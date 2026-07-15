@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="theme-color" content="#0A0A0A" />
+    <title>Manda · Propostas que fecham</title>
+    <meta name="description" content="Monte propostas com cara de agência em minutos, envie por link e veja quando o cliente abre e aceita." />
+    <link rel="preconnect" href="https://api.fontshare.com" />
+    <link
+      rel="stylesheet"
+      href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&f[]=general-sans@400,500,600&display=swap"
+    />
+    <style>
+      * { box-sizing: border-box; }
+      html, body, #root { margin: 0; padding: 0; }
+      body {
+        font-family: "General Sans", system-ui, sans-serif;
+        color: #0A0A0A;
+        background: #fff;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: #0A0A0A; text-decoration: none; }
+      ::selection { background: #FBDDD1; color: #0A0A0A; }
+      @keyframes mandaFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes mandaFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+      @keyframes mandaPulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .3; transform: scale(1.7); } }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
