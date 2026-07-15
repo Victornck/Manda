@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&f[]=general-sans@400,500,600&display=swap">
+</helmet>
+<div style="font-family:'General Sans',system-ui,sans-serif;color:#0A0A0A">
+
+  <!-- HEADER -->
+  <section style="background:radial-gradient(120% 80% at 50% -20%,#FBEDE7 0%,#FFFFFF 55%);padding:76px 24px 40px;text-align:center">
+    <div style="max-width:720px;margin:0 auto">
+      <div style="font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#D97757;margin-bottom:16px">Preços</div>
+      <h1 style="font-family:'Satoshi',sans-serif;font-weight:900;font-size:52px;line-height:1.02;letter-spacing:-0.035em;margin:0 0 16px">Simples. Sem surpresa.</h1>
+      <p style="font-size:18.5px;line-height:1.55;color:#52525B;margin:0 0 32px">Escolhe o plano e manda ver. Muda ou cancela quando quiser, sem multa.</p>
+
+      <!-- toggle -->
+      <div style="display:inline-flex;align-items:center;gap:4px;background:#F4F4F5;border-radius:11px;padding:4px">
+        <button onClick="{{ setMonthly }}" style="{{ monthlyStyle }}">Mensal</button>
+        <button onClick="{{ setAnnual }}" style="{{ annualStyle }}">
+          Anual <span style="font-size:11.5px;font-weight:600;color:#B75C3C;background:#FDF4F0;padding:2px 7px;border-radius:999px;margin-left:6px">-20%</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLAN CARDS -->
+  <section style="padding:20px 24px 84px">
+    <div style="max-width:1080px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:22px;align-items:start">
+      <sc-for list="{{ plans }}" as="p" hint-placeholder-count="3">
+        <div style="{{ p.cardStyle }}" style-hover="{{ p.cardHover }}">
+          <sc-if value="{{ p.popular }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute;top:16px;right:16px;font-size:11.5px;font-weight:600;letter-spacing:0.03em;color:#fff;background:#D97757;padding:5px 11px;border-radius:999px">Mais popular</div>
+          </sc-if>
+          <div style="font-family:'Satoshi',sans-serif;font-weight:700;font-size:20px;letter-spacing:-0.01em;margin-bottom:6px;color:{{ p.titleColor }}">{{ p.name }}</div>
+          <p style="font-size:14px;line-height:1.5;color:{{ p.subColor }};margin:0 0 22px;min-height:42px">{{ p.tagline }}</p>
+          <div style="display:flex;align-items:flex-end;gap:6px;margin-bottom:4px">
+            <span style="font-family:'Satoshi',sans-serif;font-weight:900;font-size:46px;line-height:1;letter-spacing:-0.03em;color:{{ p.titleColor }}">{{ p.price }}</span>
+            <span style="font-size:15px;color:{{ p.subColor }};margin-bottom:8px">{{ p.period }}</span>
+          </div>
+          <div style="font-size:13px;color:{{ p.subColor }};min-height:20px;margin-bottom:22px">{{ p.note }}</div>
+          <button onClick="{{ p.onClick }}" style="{{ p.btnStyle }}" style-hover="{{ p.btnHover }}">{{ p.cta }}</button>
+          <div style="height:1px;background:{{ p.divider }};margin:24px 0"></div>
+          <div style="display:flex;flex-direction:column;gap:13px">
+            <sc-for list="{{ p.features }}" as="f" hint-placeholder-count="4">
+              <div style="display:flex;align-items:flex-start;gap:10px;font-size:14.5px;line-height:1.4;color:{{ p.featColor }}">
+                <span innerHTML="{{ p.checkIcon }}" style="flex:none;margin-top:1px;display:flex"></span>{{ f }}
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section style="background:#F9FAFB;border-top:1px solid #EFEFEF;padding:80px 24px">
+    <div style="max-width:760px;margin:0 auto">
+      <h2 style="font-family:'Satoshi',sans-serif;font-weight:700;font-size:34px;letter-spacing:-0.025em;text-align:center;margin:0 0 40px">Perguntas frequentes</h2>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <sc-for list="{{ faqs }}" as="f" hint-placeholder-count="5">
+          <details style="background:#fff;border:1px solid #EAEAEA;border-radius:12px;padding:2px 20px;transition:border-color .2s,box-shadow .2s" style-hover="{{ faqHover }}">
+            <summary style="list-style:none;cursor:pointer;padding:18px 0;font-size:16px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:16px;transition:color .15s" style-hover="{{ faqSummaryHover }}">{{ f.q }}<span style="color:#D97757;flex:none" innerHTML="{{ plusIcon }}"></span></summary>
+            <p style="font-size:15px;line-height:1.6;color:#52525B;margin:0 0 18px">{{ f.a }}</p>
+          </details>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <section style="padding:20px 24px 88px;background:#fff">
+    <div style="max-width:1080px;margin:0 auto;background:radial-gradient(120% 140% at 12% 0%,#2A1712 0%,#0A0A0A 62%);border-radius:24px;padding:64px 40px;text-align:center;position:relative;overflow:hidden">
+      <h2 style="font-family:'Satoshi',sans-serif;font-weight:900;font-size:40px;line-height:1.04;letter-spacing:-0.03em;color:#fff;margin:0 0 14px">Ainda em dúvida?</h2>
+      <p style="font-size:18px;line-height:1.55;color:#D4D4D8;max-width:460px;margin:0 auto 32px">Testa o plano grátis e decide depois. Sem cartão, sem compromisso.</p>
+      <button onClick="{{ onStart }}" style="font-family:'General Sans',sans-serif;font-size:16.5px;font-weight:600;color:#0A0A0A;background:#fff;border:none;padding:16px 30px;border-radius:12px;cursor:pointer" style-hover="{{ whiteHover }}">Comece grátis</button>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1120,&quot;height&quot;:1500}}">
+class Component extends DCLogic {
+  state = { billing: 'monthly' };
+  renderVals() {
+    const annual = this.state.billing === 'annual';
+    const go = (d) => () => this.props.go && this.props.go(d);
+    const check = (color) => `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+    const toggleBase = { fontFamily: "'General Sans',sans-serif", fontSize: '14.5px', fontWeight: 600, padding: '9px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center' };
+    const tActive = { ...toggleBase, background: '#fff', color: '#0A0A0A', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' };
+    const tIdle = { ...toggleBase, background: 'transparent', color: '#71717A' };
+
+    const btn = (variant) => {
+      if (variant === 'dark') return { width: '100%', fontFamily: "'General Sans',sans-serif", fontSize: '15px', fontWeight: 600, color: '#fff', background: '#0A0A0A', border: 'none', padding: '13px', borderRadius: '10px', cursor: 'pointer', transition: 'background .18s,transform .18s' };
+      if (variant === 'accent') return { width: '100%', fontFamily: "'General Sans',sans-serif", fontSize: '15px', fontWeight: 600, color: '#fff', background: '#D97757', border: 'none', padding: '13px', borderRadius: '10px', cursor: 'pointer', transition: 'background .18s,transform .18s' };
+      return { width: '100%', fontFamily: "'General Sans',sans-serif", fontSize: '15px', fontWeight: 600, color: '#18181B', background: '#fff', border: '1px solid #E4E4E7', padding: '13px', borderRadius: '10px', cursor: 'pointer', transition: 'background .18s,border-color .18s,transform .18s' };
+    };
+    const btnHover = (variant) => variant === 'dark' ? { background: '#262626', transform: 'translateY(-1px)' } : variant === 'accent' ? { background: '#C25E3F', transform: 'translateY(-1px)' } : { borderColor: '#0A0A0A', background: '#FAFAFA', transform: 'translateY(-1px)' };
+    const cardHoverLight = { borderColor: '#D9D9D9', boxShadow: '0 16px 40px -20px rgba(20,20,30,0.2)', transform: 'translateY(-6px)' };
+    const cardHoverPro = { boxShadow: '0 30px 60px -22px rgba(217,119,87,0.55)', transform: 'scale(1.03) translateY(-6px)' };
+    const cardTransition = 'transform .22s cubic-bezier(.2,.7,.2,1),box-shadow .22s,border-color .22s';
+
+    const plans = [
+      {
+        name: 'Grátis', tagline: 'Pra testar e mandar tuas primeiras propostas.',
+        price: 'R$0', period: '', note: 'Pra sempre',
+        cta: 'Começar grátis', onClick: go('signup'), btnStyle: btn('ghost'), btnHover: btnHover('ghost'), cardHover: cardHoverLight,
+        popular: false, titleColor: '#0A0A0A', subColor: '#71717A', featColor: '#3F3F46', divider: '#EEE', checkIcon: check('#0A0A0A'),
+        cardStyle: { position: 'relative', background: '#fff', border: '1px solid #EAEAEA', borderRadius: '16px', padding: '30px 26px', transition: cardTransition },
+        features: ['Até 3 propostas por mês', '2 templates básicos', 'Link compartilhável', 'Marca d’água “Feito no Manda”'],
+      },
+      {
+        name: 'Pro', tagline: 'Pra quem vive de proposta e quer fechar mais.',
+        price: annual ? 'R$23' : 'R$29', period: '/mês', note: annual ? 'R$276/ano · cobrado anualmente' : 'cobrado mensalmente',
+        cta: 'Assinar Pro', onClick: go('signup'), btnStyle: btn('accent'), btnHover: btnHover('accent'), cardHover: cardHoverPro,
+        popular: true, titleColor: '#fff', subColor: '#A1A1AA', featColor: '#E4E4E7', divider: '#27272A', checkIcon: check('#E9967B'),
+        cardStyle: { position: 'relative', background: '#0A0A0A', color: '#fff', border: '1px solid #0A0A0A', borderRadius: '16px', padding: '30px 26px', boxShadow: '0 22px 50px -20px rgba(217,119,87,0.4)', transform: 'scale(1.03)', transition: cardTransition },
+        features: ['Propostas ilimitadas', 'Todos os templates', 'Sem marca d’água', 'Notificação de visualização', 'Aceite com um clique', 'Calculadora de preço'],
+      },
+      {
+        name: 'Business', tagline: 'Pra quem quer marca própria e automação.',
+        price: annual ? 'R$55' : 'R$69', period: '/mês', note: annual ? 'R$660/ano · cobrado anualmente' : 'cobrado mensalmente',
+        cta: 'Assinar Business', onClick: go('signup'), btnStyle: btn('dark'), btnHover: btnHover('dark'), cardHover: cardHoverLight,
+        popular: false, titleColor: '#0A0A0A', subColor: '#71717A', featColor: '#3F3F46', divider: '#EEE', checkIcon: check('#0A0A0A'),
+        cardStyle: { position: 'relative', background: '#fff', border: '1px solid #EAEAEA', borderRadius: '16px', padding: '30px 26px', transition: cardTransition },
+        features: ['Tudo do Pro', 'Domínio personalizado no link', 'Follow-up automático', 'Dashboard de conversão', 'Suporte prioritário'],
+      },
+    ];
+
+    return {
+      plans,
+      monthlyStyle: annual ? tIdle : tActive,
+      annualStyle: annual ? tActive : tIdle,
+      setMonthly: () => this.setState({ billing: 'monthly' }),
+      setAnnual: () => this.setState({ billing: 'annual' }),
+      onStart: go('signup'),
+      darkHover: { background: '#262626' },
+      whiteHover: { background: '#EDEDED' },
+      faqHover: { borderColor: '#D9D9D9', boxShadow: '0 8px 24px -16px rgba(20,20,30,0.16)' },
+      faqSummaryHover: { color: '#D97757' },
+      plusIcon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
+      faqs: [
+        { q: 'Posso cancelar quando quiser?', a: 'Pode, a qualquer momento, direto pelo painel. Você continua com acesso até o fim do período já pago e não paga nada de multa.' },
+        { q: 'Tem contrato ou fidelidade?', a: 'Nenhum. É mês a mês (ou ano a ano se escolher o anual). Sem letra miúda, sem período mínimo.' },
+        { q: 'Aceita PIX?', a: 'Sim. Você paga com PIX, cartão de crédito ou boleto. No PIX o acesso libera na hora.' },
+        { q: 'O que acontece se eu passar do limite do plano grátis?', a: 'Nada some. A gente só te avisa que chegou no limite de propostas do mês e te dá a opção de subir pro Pro pra continuar mandando.' },
+        { q: 'Preciso saber design pra usar?', a: 'Não. Os templates já vêm prontos e bonitos por nicho. Você só preenche escopo, preço e prazo — o resto o Manda cuida.' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

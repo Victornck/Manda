@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&f[]=general-sans@400,500,600&display=swap">
+<style>
+  @keyframes mandaFadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes mandaFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+  @keyframes mandaPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(1.7)}}
+  @keyframes mandaNudge{0%,100%{transform:translateX(0)}50%{transform:translateX(4px)}}
+</style>
+</helmet>
+<div ref="{{ rootRef }}" style="font-family:'General Sans',system-ui,sans-serif;color:#0A0A0A">
+
+  <!-- HERO -->
+  <section style="position:relative;overflow:hidden;background:radial-gradient(120% 90% at 85% -10%,#FBEDE7 0%,#FFFFFF 55%)">
+    <div style="max-width:1120px;margin:0 auto;padding:80px 24px 72px;display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:center">
+      <div style="animation:mandaFadeUp .6s ease both">
+        <h1 style="font-family:'Satoshi',sans-serif;font-weight:900;font-size:66px;line-height:0.98;letter-spacing:-0.035em;margin:0 0 20px">Cria.<br>Envia.<br><span style="color:#D97757">Fecha.</span></h1>
+        <p style="font-size:18.5px;line-height:1.55;color:#52525B;max-width:440px;margin:0 0 32px">Monta uma proposta profissional em minutos, manda por link e descobre na hora quando o cliente abriu — e quando aceitou.</p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <button onClick="{{ onStart }}" style="font-family:'General Sans',sans-serif;font-size:16px;font-weight:600;color:#fff;background:#0A0A0A;border:none;padding:15px 26px;border-radius:11px;cursor:pointer" style-hover="{{ darkHover }}">Comece grátis</button>
+          <button onClick="{{ onSeeHow }}" style="font-family:'General Sans',sans-serif;font-size:16px;font-weight:600;color:#18181B;background:#fff;border:1px solid #E4E4E7;padding:15px 24px;border-radius:11px;cursor:pointer;display:inline-flex;align-items:center;gap:8px" style-hover="{{ ghostHover }}">Veja como funciona
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="animation:mandaNudge 1.6s ease-in-out infinite"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <p style="font-size:13.5px;color:#A1A1AA;margin:20px 0 0">Sem cartão de crédito. Sem pegadinha.</p>
+      </div>
+
+      <!-- product mockup -->
+      <div style="animation:mandaFadeUp .7s .1s ease both">
+        <div style="background:#fff;border:1px solid #EAEAEA;border-radius:16px;box-shadow:0 24px 60px -20px rgba(20,20,30,0.22),0 8px 20px -12px rgba(20,20,30,0.12);overflow:hidden;animation:mandaFloat 6s ease-in-out infinite">
+          <div style="height:40px;background:#FAFAFA;border-bottom:1px solid #EEE;display:flex;align-items:center;padding:0 14px;gap:7px">
+            <span style="width:11px;height:11px;border-radius:50%;background:#F4B4A5"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:#F6D9A8"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:#C8E6C0"></span>
+            <span style="margin-left:12px;font-size:12px;color:#A1A1AA;font-weight:500">manda.app/p/proposta-viana</span>
+          </div>
+          <div style="padding:26px 28px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px">
+              <div>
+                <div style="width:38px;height:38px;border-radius:9px;background:#0A0A0A;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Satoshi',sans-serif;font-weight:900;margin-bottom:12px">R</div>
+                <div style="font-size:12px;color:#A1A1AA;font-weight:500">Proposta para</div>
+                <div style="font-size:15px;font-weight:600">Viana Café · Vídeo institucional</div>
+              </div>
+              <span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:#B75C3C;background:#FDF4F0;border:1px solid #F1D9CE;padding:5px 10px;border-radius:999px"><span style="width:6px;height:6px;border-radius:50%;background:#D97757;animation:mandaPulse 1.8s ease-in-out infinite"></span>Visualizada</span>
+            </div>
+            <div style="font-family:'Satoshi',sans-serif;font-weight:700;font-size:22px;letter-spacing:-0.02em;margin-bottom:16px">Produção de vídeo institucional</div>
+            <div style="border:1px solid #EEE;border-radius:11px;overflow:hidden;margin-bottom:16px">
+              <div style="display:flex;justify-content:space-between;padding:12px 15px;border-bottom:1px solid #F2F2F2;font-size:13.5px"><span style="color:#3F3F46">Roteiro + direção</span><span style="font-weight:600">R$ 1.800</span></div>
+              <div style="display:flex;justify-content:space-between;padding:12px 15px;border-bottom:1px solid #F2F2F2;font-size:13.5px"><span style="color:#3F3F46">Diária de gravação</span><span style="font-weight:600">R$ 2.400</span></div>
+              <div style="display:flex;justify-content:space-between;padding:12px 15px;font-size:13.5px"><span style="color:#3F3F46">Edição + finalização</span><span style="font-weight:600">R$ 1.600</span></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:0 3px;margin-bottom:20px">
+              <span style="font-size:13px;color:#71717A;font-weight:500">Total</span>
+              <span data-count="5800" data-prefix="R$ " style="font-family:'Satoshi',sans-serif;font-weight:900;font-size:24px;letter-spacing:-0.02em">R$ 5.800</span>
+            </div>
+            <button style="width:100%;font-family:'General Sans',sans-serif;font-size:15px;font-weight:600;color:#fff;background:#D97757;border:none;padding:13px;border-radius:10px;cursor:pointer">Aceitar proposta</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COMO FUNCIONA -->
+  <section ref="{{ comoRef }}" style="background:#F9FAFB;border-top:1px solid #EFEFEF;border-bottom:1px solid #EFEFEF;padding:88px 24px">
+    <div style="max-width:1120px;margin:0 auto">
+      <div data-reveal style="text-align:center;max-width:600px;margin:0 auto 56px">
+                <h2 style="font-family:'Satoshi',sans-serif;font-weight:700;font-size:40px;line-height:1.08;letter-spacing:-0.03em;margin:0">Da ideia à assinatura em três passos</h2>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px">
+        <sc-for list="{{ steps }}" as="s" hint-placeholder-count="3">
+          <div data-reveal data-reveal-delay="{{ s.n }}" style="background:#fff;border:1px solid #EAEAEA;border-radius:14px;padding:28px;transition:border-color .2s,box-shadow .2s,transform .2s" style-hover="{{ cardHover }}">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+              <span style="width:34px;height:34px;border-radius:9px;background:#0A0A0A;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Satoshi',sans-serif;font-weight:900;font-size:15px">{{ s.n }}</span>
+              <span innerHTML="{{ s.icon }}" style="color:#D97757;display:flex"></span>
+            </div>
+            <div style="font-family:'Satoshi',sans-serif;font-weight:700;font-size:20px;letter-spacing:-0.01em;margin-bottom:9px">{{ s.title }}</div>
+            <p style="font-size:15px;line-height:1.55;color:#52525B;margin:0">{{ s.body }}</p>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- TEMPLATES POR NICHO -->
+  <section style="padding:88px 24px">
+    <div style="max-width:1120px;margin:0 auto">
+      <div data-reveal style="max-width:620px;margin-bottom:44px">
+                <h2 style="font-family:'Satoshi',sans-serif;font-weight:700;font-size:40px;line-height:1.08;letter-spacing:-0.03em;margin:0 0 14px">Pensados pro seu mercado</h2>
+        <p style="font-size:17px;line-height:1.55;color:#52525B;margin:0">Não pra escritório de advocacia. Escolhe o teu nicho e já começa com escopo, itens e preço no lugar.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:20px">
+        <sc-for list="{{ templates }}" as="t" hint-placeholder-count="4">
+          <div data-reveal data-reveal-delay="{{ t.i }}" style="border:1px solid #EAEAEA;border-radius:14px;overflow:hidden;background:#fff;transition:border-color .2s,box-shadow .2s,transform .2s" style-hover="{{ cardHover }}">
+            <div style="height:132px;padding:16px;position:relative;overflow:hidden;background:{{ t.bg }}">
+              <span innerHTML="{{ t.icon }}" style="position:absolute;right:-14px;bottom:-14px;color:{{ t.ink }};opacity:0.16;display:flex"></span>
+              <div style="width:52px;height:8px;border-radius:4px;background:{{ t.ink }};opacity:0.9;margin-bottom:8px"></div>
+              <div style="width:82px;height:6px;border-radius:3px;background:{{ t.ink }};opacity:0.35;margin-bottom:16px"></div>
+              <div style="width:100%;height:5px;border-radius:3px;background:{{ t.ink }};opacity:0.18;margin-bottom:7px"></div>
+              <div style="width:75%;height:5px;border-radius:3px;background:{{ t.ink }};opacity:0.18"></div>
+            </div>
+            <div style="padding:16px 16px 18px;border-top:1px solid #F1F1F1">
+              <span style="display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;color:#A1A1AA"><span style="width:6px;height:6px;border-radius:50%;background:{{ t.ink }}"></span>{{ t.tag }}</span>
+              <div style="font-family:'Satoshi',sans-serif;font-weight:700;font-size:16px;margin-top:10px">{{ t.title }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section style="background:#0A0A0A;color:#fff;padding:92px 24px">
+    <div style="max-width:1120px;margin:0 auto">
+      <div data-reveal style="max-width:620px;margin-bottom:52px">
+                <h2 style="font-family:'Satoshi',sans-serif;font-weight:700;font-size:40px;line-height:1.08;letter-spacing:-0.03em;margin:0">Tudo que uma proposta boa precisa</h2>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#27272A;border:1px solid #27272A;border-radius:16px;overflow:hidden">
+        <sc-for list="{{ features }}" as="f" hint-placeholder-count="6">
+          <div data-reveal data-reveal-delay="{{ f.i }}" style="background:#0A0A0A;padding:30px 26px;transition:background .2s" style-hover="{{ featHover }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+              <span innerHTML="{{ f.icon }}" style="color:#D97757;display:flex"></span>
+              <sc-if value="{{ f.soon }}" hint-placeholder-val="{{ false }}">
+                <span style="font-size:10.5px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#D4D4D8;border:1px solid #3F3F46;padding:3px 8px;border-radius:999px">Em breve</span>
+              </sc-if>
+            </div>
+            <div style="font-family:'Satoshi',sans-serif;font-weight:700;font-size:18px;letter-spacing:-0.01em;margin-bottom:8px">{{ f.title }}</div>
+            <p style="font-size:14.5px;line-height:1.55;color:#A1A1AA;margin:0">{{ f.body }}</p>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROVA SOCIAL -->
+  <section style="padding:88px 24px">
+    <div style="max-width:1120px;margin:0 auto">
+      <div data-reveal style="text-align:center;max-width:560px;margin:0 auto 48px">
+                <h2 style="font-family:'Satoshi',sans-serif;font-weight:700;font-size:40px;line-height:1.08;letter-spacing:-0.03em;margin:0">Freelancers parecendo agência</h2>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px">
+        <sc-for list="{{ testimonials }}" as="t" hint-placeholder-count="3">
+          <div data-reveal data-reveal-delay="{{ t.i }}" style="border:1px solid #EAEAEA;border-radius:14px;padding:26px;background:#fff;transition:border-color .2s,box-shadow .2s,transform .2s" style-hover="{{ cardHover }}">
+            <p style="font-size:15.5px;line-height:1.6;color:#27272A;margin:0 0 22px">{{ t.quote }}</p>
+            <div style="display:flex;align-items:center;gap:12px">
+              <span style="width:40px;height:40px;border-radius:50%;background:{{ t.bg }};color:{{ t.ink }};display:flex;align-items:center;justify-content:center;font-family:'Satoshi',sans-serif;font-weight:700;font-size:15px">{{ t.initials }}</span>
+              <div>
+                <div style="font-size:14.5px;font-weight:600">{{ t.name }}</div>
+                <div style="font-size:13px;color:#A1A1AA">{{ t.role }}</div>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <p style="text-align:center;font-size:13.5px;color:#A1A1AA;margin:32px 0 0">Em breve: depoimentos de beta testers de verdade.</p>
+    </div>
+  </section>
+
+  <!-- CTA FINAL -->
+  <section style="padding:20px 24px 96px">
+    <div data-reveal style="max-width:1120px;margin:0 auto;background:radial-gradient(110% 130% at 15% 0%,#2A1712 0%,#0A0A0A 60%);border-radius:24px;padding:72px 40px;text-align:center;position:relative;overflow:hidden">
+      <h2 style="font-family:'Satoshi',sans-serif;font-weight:900;font-size:46px;line-height:1.04;letter-spacing:-0.035em;color:#fff;margin:0 0 16px">Chega de proposta<br>no Google Docs.</h2>
+      <p style="font-size:18px;color:#D4D4D8;margin:0 0 32px">Teu próximo cliente tá esperando uma proposta à altura.</p>
+      <button onClick="{{ onStart }}" style="font-family:'General Sans',sans-serif;font-size:16.5px;font-weight:600;color:#0A0A0A;background:#fff;border:none;padding:16px 30px;border-radius:12px;cursor:pointer" style-hover="{{ whiteHover }}">Comece grátis</button>
+      <p style="font-size:13.5px;color:#71717A;margin:18px 0 0">Sem cartão de crédito. Sem pegadinha.</p>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1180,&quot;height&quot;:2400}}">
+class Component extends DCLogic {
+  comoEl = null;
+  rootEl = null;
+
+  componentDidMount() {
+    const root = this.rootEl;
+    if (!root || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((en) => {
+        if (!en.isIntersecting) return;
+        const el = en.target;
+        const d = (parseInt(el.getAttribute('data-reveal-delay') || '0', 10) || 0) * 90;
+        if (el.hasAttribute('data-reveal')) {
+          el.style.transitionDelay = d + 'ms';
+          el.style.opacity = '1';
+          el.style.transform = 'none';
+        }
+        if (el.hasAttribute('data-count')) this.animateCount(el, parseInt(el.getAttribute('data-count'), 10) || 0, d);
+        io.unobserve(el);
+      });
+    }, { threshold: 0.16, rootMargin: '0px 0px -8% 0px' });
+
+    requestAnimationFrame(() => {
+      root.querySelectorAll('[data-reveal]').forEach((el) => {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(20px)';
+        el.style.transition = 'opacity .65s cubic-bezier(.2,.7,.2,1), transform .65s cubic-bezier(.2,.7,.2,1)';
+        io.observe(el);
+      });
+      root.querySelectorAll('[data-count]:not([data-reveal])').forEach((el) => io.observe(el));
+    });
+  }
+
+  animateCount(el, target, delay) {
+    const prefix = el.getAttribute('data-prefix') || '';
+    const dur = 1100;
+    const begin = performance.now() + delay;
+    const step = (now) => {
+      const t = Math.min(1, Math.max(0, (now - begin) / dur));
+      const e = 1 - Math.pow(1 - t, 3);
+      el.textContent = prefix + Math.round(target * e).toLocaleString('pt-BR');
+      if (t < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  renderVals() {
+    const ic = (p) => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+    const icBig = (p) => `<svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+    return {
+      onStart: () => this.props.go && this.props.go('signup'),
+      onSeeHow: () => { if (this.comoEl) { const y = this.comoEl.getBoundingClientRect().top + window.scrollY - 20; window.scrollTo({ top: y, behavior: 'smooth' }); } },
+      comoRef: (el) => { this.comoEl = el; },
+      rootRef: (el) => { this.rootEl = el; },
+      darkHover: { background: '#262626' },
+      ghostHover: { borderColor: '#0A0A0A' },
+      whiteHover: { background: '#EDEDED' },
+      cardHover: { borderColor: '#D97757', boxShadow: '0 12px 30px -14px rgba(20,20,30,0.18)', transform: 'translateY(-4px)' },
+      featHover: { background: '#161616' },
+      steps: [
+        { n: 1, title: 'Escolhe o template', body: 'Templates prontos por nicho. Já vêm com escopo, itens e estrutura de preço do teu mercado.', icon: ic('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>') },
+        { n: 2, title: 'Personaliza em minutos', body: 'Editor simples estilo documento. Preenche escopo, preço e prazo — sem formulário burocrático.', icon: ic('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>') },
+        { n: 3, title: 'Envia e acompanha', body: 'Manda o link e recebe notificação quando o cliente abrir e quando aceitar. Sem PDF perdido no email.', icon: ic('<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>') },
+      ],
+      templates: [
+        { tag: 'Vídeo', title: 'Produção de Vídeo', bg: '#FDF4F0', ink: '#B75C3C', icon: icBig('<path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/>') },
+        { tag: 'Criação', title: 'Design & Social Media', bg: '#EEF2FB', ink: '#3A5BB5', icon: icBig('<circle cx="13.5" cy="6.5" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><circle cx="15" cy="17" r="2.5"/><path d="M12 2a10 10 0 1 0 10 10"/>') },
+        { tag: 'Código', title: 'Desenvolvimento Web', bg: '#EAF5EE', ink: '#2E7D51', icon: icBig('<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>') },
+        { tag: 'Foto', title: 'Fotografia & Conteúdo', bg: '#F5EFFB', ink: '#6C48B0', icon: icBig('<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3Z"/><circle cx="12" cy="13" r="3"/>') },
+      ].map((x, i) => ({ ...x, i })),
+      features: [
+        { title: 'Link compartilhável', body: 'Sem PDF anexado. O cliente abre a proposta direto no navegador, no celular ou no computador.', soon: false, icon: ic('<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5"/>') },
+        { title: 'Sabe quando abriu', body: 'Notificação na hora em que o cliente visualiza. Chega de mandar mensagem perguntando “viu a proposta?”.', soon: false, icon: ic('<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>') },
+        { title: 'Aceite com um clique', body: 'O cliente aprova direto pela proposta. Fica registrado com data e hora, sem burocracia.', soon: false, icon: ic('<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>') },
+        { title: 'Calculadora de preço', body: 'Sugestão de valores por tipo de serviço pra você parar de chutar o orçamento.', soon: false, icon: ic('<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 10h8M8 14h4M16 14h.01M12 18h.01M8 18h.01M16 18h.01"/>') },
+        { title: 'Follow-up automático', body: 'Lembrete disparado sozinho quando o cliente some. Você fecha mais sem parecer chato.', soon: true, icon: ic('<path d="M4 4v5h5"/><path d="M4 9a9 9 0 1 1 2 6"/><path d="M12 8v4l3 2"/>') },
+        { title: 'Painel de conversão', body: 'Quantas propostas enviou, quantas fecharam e qual teu ticket médio. Tudo num lugar só.', soon: true, icon: ic('<path d="M3 3v18h18"/><path d="m7 15 4-5 3 3 5-7"/>') },
+      ].map((x, i) => ({ ...x, i })),
+      testimonials: [
+        { quote: '“Antes eu fazia no Docs e demorava uma tarde. Agora mando proposta em 10 minutos e o cliente responde no mesmo dia.”', name: 'Você?', role: 'Beta em breve', initials: 'M', bg: '#FDF4F0', ink: '#B75C3C' },
+        { quote: '“A notificação de visualização mudou meu jogo. Sei a hora certa de dar aquele follow-up.”', name: 'Você?', role: 'Beta em breve', initials: 'A', bg: '#EEF2FB', ink: '#3A5BB5' },
+        { quote: '“Meu cliente disse que a proposta parecia de uma agência grande. Fechei no valor cheio.”', name: 'Você?', role: 'Beta em breve', initials: 'J', bg: '#EAF5EE', ink: '#2E7D51' },
+      ].map((x, i) => ({ ...x, i })),
+    };
+  }
+}
+</script>
+</body>
+</html>
