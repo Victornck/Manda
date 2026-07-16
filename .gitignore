@@ -4,5 +4,6 @@ dist/
 build/
 .env
 .env.local
+.env.example
 coverage/
 *.log

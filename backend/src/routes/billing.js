@@ -25,17 +25,25 @@ r.post("/checkout", async (req, res, next) => {
     const { rows } = await query("select id, email, stripe_customer_id from users where id=$1", [req.user.id]);
     const u = rows[0];
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      line_items: [{ price, quantity: 1 }],
-      customer: u.stripe_customer_id || undefined,
-      customer_email: u.stripe_customer_id ? undefined : u.email,
-      client_reference_id: u.id,
-      metadata: { userId: u.id, plan },
-      subscription_data: { metadata: { userId: u.id, plan } },
-      success_url: `${env.APP_URL}/app?assinatura=ok`,
-      cancel_url: `${env.APP_URL}/precos?assinatura=cancelada`,
-    });
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create({
+        mode: "subscription",
+        line_items: [{ price, quantity: 1 }],
+        customer: u.stripe_customer_id || undefined,
+        customer_email: u.stripe_customer_id ? undefined : u.email,
+        client_reference_id: u.id,
+        metadata: { userId: u.id, plan },
+        subscription_data: { metadata: { userId: u.id, plan } },
+        success_url: `${env.APP_URL}/app?assinatura=ok`,
+        cancel_url: `${env.APP_URL}/precos?assinatura=cancelada`,
+      });
+    } catch (e) {
+      // Erro do Stripe (price inexistente, chave errada, modo teste x produção).
+      // Devolve a mensagem real pra facilitar o diagnóstico — não é dado sensível.
+      console.error("[stripe checkout]", e?.message);
+      return res.status(400).json({ error: `Stripe: ${e?.message || "falha ao criar o checkout."}` });
+    }
     res.json({ url: session.url });
   } catch (e) { next(e); }
 });

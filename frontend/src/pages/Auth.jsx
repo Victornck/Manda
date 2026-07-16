@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Check } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { Check, Eye, EyeOff } from "lucide-react";
 import { font, color } from "../theme.js";
-import { signInWithPassword, signUp } from "../lib/supabase.js";
+import { api, setToken } from "../lib/api.js";
 
 const onlyDigits = (v) => v.replace(/\D/g, "").slice(0, 11);
 const maskCPF = (v) => {
@@ -25,25 +25,60 @@ function isValidCPF(v) {
   return d2 === parseInt(c[10], 10);
 }
 
+const COMMON_PASSWORDS = new Set([
+  "123456", "1234567", "12345678", "123456789", "1234567890", "12345", "123123",
+  "111111", "000000", "654321", "senha", "senha123", "password", "password1",
+  "qwerty", "qwerty123", "abc123", "admin", "iloveyou", "1q2w3e4r", "asdfghjkl",
+  "112233", "121212", "102030", "mudar123", "aa123456", "gabriel",
+]);
+const isCommonPassword = (pw) => COMMON_PASSWORDS.has(String(pw).toLowerCase().trim());
+
+// Força da senha de 0 (fraca) a 4 (forte).
+function passwordScore(pw) {
+  if (!pw) return 0;
+  let s = 0;
+  if (pw.length >= 8) s++;
+  if (pw.length >= 12) s++;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) s++;
+  if (/\d/.test(pw)) s++;
+  if (/[^A-Za-z0-9]/.test(pw)) s++;
+  return Math.min(s, 4);
+}
+
 // Tela de login / criar conta. `tab` inicial vem da rota (/entrar ou /criar-conta).
 export default function Auth({ go, tab = "signup" }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const pendingParams = new URLSearchParams(location.search);
+  const pendingPlan = pendingParams.get("plan");
+  const pendingInterval = pendingParams.get("interval") === "year" ? "year" : "month";
   const [mode, setMode] = useState(tab);
   const [form, setForm] = useState({ name: "", cpf: "", email: "", password: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [entering, setEntering] = useState(false);
+  const [showPw, setShowPw] = useState(false);
 
   const isLogin = mode === "login";
   const goTo = go || ((d) => navigate(d === "app" ? "/app" : "/"));
   const upd = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const updCpf = (e) => setForm((f) => ({ ...f, cpf: maskCPF(e.target.value) }));
 
-  // Animação de entrada: quando o acesso dá certo, mostra o overlay e só então entra no app.
+  // Animação de entrada. Se veio de um plano (checkout), leva ao Stripe; senão, ao app.
   useEffect(() => {
     if (!entering) return;
     const rm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const t = setTimeout(() => { try { sessionStorage.setItem("manda_entering", "1"); } catch { /* ignore */ } goTo("app"); }, rm ? 350 : 1700);
+    const t = setTimeout(async () => {
+      if (pendingPlan) {
+        try {
+          const { url } = await api.checkout(pendingPlan, pendingInterval);
+          window.location.href = url; // vai pro gateway do Stripe
+          return;
+        } catch { /* se o checkout falhar, segue pro app */ }
+      }
+      try { sessionStorage.setItem("manda_entering", "1"); } catch { /* ignore */ }
+      goTo("app");
+    }, rm ? 350 : 1700);
     return () => clearTimeout(t);
   }, [entering]);
 
@@ -53,14 +88,31 @@ export default function Auth({ go, tab = "signup" }) {
     if (!isLogin) {
       if (!form.name.trim()) return setErr("Digite seu nome.");
       if (!isValidCPF(form.cpf)) return setErr("CPF inválido. Confira os números.");
+      if (isCommonPassword(form.password)) return setErr("Essa senha é muito comum e fácil de adivinhar. Escolha outra.");
+      if (passwordScore(form.password) < 2) return setErr("Senha fraca. Use ao menos 8 caracteres, misturando letras e números.");
     }
     setBusy(true);
-    const res = isLogin
-      ? await signInWithPassword(form.email, form.password)
-      : await signUp(form.email, form.password, form.name, onlyDigits(form.cpf));
-    setBusy(false);
-    if (res.ok) setEntering(true);
-    else setErr(res.error?.message || "Não foi possível continuar. Tente de novo.");
+    try {
+      const res = isLogin
+        ? await api.login({ email: form.email, password: form.password })
+        : await api.register({ name: form.name, email: form.email, cpf: onlyDigits(form.cpf), password: form.password });
+      setToken(res.token);
+
+      // Veio de um plano? Vai DIRETO pro checkout do Stripe.
+      // Se falhar, mostra o erro na tela — nunca joga no app em silêncio.
+      if (pendingPlan) {
+        const { url } = await api.checkout(pendingPlan, pendingInterval);
+        if (!url) throw new Error("O Stripe não retornou o link de pagamento. Confira a STRIPE_SECRET_KEY e os price IDs no .env do backend (e reinicie o backend).");
+        window.location.href = url;
+        return;
+      }
+
+      setEntering(true);
+    } catch (err) {
+      setErr(err.message || "Não foi possível continuar. Tente de novo.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const tabBase = { flex: 1, fontFamily: font.body, fontSize: "14.5px", fontWeight: 600, padding: 9, borderRadius: 8, border: "none", cursor: "pointer", transition: "all .15s" };
@@ -77,6 +129,15 @@ export default function Auth({ go, tab = "signup" }) {
 
   const cpfValid = isValidCPF(form.cpf);
   const firstName = form.name.trim().split(" ")[0];
+
+  const pwCommon = !isLogin && !!form.password && isCommonPassword(form.password);
+  const pwScore = passwordScore(form.password);
+  const pwFilled = pwCommon ? 1 : pwScore;
+  const pwMeta = pwCommon ? { c: "#B4443C", t: "Muito comum, escolha outra" }
+    : pwScore <= 1 ? { c: "#B4443C", t: "Fraca" }
+    : pwScore === 2 ? { c: "#D97757", t: "Média" }
+    : pwScore === 3 ? { c: "#2E7D51", t: "Boa" }
+    : { c: "#2E7D51", t: "Forte" };
 
   return (
     <div className="au-grid" style={{ fontFamily: font.body, color: color.ink }}>
@@ -194,7 +255,22 @@ export default function Auth({ go, tab = "signup" }) {
                 <span style={labelStyle}>Senha</span>
                 {isLogin && <button type="button" onClick={() => {}} className="au-link au-linksm">Esqueci a senha</button>}
               </div>
-              <input className="au-input" type="password" value={form.password} onChange={upd("password")} placeholder="••••••••" autoComplete={isLogin ? "current-password" : "new-password"} required />
+              <div style={{ position: "relative" }}>
+                <input className="au-input" type={showPw ? "text" : "password"} value={form.password} onChange={upd("password")} placeholder="••••••••" autoComplete={isLogin ? "current-password" : "new-password"} required style={{ paddingRight: 44 }} />
+                <button type="button" onClick={() => setShowPw((v) => !v)} className="au-btn" aria-label={showPw ? "Ocultar senha" : "Mostrar senha"} aria-pressed={showPw} style={{ position: "absolute", top: 0, right: 0, height: "100%", width: 42, background: "none", color: color.gray400, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10 }}>
+                  {showPw ? <EyeOff size={18} strokeWidth={2} /> : <Eye size={18} strokeWidth={2} />}
+                </button>
+              </div>
+              {!isLogin && form.password && (
+                <div>
+                  <div style={{ display: "flex", gap: 4, marginTop: 8, marginBottom: 5 }}>
+                    {[0, 1, 2, 3].map((i) => (
+                      <span key={i} style={{ flex: 1, height: 4, borderRadius: 999, background: pwFilled > i ? pwMeta.c : color.gray200, transition: "background .2s ease" }} />
+                    ))}
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: pwMeta.c }}>{pwMeta.t}</span>
+                </div>
+              )}
             </label>
 
             {err && <div role="alert" style={{ fontSize: 13.5, color: "#B4443C", background: "#FDECEA", border: "1px solid #F5D2CD", padding: "10px 12px", borderRadius: 9 }}>{err}</div>}
@@ -210,7 +286,7 @@ export default function Auth({ go, tab = "signup" }) {
             <span style={{ flex: 1, height: 1, background: color.line }} />
           </div>
 
-          <button onClick={() => setEntering(true)} className="au-btn au-google">
+          <button onClick={() => setErr("Login com Google chega em breve. Use email e senha por enquanto.")} className="au-btn au-google">
             <GoogleIcon />{isLogin ? "Entrar com Google" : "Cadastrar com Google"}
           </button>
 

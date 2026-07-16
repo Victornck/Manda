@@ -1,11 +1,25 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Check, Plus } from "lucide-react";
 import { font, color } from "../theme.js";
+import { api, getToken } from "../lib/api.js";
 
 export default function Pricing({ go }) {
   const [billing, setBilling] = useState("monthly");
   const annual = billing === "annual";
+  const navigate = useNavigate();
   const signup = () => go && go("signup");
+  const subscribe = async (planKey) => {
+    const interval = annual ? "year" : "month";
+    if (getToken()) {
+      try {
+        const { url } = await api.checkout(planKey, interval);
+        window.location.href = url; // gateway do Stripe
+        return;
+      } catch { /* não logado / erro: manda pro cadastro com o plano pendente */ }
+    }
+    navigate(`/criar-conta?plan=${planKey}&interval=${interval}`);
+  };
 
   const toggleBase = { fontFamily: font.body, fontSize: "14.5px", fontWeight: 600, padding: "9px 18px", borderRadius: 8, border: "none", cursor: "pointer", display: "flex", alignItems: "center", transition: "background .15s,color .15s" };
   const tActive = { ...toggleBase, background: color.white, color: color.ink, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" };
@@ -13,22 +27,22 @@ export default function Pricing({ go }) {
 
   const plans = [
     {
-      name: "Básico", tagline: "Pra começar a mandar propostas com cara profissional.",
-      price: annual ? "R$10,80" : "R$12", period: "/mês", note: annual ? "R$129,60/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Básico", variant: "ghost",
+      name: "Básico", planKey: "basic", tagline: "Pra começar a mandar propostas com cara profissional.",
+      price: annual ? "R$11" : "R$12", period: "/mês", note: annual ? "R$132/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Básico", variant: "ghost",
       popular: false, titleColor: color.ink, subColor: color.gray500, featColor: color.gray700, divider: "#EEE", checkColor: color.ink,
       cardStyle: { position: "relative", background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, padding: "30px 26px" },
       features: ["2 propostas por mês", "Acesso aos templates básicos", "Link compartilhável", "Aceite com um clique"],
     },
     {
-      name: "Pro", tagline: "Pra quem vive de proposta e quer fechar mais.",
-      price: annual ? "R$26,10" : "R$29", period: "/mês", note: annual ? "R$313,20/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Pro", variant: "accent",
+      name: "Pro", planKey: "pro", tagline: "Pra quem vive de proposta e quer fechar mais.",
+      price: annual ? "R$26" : "R$29", period: "/mês", note: annual ? "R$312/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Pro", variant: "accent",
       popular: true, titleColor: color.white, subColor: color.gray400, featColor: color.gray200, divider: color.ink800, checkColor: "#E9967B",
       cardStyle: { position: "relative", background: color.ink, color: color.white, border: `1px solid ${color.ink}`, borderRadius: 16, padding: "30px 26px", boxShadow: "0 22px 50px -20px rgba(217,119,87,0.4)", transform: "scale(1.03)" },
       features: ["Propostas ilimitadas", "Todos os templates", "Sem marca d’água", "Notificação de visualização", "Aceite com um clique", "Calculadora de preço"],
     },
     {
-      name: "Business", tagline: "Pra quem quer marca própria e automação.",
-      price: annual ? "R$71,10" : "R$79", period: "/mês", note: annual ? "R$853,20/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Business", variant: "dark",
+      name: "Business", planKey: "business", tagline: "Pra quem quer marca própria e automação.",
+      price: annual ? "R$71" : "R$79", period: "/mês", note: annual ? "R$852/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Business", variant: "dark",
       popular: false, titleColor: color.ink, subColor: color.gray500, featColor: color.gray700, divider: "#EEE", checkColor: color.ink,
       cardStyle: { position: "relative", background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, padding: "30px 26px" },
       features: ["Tudo do Pro", "Domínio personalizado no link", "Follow-up automático", "Dashboard de conversão", "Suporte prioritário"],
@@ -113,7 +127,7 @@ export default function Pricing({ go }) {
                 <span style={{ fontSize: 15, color: p.subColor, marginBottom: 8 }}>{p.period}</span>
               </div>
               <div style={{ fontSize: 13, color: p.subColor, minHeight: 20, marginBottom: 22 }}>{p.note}</div>
-              <button onClick={signup} className={`pr-btn pr-btn-${p.variant}`}>{p.cta}</button>
+              <button onClick={() => subscribe(p.planKey)} className={`pr-btn pr-btn-${p.variant}`}>{p.cta}</button>
               <div style={{ height: 1, background: p.divider, margin: "24px 0" }} />
               <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
                 {p.features.map((f, j) => (

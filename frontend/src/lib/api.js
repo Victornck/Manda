@@ -59,6 +59,6 @@ export const api = {
   declinePublic: (publicId) => request(`/public/${publicId}/decline`, { method: "POST" }),
 
   // cobrança (Stripe). checkout/portal devolvem { url } — redirecione com window.location = url
-  checkout: (plan) => request("/billing/checkout", { method: "POST", body: JSON.stringify({ plan }) }),
+  checkout: (plan, interval = "month") => request("/billing/checkout", { method: "POST", body: JSON.stringify({ plan, interval }) }),
   billingPortal: () => request("/billing/portal", { method: "POST" }),
 };

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
-  Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle,
+  Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, brl, initials } from "../theme.js";
-import { getCurrentUser } from "../lib/supabase.js";
+import { api, setToken } from "../lib/api.js";
 import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
 import { encodeProposal } from "../lib/share.js";
 import { DESIGNS, ProposalDesign, SAMPLE_DOC } from "../templates/designs.jsx";
@@ -51,10 +51,35 @@ export default function Dashboard({ go }) {
   const [copied, setCopied] = useState(false);
   const [toDelete, setToDelete] = useState(null);
   const [intro, setIntro] = useState(() => { try { return sessionStorage.getItem("manda_entering") === "1"; } catch { return false; } });
+  const [billingMsg, setBillingMsg] = useState(null);
 
   useEffect(() => {
-    getCurrentUser().then((u) => setUser(u)).catch(() => {});
+    api.me().then((r) => setUser(r.user)).catch(() => {});
   }, []);
+
+  // Retorno do checkout do Stripe (?assinatura=ok|cancelada).
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("assinatura");
+    if (p === "ok") {
+      setBillingMsg({ ok: true, text: "Pagamento recebido! Seu plano é ativado assim que o Stripe confirmar." });
+      api.me().then((r) => setUser(r.user)).catch(() => {});
+      window.history.replaceState({}, "", "/app");
+    } else if (p === "cancelada") {
+      setBillingMsg({ ok: false, text: "Assinatura cancelada. Pode tentar de novo quando quiser." });
+      window.history.replaceState({}, "", "/app");
+    }
+  }, []);
+
+  // Fecha modais com a tecla ESC.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      if (toDelete) setToDelete(null);
+      else if (view === "editor" && flow === "done") setFlow("editing");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toDelete, view, flow]);
 
   // Dissolve a tela de entrada revelando o painel (transição suave vinda do login).
   useEffect(() => {
@@ -101,7 +126,14 @@ export default function Dashboard({ go }) {
     updatedAt: Date.now(),
   });
 
-  const newProposal = () => { setDoc(BLANK_DOC); setDraftId(newId()); setFlow("editing"); setView("editor"); };
+  const newProposal = () => {
+    let bio = "", accent = "#D97757";
+    try { bio = localStorage.getItem("manda_default_bio") || ""; accent = localStorage.getItem("manda_default_accent") || "#D97757"; } catch { /* ignore */ }
+    setDoc({ ...BLANK_DOC, bio, accent });
+    setDraftId(newId());
+    setFlow("editing");
+    setView("editor");
+  };
   const openRow = (r) => {
     setDoc({
       ...BLANK_DOC,
@@ -291,7 +323,7 @@ export default function Dashboard({ go }) {
         @media (max-width:680px){ .db-dsn-grid{ grid-template-columns:1fr; } }
 
         .db-flow{ position:fixed; inset:0; z-index:120; background:rgba(249,250,251,0.85); backdrop-filter:blur(5px); display:flex; align-items:center; justify-content:center; padding:24px; animation:dbFade .2s ease both; }
-        .db-flow-card{ width:100%; max-width:440px; background:#fff; border:1px solid ${color.line}; border-radius:18px; box-shadow:0 30px 70px -22px rgba(20,20,30,0.35); padding:32px 30px; animation:dbPop .38s cubic-bezier(.2,.8,.2,1) both; }
+        .db-flow-card{ position:relative; width:100%; max-width:440px; background:#fff; border:1px solid ${color.line}; border-radius:18px; box-shadow:0 30px 70px -22px rgba(20,20,30,0.35); padding:32px 30px; animation:dbPop .38s cubic-bezier(.2,.8,.2,1) both; }
         @keyframes dbFade{ from{ opacity:0; } to{ opacity:1; } }
         @keyframes dbPop{ 0%{ opacity:0; transform:translateY(12px) scale(.96); } 100%{ opacity:1; transform:none; } }
         .db-step{ display:flex; align-items:center; gap:12px; padding:10px 0; animation:dbStepIn .4s cubic-bezier(.2,.8,.2,1) both; }
@@ -353,10 +385,10 @@ export default function Dashboard({ go }) {
         </div>
         <nav className="db-nav" style={{ flex: 1, padding: "6px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
           {nav.map((n) => {
-            const on = (n.key === "list" && (view === "list" || view === "editor")) || (n.key === "templates" && view === "templates") || (n.key === "clients" && view === "clients");
+            const on = (n.key === "list" && (view === "list" || view === "editor")) || (n.key === "templates" && view === "templates") || (n.key === "clients" && view === "clients") || (n.key === "settings" && view === "settings");
             return (
               <a key={n.key} href="#" className={on ? "on" : "idle"} title={n.label} aria-current={on ? "page" : undefined}
-                onClick={(e) => { e.preventDefault(); if (n.key === "list") navTo("list"); else if (n.key === "templates") navTo("templates"); else if (n.key === "clients") navTo("clients"); }}>
+                onClick={(e) => { e.preventDefault(); if (n.key === "list") navTo("list"); else if (n.key === "templates") navTo("templates"); else if (n.key === "clients") navTo("clients"); else if (n.key === "settings") navTo("settings"); }}>
                 <span style={{ display: "flex", flex: "none" }}><n.Icon size={18} strokeWidth={1.9} /></span>
                 <span className="db-collapsed">{n.label}</span>
               </a>
@@ -372,7 +404,7 @@ export default function Dashboard({ go }) {
               <div style={{ fontSize: "13.5px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{profileName}</div>
               <div style={{ fontSize: 12, color: color.gray400 }}>{profileSub}</div>
             </div>
-            <button onClick={() => go && go("landing")} className="db-collapsed db-logout" aria-label="Sair" title="Sair"><LogOut size={17} strokeWidth={1.9} /></button>
+            <button onClick={() => { setToken(null); go && go("landing"); }} className="db-collapsed db-logout" aria-label="Sair" title="Sair"><LogOut size={17} strokeWidth={1.9} /></button>
           </div>
         </div>
       </aside>
@@ -453,6 +485,8 @@ export default function Dashboard({ go }) {
           <DesignGallery onUse={startWithDesign} />
         ) : view === "clients" ? (
           <ClientsPanel rows={rows} />
+        ) : view === "settings" ? (
+          <SettingsPanel user={user} go={go} />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
             {/* action bar */}
@@ -603,8 +637,8 @@ export default function Dashboard({ go }) {
 
       {/* FLOW DE CONCLUSÃO */}
       {view === "editor" && flow !== "editing" && (
-        <div className="db-flow">
-          <div className="db-flow-card">
+        <div className="db-flow" onClick={() => { if (flow === "done") setFlow("editing"); }}>
+          <div className="db-flow-card" onClick={(e) => e.stopPropagation()}>
             {flow === "finishing" ? (
               <div>
                 <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 4 }}>Finalizando sua proposta</div>
@@ -622,6 +656,7 @@ export default function Dashboard({ go }) {
               </div>
             ) : (
               <div style={{ textAlign: "center" }}>
+                <button onClick={() => setFlow("editing")} aria-label="Fechar" className="db-btn" style={{ position: "absolute", top: 12, right: 12, background: "none", color: color.gray400, padding: 4 }}><X size={20} strokeWidth={2} /></button>
                 <div className="db-in-0" style={{ width: 76, height: 76, margin: "0 auto 20px" }}>
                   <svg width="76" height="76" viewBox="0 0 52 52" aria-hidden="true">
                     <circle cx="26" cy="26" r="24" fill="none" stroke={color.accent} strokeWidth="3" className="db-check-ring" />
@@ -677,6 +712,12 @@ export default function Dashboard({ go }) {
               <button onClick={confirmDelete} className="db-btn db-btn-danger" style={{ flex: 1, fontSize: 14.5, padding: "11px 0" }}><Trash2 size={16} strokeWidth={2.2} />Excluir</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {billingMsg && (
+        <div onClick={() => setBillingMsg(null)} role="status" style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", zIndex: 150, cursor: "pointer", background: billingMsg.ok ? "#EAF5EE" : "#FDECEA", color: billingMsg.ok ? "#2E7D51" : "#B4443C", border: `1px solid ${billingMsg.ok ? "#C9E7D5" : "#F5D2CD"}`, borderRadius: 12, padding: "12px 16px", fontSize: 14, fontWeight: 600, boxShadow: "0 10px 30px -12px rgba(20,20,30,0.25)", maxWidth: "90vw", animation: "mandaFadeUp .3s ease both" }}>
+          {billingMsg.text}
         </div>
       )}
 
@@ -829,6 +870,89 @@ function ClientsPanel({ rows }) {
           <p style={{ fontSize: 14.5, color: color.gray500, margin: 0 }}>Crie e envie propostas para ver seus clientes e a receita aqui.</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function SettingsPanel({ user, go }) {
+  const [bio, setBio] = useState(() => { try { return localStorage.getItem("manda_default_bio") || ""; } catch { return ""; } });
+  const [accent, setAccent] = useState(() => { try { return localStorage.getItem("manda_default_accent") || "#D97757"; } catch { return "#D97757"; } });
+  const [saved, setSaved] = useState(false);
+
+  const saveDefaults = () => {
+    try { localStorage.setItem("manda_default_bio", bio); localStorage.setItem("manda_default_accent", accent); } catch { /* ignore */ }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1600);
+  };
+  const manageBilling = async () => {
+    try { const { url } = await api.billingPortal(); window.location.href = url; }
+    catch { if (go) go("pricing"); }
+  };
+  const logout = () => { setToken(null); if (go) go("landing"); };
+
+  const plan = user?.plan || "free";
+  const planLabel = { free: "Grátis (sem assinatura)", basic: "Básico", pro: "Pro", business: "Business" }[plan] || plan;
+
+  const card = { background: "#fff", border: `1px solid ${color.line2}`, borderRadius: 14, padding: "22px 24px" };
+  const hTitle = { fontFamily: font.heading, fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em", marginBottom: 4 };
+  const subTxt = { fontSize: "13.5px", color: color.gray500, margin: "0 0 18px" };
+  const fieldLabel = { fontSize: 13, fontWeight: 600, color: color.gray700, display: "block", marginBottom: 6 };
+
+  return (
+    <div className="db-pad" style={{ maxWidth: 720 }}>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Configurações</h1>
+        <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Sua conta, assinatura e os padrões das suas propostas.</p>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div style={card}>
+          <div style={hTitle}>Sua conta</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 8 }}>
+            <span style={{ width: 44, height: 44, flex: "none", borderRadius: "50%", background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 700, fontSize: 16 }}>
+              {user ? initials(user.name) : <User size={20} strokeWidth={2} />}
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>{user?.name || "Sua conta"}</div>
+              <div style={{ fontSize: "13.5px", color: color.gray500 }}>{user?.email || "Não conectado"}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={card}>
+          <div style={hTitle}>Plano e cobrança</div>
+          <p style={subTxt}>Seu plano atual e a gestão da assinatura.</p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: color.accentInk, background: color.accentTint, border: `1px solid ${color.accentLine}`, padding: "6px 12px", borderRadius: 999 }}>{planLabel}</span>
+            {plan === "free"
+              ? <button onClick={() => go && go("pricing")} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 18px" }}>Ver planos</button>
+              : <button onClick={manageBilling} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 18px" }}>Gerenciar assinatura</button>}
+          </div>
+        </div>
+
+        <div style={card}>
+          <div style={hTitle}>Padrões da proposta</div>
+          <p style={subTxt}>Preenchidos automaticamente em cada proposta nova.</p>
+          <label style={fieldLabel}>Sobre mim (padrão)</label>
+          <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={3} placeholder="Uma breve apresentação sua, usada em toda proposta." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
+          <div style={{ ...fieldLabel, marginTop: 16 }}>Cor padrão</div>
+          <div style={{ display: "flex", gap: 9 }}>
+            {SWATCHES.map((c) => (
+              <button key={c} className="db-swatch" onClick={() => setAccent(c)} aria-label={`Cor ${c}`} style={{ background: c, boxShadow: accent === c ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : `0 0 0 1px ${color.line}` }} />
+            ))}
+          </div>
+          <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 12 }}>
+            <button onClick={saveDefaults} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px" }}>Salvar padrões</button>
+            {saved && <span style={{ fontSize: 13, color: "#2E7D51", fontWeight: 600 }}>Salvo!</span>}
+          </div>
+        </div>
+
+        <div style={card}>
+          <div style={hTitle}>Sessão</div>
+          <p style={subTxt}>Encerra sua sessão neste dispositivo.</p>
+          <button onClick={logout} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 18px" }}><LogOut size={15} strokeWidth={2} />Sair da conta</button>
+        </div>
+      </div>
     </div>
   );
 }

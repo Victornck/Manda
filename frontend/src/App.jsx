@@ -1,11 +1,17 @@
 import { useEffect } from "react";
-import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import MarketingLayout from "./components/MarketingLayout.jsx";
 import Landing from "./pages/Landing.jsx";
 import Pricing from "./pages/Pricing.jsx";
 import Auth from "./pages/Auth.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import PublicProposal from "./pages/PublicProposal.jsx";
+import { getToken } from "./lib/api.js";
+
+// Protege rotas que exigem login. Sem token, manda pro /entrar.
+function RequireAuth({ children }) {
+  return getToken() ? children : <Navigate to="/entrar" replace />;
+}
 
 // Título da aba por rota. Marca "Manda" (lê como "manda aí").
 const TITLES = {
@@ -41,7 +47,7 @@ export default function App() {
       </Route>
       <Route path="/entrar" element={<Auth go={go} tab="login" />} />
       <Route path="/criar-conta" element={<Auth go={go} tab="signup" />} />
-      <Route path="/app" element={<Dashboard go={go} />} />
+      <Route path="/app" element={<RequireAuth><Dashboard go={go} /></RequireAuth>} />
       <Route path="/p/:token" element={<PublicProposal />} />
     </Routes>
   );
