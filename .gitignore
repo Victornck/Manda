@@ -7,3 +7,4 @@ build/
 .env.example
 coverage/
 *.log
+AUDITORIA_SEGURANCA_MANDA.md

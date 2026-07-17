@@ -11,6 +11,10 @@ export const SAMPLE_DOC = {
 };
 
 const has = (v) => v != null && String(v).trim() !== "";
+// Preenchimento do destaque: sólido, ou gradiente quando o usuário liga a segunda cor.
+const accentFill = (doc, accent) => (doc.gradient && has(doc.accent2))
+  ? `linear-gradient(135deg, ${accent} 0%, ${doc.accent2} 100%)`
+  : accent;
 const filledItems = (doc) => doc.items.filter((it) => has(it.desc) || has(it.value));
 const sum = (arr) => arr.reduce((a, it) => a + (parseInt(it.value, 10) || 0), 0);
 const money = (v) => brl(parseInt(v, 10) || 0);
@@ -27,7 +31,7 @@ function Minimal({ doc, accent, onAccept }) {
   const total = sum(items);
   const dates = [["Início", doc.start], ["Entrega", doc.end]].filter(([, v]) => has(v));
   return (
-    <div style={{ background: "#fff", border: `1px solid ${color.line}`, borderRadius: 14, overflow: "hidden", boxShadow: "0 12px 40px -16px rgba(20,20,30,0.16)" }}>
+    <div style={{ background: "#fff", border: `1px solid ${color.line}`, borderRadius: 14, overflow: "hidden", boxShadow: "0 12px 40px -16px rgba(20,20,30,0.16)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
       <div style={{ height: 5, background: accent }} />
       <div style={{ padding: "30px 34px 34px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 26 }}>
@@ -68,6 +72,13 @@ function Minimal({ doc, accent, onAccept }) {
           </div>
         )}
 
+        {has(doc.bio) && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={kicker(color.gray400)}>Sobre mim</div>
+            <p style={{ fontSize: "13.5px", lineHeight: 1.6, color: color.gray600, margin: 0 }}>{doc.bio}</p>
+          </div>
+        )}
+
         <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 600, color: "#fff", background: accent, border: "none", padding: 13, borderRadius: 10, cursor: "pointer" }}>Aceitar proposta</button>
       </div>
     </div>
@@ -80,8 +91,8 @@ function Bold({ doc, accent, onAccept }) {
   const total = sum(items);
   const chips = [["Início", doc.start], ["Entrega", doc.end], ["Validade", doc.validity]].filter(([, v]) => has(v));
   return (
-    <div style={{ background: "#fff", border: `1px solid ${color.line}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 12px 40px -16px rgba(20,20,30,0.16)" }}>
-      <div style={{ background: accent, color: "#fff", padding: "26px 30px 28px" }}>
+    <div style={{ background: "#fff", border: `1px solid ${color.line}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 12px 40px -16px rgba(20,20,30,0.16)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+      <div style={{ background: accentFill(doc, accent), color: "#fff", padding: "26px 30px 28px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           <Mono doc={doc} size={34} radius={9} bg="rgba(255,255,255,0.18)" />
           <div style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.85 }}>Proposta</div>
@@ -111,6 +122,12 @@ function Bold({ doc, accent, onAccept }) {
             ))}
           </div>
         )}
+        {has(doc.bio) && (
+          <div style={{ marginBottom: 22, paddingTop: 18, borderTop: "1px solid #F0F0F0" }}>
+            <div style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: color.gray400, marginBottom: 6 }}>Sobre mim</div>
+            <p style={{ fontSize: 13, lineHeight: 1.6, color: color.gray600, margin: 0 }}>{doc.bio}</p>
+          </div>
+        )}
         <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 700, color: "#fff", background: color.ink, border: "none", padding: 14, borderRadius: 10, cursor: "pointer" }}>Aceitar proposta</button>
       </div>
     </div>
@@ -125,7 +142,7 @@ function Editorial({ doc, accent, onAccept }) {
   const conds = [["Pagamento", doc.payment], ["Revisões", doc.revisions]].filter(([, v]) => has(v));
   const rule = { height: 1, background: color.ink, opacity: 0.14 };
   return (
-    <div style={{ background: "#fff", border: `1px solid ${color.gray200}`, borderRadius: 6, padding: "30px 32px 32px" }}>
+    <div style={{ background: "#fff", border: `1px solid ${color.gray200}`, borderRadius: 6, padding: "30px 32px 32px", overflowWrap: "anywhere", wordBreak: "break-word" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <Mono doc={doc} size={30} radius={7} />
@@ -166,6 +183,12 @@ function Editorial({ doc, accent, onAccept }) {
           {conds.map(([k, v]) => <div key={k}>{k}: {v}</div>)}
         </div>
       )}
+      {has(doc.bio) && (
+        <div style={{ marginTop: 20 }}>
+          <div style={{ ...kicker(color.gray500), margin: "0 0 6px" }}>Sobre mim</div>
+          <p style={{ fontSize: "12.5px", lineHeight: 1.65, color: color.gray600, margin: 0 }}>{doc.bio}</p>
+        </div>
+      )}
       <button onClick={onAccept} style={{ marginTop: 20, width: "100%", fontFamily: font.body, fontSize: 14.5, fontWeight: 600, color: color.ink, background: "#fff", border: `1.5px solid ${color.ink}`, padding: 12, borderRadius: 8, cursor: "pointer" }}>Aceitar proposta</button>
     </div>
   );
@@ -176,9 +199,12 @@ function Colorido({ doc, accent, onAccept }) {
   const items = filledItems(doc);
   const total = sum(items);
   const dates = [["Início", doc.start], ["Entrega", doc.end]].filter(([, v]) => has(v));
+  const headBg = (doc.gradient && has(doc.accent2))
+    ? `linear-gradient(135deg, ${accent} 0%, ${doc.accent2} 100%)`
+    : `radial-gradient(120% 130% at 85% -10%, ${accent} 0%, ${accent}CC 55%, ${accent}99 100%)`;
   return (
-    <div style={{ background: "#fff", border: `1px solid ${color.line}`, borderRadius: 18, overflow: "hidden", boxShadow: "0 16px 44px -18px rgba(20,20,30,0.28)" }}>
-      <div style={{ background: `radial-gradient(120% 130% at 85% -10%, ${accent} 0%, ${accent}CC 55%, ${accent}99 100%)`, color: "#fff", padding: "30px 30px 34px" }}>
+    <div style={{ background: "#fff", border: `1px solid ${color.line}`, borderRadius: 18, overflow: "hidden", boxShadow: "0 16px 44px -18px rgba(20,20,30,0.28)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+      <div style={{ background: headBg, color: "#fff", padding: "30px 30px 34px" }}>
         <Mono doc={doc} size={44} radius={12} bg="rgba(255,255,255,0.22)" />
         <div style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", opacity: 0.9, margin: "22px 0 6px" }}>Proposta para {doc.client || "cliente"}</div>
         <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 28, lineHeight: 1.04, letterSpacing: "-0.03em" }}>{doc.title || "Título da proposta"}</div>
@@ -203,6 +229,12 @@ function Colorido({ doc, accent, onAccept }) {
             {dates.map(([k, v]) => (
               <div key={k}><div style={{ fontSize: "11.5px", color: color.gray400, marginBottom: 3 }}>{k}</div><div style={{ fontSize: 14, fontWeight: 600 }}>{v}</div></div>
             ))}
+          </div>
+        )}
+        {has(doc.bio) && (
+          <div style={{ marginBottom: 22 }}>
+            <div style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 6 }}>Sobre mim</div>
+            <p style={{ fontSize: "13.5px", lineHeight: 1.6, color: color.gray600, margin: 0 }}>{doc.bio}</p>
           </div>
         )}
         <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 700, color: "#fff", background: accent, border: "none", padding: 14, borderRadius: 12, cursor: "pointer" }}>Aceitar proposta</button>

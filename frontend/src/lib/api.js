@@ -43,6 +43,9 @@ export const api = {
   register: (body) => request("/auth/register", { method: "POST", body: JSON.stringify(body) }),
   login: (body) => request("/auth/login", { method: "POST", body: JSON.stringify(body) }),
   me: () => request("/auth/me"),
+  updateProfile: (body) => request("/auth/profile", { method: "PATCH", body: JSON.stringify(body) }),
+  changePassword: (body) => request("/auth/password", { method: "POST", body: JSON.stringify(body) }),
+  notifications: () => request("/proposals/notifications"),
 
   // propostas (exigem token)
   listProposals: () => request("/proposals"),
@@ -55,6 +58,7 @@ export const api = {
 
   // público (sem token)
   publicProposal: (publicId) => request(`/public/${publicId}`),
+  viewPublic: (publicId) => request(`/public/${publicId}/view`, { method: "POST" }),
   acceptPublic: (publicId) => request(`/public/${publicId}/accept`, { method: "POST" }),
   declinePublic: (publicId) => request(`/public/${publicId}/decline`, { method: "POST" }),
 

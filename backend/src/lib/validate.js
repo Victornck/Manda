@@ -31,6 +31,8 @@ export const proposalSchema = z.object({
   validity: z.string().max(100).optional().default(""),
   bio: z.string().max(2000).optional().default(""),
   accent: z.string().max(20).optional().default("#D97757"),
+  accent2: z.string().max(20).optional().default("#6C48B0"),
+  gradient: z.boolean().optional().default(false),
   template: z.enum(["minimal", "bold", "editorial", "colorido"]).optional().default("minimal"),
 });
 

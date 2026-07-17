@@ -1,41 +1,77 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Check, FileWarning } from "lucide-react";
 import { font, color } from "../theme.js";
 import { ProposalDesign } from "../templates/designs.jsx";
-import { decodeProposal } from "../lib/share.js";
-import { loadProposals, upsertProposal } from "../lib/drafts.js";
+import { api } from "../lib/api.js";
 
 export default function PublicProposal() {
-  const { token } = useParams();
-  const doc = useMemo(() => decodeProposal(token), [token]);
+  // A rota é /p/:token — aqui o token é o public_id curto da proposta.
+  const { token: publicId } = useParams();
+  const [doc, setDoc] = useState(null);
+  const [state, setState] = useState("loading"); // loading | ok | notfound | error
   const [accepted, setAccepted] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setState("loading");
+    api.publicProposal(publicId)
+      .then((r) => {
+        if (!alive) return;
+        setDoc(r.proposal);
+        setAccepted(r.proposal.status === "accepted");
+        setState("ok");
+        // Confirma a visualização REAL. Só roda em navegador de verdade —
+        // bots de link-preview (WhatsApp, etc.) não executam este JS.
+        api.viewPublic(publicId).catch(() => {});
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setState(/não encontrada|not found|404/i.test(e.message || "") ? "notfound" : "error");
+      });
+    return () => { alive = false; };
+  }, [publicId]);
 
   useEffect(() => {
     document.title = doc ? `${doc.title || "Proposta"} · Manda` : "Proposta · Manda";
   }, [doc]);
 
-  if (!doc) {
-    return (
-      <div style={{ minHeight: "100vh", background: color.surface2, fontFamily: font.body, color: color.ink, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <div style={{ textAlign: "center", maxWidth: 360 }}>
-          <div style={{ width: 56, height: 56, margin: "0 auto 16px", borderRadius: 14, background: "#FDECEA", color: "#B4443C", display: "flex", alignItems: "center", justifyContent: "center" }}><FileWarning size={26} strokeWidth={1.9} /></div>
-          <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, marginBottom: 6 }}>Link inválido</div>
-          <p style={{ fontSize: 14.5, color: color.gray500, margin: 0 }}>Este link de proposta está quebrado ou incompleto. Peça um novo para quem te enviou.</p>
-        </div>
-      </div>
+  const onAccept = () => {
+    setAccepted(true);
+    api.acceptPublic(publicId).catch(() => {});
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const centered = (children) => (
+    <div style={{ minHeight: "100vh", background: color.surface2, fontFamily: font.body, color: color.ink, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ textAlign: "center", maxWidth: 360 }}>{children}</div>
+    </div>
+  );
+
+  if (state === "loading") {
+    return centered(
+      <>
+        <style>{`@keyframes ppSpin{to{transform:rotate(360deg)}}`}</style>
+        <div style={{ width: 30, height: 30, margin: "0 auto 14px", border: `3px solid ${color.gray200}`, borderTopColor: color.accent, borderRadius: "50%", animation: "ppSpin .7s linear infinite" }} />
+        <p style={{ fontSize: 14.5, color: color.gray500, margin: 0 }}>Carregando proposta…</p>
+      </>
     );
   }
 
-  const onAccept = () => {
-    // Se a proposta existe neste navegador (mesmo dispositivo), marca como Aceita no painel.
-    if (doc.__id) {
-      const found = loadProposals().find((r) => r.id === doc.__id);
-      if (found) upsertProposal({ ...found, status: "Aceita" });
-    }
-    setAccepted(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
+  if (state !== "ok" || !doc) {
+    const notFound = state === "notfound";
+    return centered(
+      <>
+        <div style={{ width: 56, height: 56, margin: "0 auto 16px", borderRadius: 14, background: "#FDECEA", color: "#B4443C", display: "flex", alignItems: "center", justifyContent: "center" }}><FileWarning size={26} strokeWidth={1.9} /></div>
+        <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, marginBottom: 6 }}>{notFound ? "Proposta não encontrada" : "Não foi possível abrir"}</div>
+        <p style={{ fontSize: 14.5, color: color.gray500, margin: 0 }}>
+          {notFound
+            ? "Este link pode ter expirado ou sido removido. Peça um novo para quem te enviou."
+            : "Tivemos um problema para carregar esta proposta. Tente atualizar a página em instantes."}
+        </p>
+      </>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: color.surface2, fontFamily: font.body, color: color.ink, padding: "clamp(24px,5vw,56px) 20px" }}>

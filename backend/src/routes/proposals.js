@@ -20,7 +20,8 @@ const toProposal = (p) => ({
   id: p.id, publicId: p.public_id, client: p.client, company: p.company, clientEmail: p.client_email,
   title: p.title, scope: p.scope, items: p.items, start: p.start_date, end: p.end_date,
   payment: p.payment, revisions: p.revisions, validity: p.validity, bio: p.bio,
-  accent: p.accent, template: p.template, status: p.status, value: Number(p.value),
+  accent: p.accent, accent2: p.accent2, gradient: p.gradient, template: p.template,
+  status: p.status, value: Number(p.value),
   createdAt: p.created_at, updatedAt: p.updated_at,
 });
 
@@ -57,6 +58,27 @@ r.get("/stats", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Notificações: interações reais do cliente (visualizou/aceitou/recusou).
+// Definido antes de /:id para não conflitar na rota.
+r.get("/notifications", async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `select e.id, e.type, e.created_at, p.client, p.title, p.public_id
+         from proposal_events e
+         join proposals p on p.id = e.proposal_id
+        where p.user_id = $1 and e.type in ('viewed','accepted','declined')
+        order by e.created_at desc
+        limit 50`,
+      [req.user.id]
+    );
+    res.json({
+      notifications: rows.map((n) => ({
+        id: n.id, type: n.type, client: n.client, title: n.title, publicId: n.public_id, createdAt: n.created_at,
+      })),
+    });
+  } catch (e) { next(e); }
+});
+
 r.get("/:id", async (req, res, next) => {
   try {
     const { rows } = await query("select * from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);
@@ -88,9 +110,9 @@ r.post("/", async (req, res, next) => {
       }
     }
     const { rows } = await query(
-      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, template, value)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) returning *`,
-      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.template, sumItems(d.items)]
+      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning *`,
+      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items)]
     );
     res.status(201).json({ proposal: toProposal(rows[0]) });
   } catch (e) { next(e); }
@@ -104,9 +126,9 @@ r.put("/:id", async (req, res, next) => {
       return res.status(402).json({ error: "Seu plano não inclui este template." });
     }
     const { rows } = await query(
-      `update proposals set client=$3, company=$4, client_email=$5, title=$6, scope=$7, items=$8, start_date=$9, end_date=$10, payment=$11, revisions=$12, validity=$13, bio=$14, accent=$15, template=$16, value=$17, updated_at=now()
+      `update proposals set client=$3, company=$4, client_email=$5, title=$6, scope=$7, items=$8, start_date=$9, end_date=$10, payment=$11, revisions=$12, validity=$13, bio=$14, accent=$15, accent2=$16, gradient=$17, template=$18, value=$19, updated_at=now()
        where id=$1 and user_id=$2 returning *`,
-      [req.params.id, req.user.id, d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.template, sumItems(d.items)]
+      [req.params.id, req.user.id, d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items)]
     );
     if (!rows[0]) return res.status(404).json({ error: "Proposta não encontrada." });
     res.json({ proposal: toProposal(rows[0]) });

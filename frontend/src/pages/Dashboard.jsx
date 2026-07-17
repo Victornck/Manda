@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
+  Bell, Eye, Clock, Lock, Calendar, RotateCcw,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, brl, initials } from "../theme.js";
 import { api, setToken } from "../lib/api.js";
 import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
-import { encodeProposal } from "../lib/share.js";
+import { loadNotifs, mergeNotifs, getSeen, setSeen } from "../lib/notifs.js";
 import { DESIGNS, ProposalDesign, SAMPLE_DOC } from "../templates/designs.jsx";
 
 const FILTERS = {
@@ -21,14 +22,58 @@ const BLANK_DOC = {
   client: "", company: "", clientEmail: "", title: "",
   scope: "", items: [{ desc: "", value: "" }],
   start: "", end: "", payment: "", revisions: "", validity: "", bio: "",
-  accent: "#D97757", logo: null, template: "minimal",
+  accent: "#D97757", accent2: "#6C48B0", gradient: false, logo: null, template: "minimal",
 };
 
 const MAX_ITEMS = 20;
 const STATUS_OPTIONS = ["Rascunho", "Enviada", "Visualizada", "Aceita", "Recusada"];
 
-// Cores disponíveis para personalizar a proposta.
-const SWATCHES = ["#D97757", "#3A5BB5", "#2E7D51", "#6C48B0", "#0A0A0A"];
+// Cores de atalho — o usuário também pode escolher QUALQUER cor no seletor.
+const PRESET_COLORS = ["#D97757", "#3A5BB5", "#2E7D51", "#6C48B0", "#0A0A0A", "#C6407E", "#E0A100"];
+
+// Limites de caracteres por campo (sempre <= aos do backend, para não falhar no salvamento).
+const LIMITS = {
+  client: 80, company: 80, title: 120, scope: 5000, itemDesc: 120, itemValue: 12,
+  start: 60, end: 60, payment: 300, revisions: 120, validity: 60, bio: 600,
+};
+
+// Status: o backend fala inglês, a UI fala português.
+const EN2PT = { draft: "Rascunho", sent: "Enviada", viewed: "Visualizada", accepted: "Aceita", declined: "Recusada" };
+const PT2EN = { Rascunho: "draft", Enviada: "sent", Visualizada: "viewed", Aceita: "accepted", Recusada: "declined" };
+// Rascunhos ficam locais (localStorage) e têm id começando com "d_".
+// Propostas concluídas vivem no servidor e têm id UUID.
+const isLocalId = (id) => String(id || "").startsWith("d_");
+const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  if (d.toDateString() === new Date().toDateString()) return "Hoje";
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+// Notificações: rótulo e verbo por tipo de evento.
+const NOTIF_VERB = { viewed: "visualizou", accepted: "aceitou", declined: "recusou" };
+const notifLabel = (n) => `${(n.client || "Alguém").trim() || "Alguém"} ${NOTIF_VERB[n.type] || "interagiu com"} "${n.title || "sua proposta"}"`;
+function timeAgo(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return "agora";
+  const m = Math.floor(s / 60); if (m < 60) return `há ${m} min`;
+  const h = Math.floor(m / 60); if (h < 24) return `há ${h} h`;
+  const dd = Math.floor(h / 24); if (dd < 30) return `há ${dd} d`;
+  return fmtDate(iso);
+}
+
+// Converte uma proposta da API para o formato de linha da tabela (status em PT).
+const fromApi = (p) => ({
+  id: p.id, publicId: p.publicId, client: p.client, company: p.company, clientEmail: p.clientEmail,
+  title: p.title, value: Number(p.value) || 0, status: EN2PT[p.status] || "Rascunho",
+  date: fmtDate(p.updatedAt || p.createdAt), scope: p.scope, items: Array.isArray(p.items) ? p.items : [],
+  start: p.start, end: p.end, payment: p.payment, revisions: p.revisions, validity: p.validity,
+  bio: p.bio, accent: p.accent, accent2: p.accent2 || "#6C48B0", gradient: !!p.gradient,
+  template: p.template, createdAt: p.createdAt,
+});
 
 const STEPS = [
   "Organizando cada detalhe da sua proposta",
@@ -50,11 +95,64 @@ export default function Dashboard({ go }) {
   const [sealing, setSealing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [toDelete, setToDelete] = useState(null);
+  const [showPreview, setShowPreview] = useState(true); // toggle do painel de pré-visualização
   const [intro, setIntro] = useState(() => { try { return sessionStorage.getItem("manda_entering") === "1"; } catch { return false; } });
   const [billingMsg, setBillingMsg] = useState(null);
+  const [draftPublicId, setDraftPublicId] = useState(null); // link público da proposta em edição
+  const [sending, setSending] = useState(false);            // concluindo (salvando no servidor)
+  const [flowError, setFlowError] = useState("");           // erro ao concluir (ex: limite do plano)
+  const [toasts, setToasts] = useState([]);                 // pop-ups que somem após 4s
+  const [notifs, setNotifs] = useState(() => loadNotifs()); // notificações (só no localStorage)
+  const [notifSeen, setNotifSeen] = useState(() => getSeen());
+  const firstNotifPoll = useRef(true);                      // evita "chuva" de toasts na 1ª carga
+
+  // Pop-up efêmero (some sozinho em 4 segundos).
+  const pushToast = (msg, kind = "info") => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t, { id, msg, kind }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+  };
+  const markNotifsSeen = () => {
+    const now = Date.now();
+    setNotifSeen(now);
+    setSeen(now);
+  };
+
+  // Recarrega a lista: propostas do servidor + rascunhos locais (localStorage).
+  const refreshRows = async () => {
+    const local = loadProposals();
+    try {
+      const { proposals } = await api.listProposals();
+      setRows([...local, ...proposals.map(fromApi)]);
+    } catch {
+      setRows(local); // backend fora do ar: mostra ao menos os rascunhos locais
+    }
+  };
 
   useEffect(() => {
     api.me().then((r) => setUser(r.user)).catch(() => {});
+    refreshRows();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Polling só para DESCOBRIR interações do cliente no backend. O que chega é
+  // mesclado no store local (localStorage) — a fonte de verdade das notificações.
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const { notifications } = await api.notifications();
+        if (!alive) return;
+        const { list, added } = mergeNotifs(notifications);
+        setNotifs(list);
+        if (!firstNotifPoll.current) added.forEach((n) => pushToast(notifLabel(n)));
+        firstNotifPoll.current = false;
+      } catch { /* backend fora / sem login: segue com o que já está no localStorage */ }
+    };
+    load();
+    const iv = setInterval(load, 30000);
+    return () => { alive = false; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Retorno do checkout do Stripe (?assinatura=ok|cancelada).
@@ -98,12 +196,14 @@ export default function Dashboard({ go }) {
   const addItem = () => setDoc((d) => (d.items.length >= MAX_ITEMS ? d : { ...d, items: [...d.items, { desc: "", value: "" }] }));
   const removeItem = (i) => () => setDoc((d) => ({ ...d, items: d.items.filter((_, idx) => idx !== i) }));
 
-  const shareUrl = () => `${window.location.origin}/p/${encodeProposal({ ...doc, __id: draftId })}`;
+  const shareUrl = () => (draftPublicId ? `${window.location.origin}/p/${draftPublicId}` : "");
   const copyLink = () => {
     const url = shareUrl();
+    if (!url) return;
     if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
+    pushToast("Link copiado para a área de transferência.", "success");
   };
   const sendByEmail = () => {
     const url = shareUrl();
@@ -118,9 +218,19 @@ export default function Dashboard({ go }) {
     doc.payment || doc.revisions || doc.validity || doc.bio || doc.items.some((it) => it.desc || it.value);
   const canFinish = doc.client.trim() !== "" && doc.title.trim() !== "";
 
-  const buildProposal = (status) => ({
+  // Corpo enviado à API (formato do proposalSchema do backend).
+  const toApiBody = () => ({
+    client: doc.client, company: doc.company, clientEmail: doc.clientEmail,
+    title: doc.title, scope: doc.scope,
+    items: doc.items.filter((it) => it.desc || it.value).map((it) => ({ desc: it.desc || "", value: String(it.value || "") })),
+    start: doc.start, end: doc.end, payment: doc.payment, revisions: doc.revisions,
+    validity: doc.validity, bio: doc.bio, accent: doc.accent, accent2: doc.accent2, gradient: !!doc.gradient, template: doc.template,
+  });
+
+  // Rascunho guardado localmente (não consome cota do plano até ser concluído).
+  const buildLocalDraft = () => ({
     id: draftId, client: doc.client, company: doc.company, clientEmail: doc.clientEmail,
-    title: doc.title || "Proposta sem título", value: total, status, date: "Hoje",
+    title: doc.title || "Proposta sem título", value: total, status: "Rascunho", date: "Hoje",
     scope: doc.scope, items: doc.items, start: doc.start, end: doc.end,
     payment: doc.payment, revisions: doc.revisions, validity: doc.validity, bio: doc.bio, accent: doc.accent, template: doc.template,
     updatedAt: Date.now(),
@@ -131,6 +241,8 @@ export default function Dashboard({ go }) {
     try { bio = localStorage.getItem("manda_default_bio") || ""; accent = localStorage.getItem("manda_default_accent") || "#D97757"; } catch { /* ignore */ }
     setDoc({ ...BLANK_DOC, bio, accent });
     setDraftId(newId());
+    setDraftPublicId(null);
+    setFlowError("");
     setFlow("editing");
     setView("editor");
   };
@@ -142,24 +254,40 @@ export default function Dashboard({ go }) {
       items: Array.isArray(r.items) && r.items.length ? r.items : BLANK_DOC.items,
       start: r.start || "", end: r.end || "", payment: r.payment || "",
       revisions: r.revisions || "", validity: r.validity || "", bio: r.bio || "",
-      accent: r.accent || "#D97757", logo: null, template: r.template || "minimal",
+      accent: r.accent || "#D97757", accent2: r.accent2 || "#6C48B0", gradient: !!r.gradient, logo: null, template: r.template || "minimal",
     });
     setDraftId(r.id || newId());
+    setDraftPublicId(r.publicId || null);
+    setFlowError("");
     setFlow("editing");
     setView("editor");
   };
   const onRowKey = (r) => (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(r); } };
 
-  const navTo = (v) => {
-    if (view === "editor" && flow !== "done" && hasContent) setRows(upsertProposal(buildProposal("Rascunho")));
+  const navTo = async (v) => {
+    if (view === "editor" && flow !== "done" && hasContent) {
+      if (draftId && !isLocalId(draftId)) {
+        // já é proposta do servidor: atualiza o conteúdo (sem mexer no status)
+        try { await api.updateProposal(draftId, toApiBody()); } catch { /* ignore */ }
+      } else {
+        // rascunho novo/local
+        upsertProposal(buildLocalDraft());
+      }
+      await refreshRows();
+    }
+    setFlowError("");
     setFlow("editing");
     setView(v);
   };
   const exitEditor = () => navTo("list");
 
   const startWithDesign = (id) => {
-    setDoc({ ...BLANK_DOC, template: id });
+    let bio = "";
+    try { bio = localStorage.getItem("manda_default_bio") || ""; } catch { /* ignore */ }
+    setDoc({ ...BLANK_DOC, template: id, bio });
     setDraftId(newId());
+    setDraftPublicId(null);
+    setFlowError("");
     setFlow("editing");
     setView("editor");
   };
@@ -173,15 +301,53 @@ export default function Dashboard({ go }) {
     e.target.value = "";
   };
 
-  const finish = () => { if (canFinish) setFlow("finishing"); };
-
-  const confirmDelete = () => {
-    if (toDelete) setRows(removeProposal(toDelete.id));
-    setToDelete(null);
+  // Concluir: salva no servidor, marca como enviada (sent) e obtém o link público.
+  // Só liga a animação DEPOIS de salvo — assim o link já existe no modal "pronto".
+  const finish = async () => {
+    if (!canFinish || sending) return;
+    setFlowError("");
+    setSending(true);
+    try {
+      const body = toApiBody();
+      let saved;
+      if (draftId && !isLocalId(draftId)) {
+        saved = (await api.updateProposal(draftId, body)).proposal;
+      } else {
+        saved = (await api.createProposal(body)).proposal; // conta na cota mensal do plano
+        if (isLocalId(draftId)) removeProposal(draftId);    // o rascunho local vira proposta do servidor
+      }
+      const sent = (await api.setStatus(saved.id, "sent")).proposal;
+      setDraftId(sent.id);
+      setDraftPublicId(sent.publicId);
+      await refreshRows();
+      setFlow("finishing");
+    } catch (err) {
+      setFlowError(err.message || "Não foi possível concluir. Tente de novo.");
+    } finally {
+      setSending(false);
+    }
   };
 
-  const changeStatus = (r) => (e) => {
-    setRows(upsertProposal({ ...r, status: e.target.value }));
+  // Decisão do cliente (Aceita/Recusada) — pode acontecer offline, então é manual.
+  // Só existe para propostas já enviadas (no servidor); os demais status são automáticos.
+  const setDecision = (r, pt) => async (e) => {
+    e.stopPropagation();
+    try { await api.setStatus(r.id, PT2EN[pt] || "sent"); } catch { /* ignore */ }
+    await refreshRows();
+    pushToast(
+      pt === "Aceita" ? "Proposta marcada como aceita." : pt === "Recusada" ? "Proposta marcada como recusada." : "Proposta reaberta.",
+      pt === "Aceita" ? "success" : "info"
+    );
+  };
+
+  const confirmDelete = async () => {
+    const r = toDelete;
+    setToDelete(null);
+    if (!r) return;
+    if (isLocalId(r.id)) removeProposal(r.id);
+    else { try { await api.deleteProposal(r.id); } catch { /* ignore */ } }
+    await refreshRows();
+    pushToast("Proposta excluída.", "info");
   };
 
   useEffect(() => {
@@ -203,11 +369,6 @@ export default function Dashboard({ go }) {
     return () => clearInterval(id);
   }, [flow]);
 
-  useEffect(() => {
-    if (flow === "done") setRows(upsertProposal(buildProposal("Enviada")));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flow]);
-
   const count = (f) => (FILTERS[f] ? rows.filter((r) => FILTERS[f].includes(r.status)).length : rows.length);
   const byFilter = FILTERS[filter] ? rows.filter((r) => FILTERS[filter].includes(r.status)) : rows;
   const q = query.trim().toLowerCase();
@@ -221,10 +382,13 @@ export default function Dashboard({ go }) {
   const sectionLabel = { fontSize: 12, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 10 };
   const pvSection = { fontSize: "11.5px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 8 };
 
+  const unread = notifs.filter((n) => new Date(n.createdAt).getTime() > notifSeen).length;
+
   const nav = [
     { key: "list", label: "Propostas", Icon: FileText },
     { key: "templates", label: "Templates", Icon: LayoutGrid },
     { key: "clients", label: "Clientes", Icon: Users },
+    { key: "notifications", label: "Notificações", Icon: Bell, badge: unread },
     { key: "settings", label: "Configurações", Icon: Settings },
   ];
 
@@ -263,6 +427,13 @@ export default function Dashboard({ go }) {
         .db-nav a.idle{ color:${color.gray600}; font-weight:500; background:transparent; }
         .db-nav a.idle:hover{ background:${color.surface}; color:${color.ink}; }
         .db-nav a.on{ color:${color.accentInk}; font-weight:600; background:${color.accentTint}; }
+        .db-nav-dot{ position:absolute; top:-3px; right:-4px; width:8px; height:8px; border-radius:50%; background:${color.accent}; border:2px solid #fff; }
+        .db-nav-badge{ margin-left:auto; font-size:11px; font-weight:700; min-width:18px; height:18px; padding:0 5px; border-radius:999px; background:${color.accent}; color:#fff; display:inline-flex; align-items:center; justify-content:center; }
+        .db-toasts{ position:fixed; right:20px; bottom:20px; z-index:400; display:flex; flex-direction:column; gap:10px; max-width:340px; }
+        .db-toast{ display:flex; align-items:center; gap:10px; color:#fff; padding:12px 14px; border-radius:11px; box-shadow:0 14px 34px -14px rgba(20,20,30,0.55); font-size:13.5px; font-weight:500; line-height:1.35; animation:dbToastIn .28s cubic-bezier(.2,.8,.2,1) both; }
+        .db-toast.success{ background:#1F7A48; }
+        .db-toast.info{ background:${color.ink}; }
+        @keyframes dbToastIn{ from{ opacity:0; transform:translateY(12px) scale(.98); } to{ opacity:1; transform:none; } }
         .db-profile{ display:flex; align-items:center; gap:11px; padding:10px 12px; margin:8px; border-radius:11px; }
         .db-logout{ flex:none; margin-left:auto; display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:none; background:none; color:${color.gray400}; border-radius:8px; cursor:pointer; transition:background .14s ease, color .14s ease; }
         .db-logout:hover{ background:${color.surface}; color:${color.ink}; }
@@ -282,7 +453,7 @@ export default function Dashboard({ go }) {
         .db-badge{ font-size:11.5px; font-weight:700; padding:1px 8px; border-radius:999px; font-variant-numeric:tabular-nums; }
 
         .db-table{ background:#fff; border:1px solid ${color.line2}; border-radius:14px; overflow:hidden; }
-        .db-thead, .db-row{ display:grid; grid-template-columns:minmax(190px,1.7fr) minmax(150px,1.4fr) 118px 148px 76px 36px; column-gap:22px; align-items:center; }
+        .db-thead, .db-row{ display:grid; grid-template-columns:minmax(180px,1.6fr) minmax(140px,1.3fr) 116px 130px 64px 108px; column-gap:16px; align-items:center; }
         .db-thead{ padding:12px 20px; background:${color.surface3}; border-bottom:1px solid #EEE; font-size:11.5px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; color:${color.gray400}; }
         .db-row{ padding:16px 20px; border-top:1px solid #F3F3F3; cursor:pointer; transition:background .12s ease; }
         .db-row:hover{ background:${color.surface2}; }
@@ -292,6 +463,13 @@ export default function Dashboard({ go }) {
         .db-del{ display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:none; background:none; color:${color.gray400}; border-radius:7px; cursor:pointer; opacity:0; transition:opacity .14s ease, background .14s ease, color .14s ease; }
         .db-row:hover .db-del{ opacity:1; }
         .db-del:hover{ background:#FDECEA; color:#B4443C; }
+        .db-act{ display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:none; background:none; border-radius:8px; cursor:pointer; opacity:0; transition:opacity .14s ease, background .14s ease, color .14s ease, transform .12s ease; }
+        .db-row:hover .db-act{ opacity:1; }
+        .db-act:active{ transform:translateY(1px); }
+        .db-act:focus-visible{ opacity:1; outline:2px solid ${color.accent}; outline-offset:1px; }
+        .db-act-ok{ color:#2E7D51; } .db-act-ok:hover{ background:#EAF5EE; }
+        .db-act-no{ color:#B4443C; } .db-act-no:hover{ background:#FDECEA; }
+        .db-act-un{ color:${color.gray500}; } .db-act-un:hover{ background:${color.surface}; color:${color.ink}; }
         .db-del:focus-visible{ opacity:1; outline:2px solid ${color.accent}; outline-offset:1px; }
 
         .db-footbar{ flex:none; background:#fff; border-top:1px solid ${color.line2}; box-shadow:0 -10px 28px -20px rgba(20,20,30,0.25); display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 24px 16px; flex-wrap:wrap; }
@@ -364,7 +542,7 @@ export default function Dashboard({ go }) {
           .db-c-client{ grid-area:client; } .db-c-title{ grid-area:title; } .db-c-value{ grid-area:value; }
           .db-c-status{ grid-area:status; } .db-c-date{ grid-area:date; } .db-c-del{ grid-area:del; justify-self:end; }
           .db-c-value, .db-c-date{ justify-self:end; text-align:right; }
-          .db-del{ opacity:1; }
+          .db-del, .db-act{ opacity:1; }
         }
         @media (prefers-reduced-motion: reduce){
           .db *, .db *::before, .db *::after{ transition-duration:.001ms !important; animation-duration:.001ms !important; }
@@ -385,12 +563,16 @@ export default function Dashboard({ go }) {
         </div>
         <nav className="db-nav" style={{ flex: 1, padding: "6px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
           {nav.map((n) => {
-            const on = (n.key === "list" && (view === "list" || view === "editor")) || (n.key === "templates" && view === "templates") || (n.key === "clients" && view === "clients") || (n.key === "settings" && view === "settings");
+            const on = view === n.key || (n.key === "list" && view === "editor");
             return (
               <a key={n.key} href="#" className={on ? "on" : "idle"} title={n.label} aria-current={on ? "page" : undefined}
-                onClick={(e) => { e.preventDefault(); if (n.key === "list") navTo("list"); else if (n.key === "templates") navTo("templates"); else if (n.key === "clients") navTo("clients"); else if (n.key === "settings") navTo("settings"); }}>
-                <span style={{ display: "flex", flex: "none" }}><n.Icon size={18} strokeWidth={1.9} /></span>
-                <span className="db-collapsed">{n.label}</span>
+                onClick={(e) => { e.preventDefault(); navTo(n.key); }}>
+                <span style={{ display: "flex", flex: "none", position: "relative" }}>
+                  <n.Icon size={18} strokeWidth={1.9} />
+                  {n.badge > 0 && <span className="db-nav-dot" />}
+                </span>
+                <span className="db-collapsed" style={{ flex: 1 }}>{n.label}</span>
+                {n.badge > 0 && <span className="db-collapsed db-nav-badge">{n.badge}</span>}
               </a>
             );
           })}
@@ -461,12 +643,19 @@ export default function Dashboard({ go }) {
                       <span className="db-c-title" style={{ fontSize: 14, color: color.gray700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", paddingRight: 12 }}>{r.title || "Proposta sem título"}</span>
                       <span className="db-c-value db-num" style={{ fontSize: 14, fontWeight: 600, color: r.value ? color.ink : color.gray400 }}>{r.value ? brl(r.value) : "—"}</span>
                       <span className="db-c-status">
-                        <select value={r.status || "Rascunho"} onClick={(e) => e.stopPropagation()} onChange={changeStatus(r)} aria-label="Mudar status" className="db-status-sel" style={{ color: sc.c, background: sc.bg, border: `1px solid ${sc.b}` }}>
-                          {STATUS_OPTIONS.map((st) => <option key={st} value={st} style={{ color: color.ink, background: "#fff" }}>{st}</option>)}
-                        </select>
+                        <span className="db-status-sel" title={`Status: ${r.status || "Rascunho"}`} style={{ display: "inline-block", cursor: "default", color: sc.c, background: sc.bg, border: `1px solid ${sc.b}` }}>{r.status || "Rascunho"}</span>
                       </span>
                       <span className="db-c-date db-num" style={{ fontSize: 13, color: color.gray400 }}>{r.date || ""}</span>
-                      <span className="db-c-del">
+                      <span className="db-c-del" style={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
+                        {(r.status === "Enviada" || r.status === "Visualizada") && (
+                          <>
+                            <button className="db-act db-act-ok" onClick={setDecision(r, "Aceita")} aria-label="Marcar como aceita" title="Cliente aceitou"><Check size={16} strokeWidth={2.6} /></button>
+                            <button className="db-act db-act-no" onClick={setDecision(r, "Recusada")} aria-label="Marcar como recusada" title="Cliente recusou"><X size={16} strokeWidth={2.4} /></button>
+                          </>
+                        )}
+                        {(r.status === "Aceita" || r.status === "Recusada") && (
+                          <button className="db-act db-act-un" onClick={setDecision(r, "Enviada")} aria-label="Reabrir proposta" title="Reabrir (volta para Enviada)"><RotateCcw size={15} strokeWidth={2.2} /></button>
+                        )}
                         <button className="db-del" onClick={(e) => { e.stopPropagation(); setToDelete(r); }} aria-label={`Excluir proposta de ${r.client || "cliente"}`} title="Excluir">
                           <Trash2 size={16} strokeWidth={2} />
                         </button>
@@ -485,8 +674,10 @@ export default function Dashboard({ go }) {
           <DesignGallery onUse={startWithDesign} />
         ) : view === "clients" ? (
           <ClientsPanel rows={rows} />
+        ) : view === "notifications" ? (
+          <NotificationsPanel notifs={notifs} seen={notifSeen} onSeen={markNotifsSeen} />
         ) : view === "settings" ? (
-          <SettingsPanel user={user} go={go} />
+          <SettingsPanel user={user} setUser={setUser} go={go} pushToast={pushToast} />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
             {/* action bar */}
@@ -496,14 +687,14 @@ export default function Dashboard({ go }) {
               </button>
               <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 13, color: color.gray400, marginRight: 6, display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: hasContent ? "#22C55E" : color.gray300 }} />{hasContent ? "Rascunho salvo ao sair" : "Rascunho"}</span>
-                <button className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "9px 15px" }}>Pré-visualizar</button>
+                <button onClick={() => setShowPreview((v) => !v)} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "9px 15px" }} aria-pressed={showPreview}><Eye size={15} strokeWidth={2} />{showPreview ? "Ocultar prévia" : "Pré-visualizar"}</button>
               </div>
             </div>
 
             {/* split */}
-            <div className="db-split" style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", minHeight: 0 }}>
+            <div className="db-split" style={{ flex: 1, display: "grid", gridTemplateColumns: showPreview ? "1fr 1fr" : "1fr", minHeight: 0 }}>
               {/* editor side */}
-              <div style={{ overflow: "auto", padding: "32px 36px", borderRight: `1px solid ${color.line2}` }}>
+              <div style={{ overflow: "auto", padding: "32px 36px", borderRight: showPreview ? `1px solid ${color.line2}` : "none" }}>
                 <div style={{ maxWidth: 440, margin: "0 auto", display: "flex", flexDirection: "column", gap: 26 }}>
                   <div>
                     <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 4 }}>Monte sua proposta</div>
@@ -536,26 +727,48 @@ export default function Dashboard({ go }) {
                       </label>
                       {doc.logo && <button onClick={() => setDoc((d) => ({ ...d, logo: null }))} className="db-btn" style={{ marginTop: 8, fontSize: "12.5px", color: color.gray500, background: "none", padding: "2px 4px", gap: 5 }}><X size={13} strokeWidth={2.2} />Remover</button>}
                     </div>
-                    <div>
-                      <div style={sectionLabel}>Cor</div>
-                      <div style={{ display: "flex", gap: 9, paddingTop: 4 }}>
-                        {SWATCHES.map((c) => (
-                          <button key={c} className="db-swatch" onClick={() => setDoc((d) => ({ ...d, accent: c }))} aria-label={`Cor ${c}`} title="Cor da proposta"
-                            style={{ background: c, boxShadow: doc.accent === c ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : `0 0 0 1px ${color.line}` }} />
+                  </div>
+
+                  <div>
+                    <div style={sectionLabel}>Cor</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, border: `1px solid ${color.gray200}`, borderRadius: 10, padding: "5px 10px", cursor: "pointer" }}>
+                        <input type="color" value={doc.accent} onChange={(e) => setDoc((d) => ({ ...d, accent: e.target.value }))} style={{ width: 26, height: 26, border: "none", background: "none", padding: 0, cursor: "pointer" }} aria-label="Escolher cor" />
+                        <input value={doc.accent} onChange={(e) => setDoc((d) => ({ ...d, accent: e.target.value }))} maxLength={20} style={{ width: 82, border: "none", outline: "none", fontFamily: font.body, fontSize: 13, textTransform: "uppercase", color: color.ink }} aria-label="Cor em hexadecimal" />
+                      </label>
+                      <div style={{ display: "flex", gap: 7 }}>
+                        {PRESET_COLORS.map((c) => (
+                          <button key={c} className="db-swatch" onClick={() => setDoc((d) => ({ ...d, accent: c }))} aria-label={`Cor ${c}`} title={c}
+                            style={{ width: 22, height: 22, background: c, boxShadow: (doc.accent || "").toLowerCase() === c.toLowerCase() ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : `0 0 0 1px ${color.line}` }} />
                         ))}
                       </div>
                     </div>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: color.gray600, cursor: "pointer" }}>
+                      <input type="checkbox" checked={!!doc.gradient} onChange={(e) => setDoc((d) => ({ ...d, gradient: e.target.checked }))} />
+                      Usar gradiente <span style={{ color: color.gray400, fontSize: 12 }}>(nos modelos Bold e Colorido)</span>
+                    </label>
+                    {doc.gradient && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "12.5px", color: color.gray500 }}>Segunda cor</span>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, border: `1px solid ${color.gray200}`, borderRadius: 10, padding: "5px 10px", cursor: "pointer" }}>
+                          <input type="color" value={doc.accent2} onChange={(e) => setDoc((d) => ({ ...d, accent2: e.target.value }))} style={{ width: 26, height: 26, border: "none", background: "none", padding: 0, cursor: "pointer" }} aria-label="Segunda cor" />
+                          <input value={doc.accent2} onChange={(e) => setDoc((d) => ({ ...d, accent2: e.target.value }))} maxLength={20} style={{ width: 82, border: "none", outline: "none", fontFamily: font.body, fontSize: 13, textTransform: "uppercase", color: color.ink }} aria-label="Segunda cor em hexadecimal" />
+                        </label>
+                        <span style={{ width: 44, height: 26, borderRadius: 7, background: `linear-gradient(135deg, ${doc.accent}, ${doc.accent2})`, border: `1px solid ${color.line}` }} />
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                    <Field label="Cliente" required><input className="db-input" value={doc.client} onChange={updDoc("client")} placeholder="Nome do cliente" style={inp()} /></Field>
-                    <Field label="Empresa"><input className="db-input" value={doc.company} onChange={updDoc("company")} placeholder="Empresa" style={inp()} /></Field>
+                    <Field label="Cliente" required><input className="db-input" value={doc.client} onChange={updDoc("client")} maxLength={LIMITS.client} placeholder="Nome do cliente" style={inp()} /></Field>
+                    <Field label="Empresa"><input className="db-input" value={doc.company} onChange={updDoc("company")} maxLength={LIMITS.company} placeholder="Empresa" style={inp()} /></Field>
                   </div>
-                  <Field label="Título da proposta" required><input className="db-input" value={doc.title} onChange={updDoc("title")} placeholder="Ex: Produção de vídeo institucional" style={inp()} /></Field>
+                  <Field label="Título da proposta" required><input className="db-input" value={doc.title} onChange={updDoc("title")} maxLength={LIMITS.title} placeholder="Ex: Produção de vídeo institucional" style={inp()} /></Field>
 
                   <div>
                     <div style={sectionLabel}>Escopo</div>
-                    <textarea className="db-input" value={doc.scope} onChange={updDoc("scope")} rows={4} placeholder="Descreva o que está incluído no serviço." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
+                    <textarea className="db-input" value={doc.scope} onChange={updDoc("scope")} maxLength={LIMITS.scope} rows={4} placeholder="Descreva o que está incluído no serviço." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
+                    <div style={{ fontSize: "12px", color: color.gray400, marginTop: 5, textAlign: "right" }}>{doc.scope.length}/{LIMITS.scope}</div>
                   </div>
 
                   <div>
@@ -563,10 +776,10 @@ export default function Dashboard({ go }) {
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {doc.items.map((it, i) => (
                         <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <input className="db-input" value={it.desc} onChange={updItem(i, "desc")} placeholder="Item" style={{ ...inp(), flex: 1 }} />
+                          <input className="db-input" value={it.desc} onChange={updItem(i, "desc")} maxLength={LIMITS.itemDesc} placeholder="Item" style={{ ...inp(), flex: 1 }} />
                           <div className="db-input" style={{ display: "flex", alignItems: "center", gap: 4, flex: "none", width: 118, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "0 10px", background: color.white }}>
                             <span style={{ fontSize: 13, color: color.gray400 }}>R$</span>
-                            <input value={it.value} onChange={updItem(i, "value")} inputMode="numeric" placeholder="0" style={{ width: "100%", border: "none", outline: "none", fontFamily: font.body, fontSize: 14, padding: "10px 0", background: "transparent" }} />
+                            <input value={it.value} onChange={updItem(i, "value")} maxLength={LIMITS.itemValue} inputMode="numeric" placeholder="0" style={{ width: "100%", border: "none", outline: "none", fontFamily: font.body, fontSize: 14, padding: "10px 0", background: "transparent" }} />
                           </div>
                           <button onClick={removeItem(i)} className="db-btn" aria-label="Remover item" style={{ flex: "none", width: 34, height: 38, border: "1px solid #EEE", background: color.white, borderRadius: 9, color: color.gray400 }}><Trash2 size={15} strokeWidth={2} /></button>
                         </div>
@@ -581,33 +794,38 @@ export default function Dashboard({ go }) {
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                    <Field label="Início"><input className="db-input" value={doc.start} onChange={updDoc("start")} placeholder="Ex: 10 de agosto" style={inp()} /></Field>
-                    <Field label="Entrega"><input className="db-input" value={doc.end} onChange={updDoc("end")} placeholder="Ex: 5 de setembro" style={inp()} /></Field>
+                    <Field label="Início"><input className="db-input" value={doc.start} onChange={updDoc("start")} maxLength={LIMITS.start} placeholder="Ex: 10 de agosto" style={inp()} /></Field>
+                    <Field label="Entrega"><input className="db-input" value={doc.end} onChange={updDoc("end")} maxLength={LIMITS.end} placeholder="Ex: 5 de setembro" style={inp()} /></Field>
                   </div>
 
                   <div>
                     <div style={sectionLabel}>Condições</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                      <Field label="Forma de pagamento"><input className="db-input" value={doc.payment} onChange={updDoc("payment")} placeholder="Ex: 50% na aprovação, 50% na entrega" style={inp()} /></Field>
+                      <Field label="Forma de pagamento"><input className="db-input" value={doc.payment} onChange={updDoc("payment")} maxLength={LIMITS.payment} placeholder="Ex: 50% na aprovação, 50% na entrega" style={inp()} /></Field>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                        <Field label="Revisões inclusas"><input className="db-input" value={doc.revisions} onChange={updDoc("revisions")} placeholder="Ex: 2 rodadas" style={inp()} /></Field>
-                        <Field label="Validade"><input className="db-input" value={doc.validity} onChange={updDoc("validity")} placeholder="Ex: 15 dias" style={inp()} /></Field>
+                        <Field label="Revisões inclusas"><input className="db-input" value={doc.revisions} onChange={updDoc("revisions")} maxLength={LIMITS.revisions} placeholder="Ex: 2 rodadas" style={inp()} /></Field>
+                        <Field label="Validade"><input className="db-input" value={doc.validity} onChange={updDoc("validity")} maxLength={LIMITS.validity} placeholder="Ex: 15 dias" style={inp()} /></Field>
                       </div>
                     </div>
                   </div>
 
                   <div>
                     <div style={sectionLabel}>Sobre mim</div>
-                    <textarea className="db-input" value={doc.bio} onChange={updDoc("bio")} rows={3} placeholder="Uma breve apresentação sua." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
-                    <div style={{ fontSize: "12.5px", color: color.gray400, marginTop: 6 }}>Salvo para a próxima proposta automaticamente.</div>
+                    <textarea className="db-input" value={doc.bio} onChange={updDoc("bio")} maxLength={LIMITS.bio} rows={3} placeholder="Uma breve apresentação sua." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: "12.5px", color: color.gray400, marginTop: 6 }}>
+                      <span>Salvo para a próxima proposta automaticamente.</span>
+                      <span>{doc.bio.length}/{LIMITS.bio}</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* preview side */}
-              <div className="db-preview" style={{ overflow: "auto", background: color.surface, padding: "32px 36px" }}>
-                <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} />
-              </div>
+              {showPreview && (
+                <div className="db-preview" style={{ overflow: "auto", background: color.surface, padding: "32px 36px" }}>
+                  <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} />
+                </div>
+              )}
             </div>
 
             {/* barra inferior */}
@@ -621,13 +839,15 @@ export default function Dashboard({ go }) {
                 <span className="db-foot-items">{itemCount} {itemCount === 1 ? "item" : "itens"}</span>
               </div>
               <div className="db-foot-actions">
-                {canFinish ? (
+                {flowError ? (
+                  <span className="db-ready" style={{ color: "#B4443C", fontWeight: 600, maxWidth: 320 }}>{flowError}</span>
+                ) : canFinish ? (
                   <span className="db-ready ok"><Check size={15} strokeWidth={2.6} />Tudo pronto</span>
                 ) : (
                   <span className="db-ready">Falta {missing.map((m) => <span key={m} className="db-chip">{m}</span>)}</span>
                 )}
-                <button onClick={finish} disabled={!canFinish} className="db-btn db-btn-accent" style={{ fontSize: 15, padding: "12px 24px", borderRadius: 10 }}>
-                  <Check size={17} strokeWidth={2.6} />Concluir proposta
+                <button onClick={finish} disabled={!canFinish || sending} className="db-btn db-btn-accent" style={{ fontSize: 15, padding: "12px 24px", borderRadius: 10 }}>
+                  <Check size={17} strokeWidth={2.6} />{sending ? "Concluindo…" : "Concluir proposta"}
                 </button>
               </div>
             </div>
@@ -726,6 +946,66 @@ export default function Dashboard({ go }) {
           <div className="db-intro-mark">M</div>
         </div>
       )}
+
+      {/* POP-UPS (somem após 4s) */}
+      {toasts.length > 0 && (
+        <div className="db-toasts" aria-live="polite">
+          {toasts.map((t) => (
+            <div key={t.id} className={`db-toast ${t.kind}`}>
+              <span style={{ display: "flex", flex: "none" }}>{t.kind === "success" ? <Check size={16} strokeWidth={2.6} /> : <Bell size={15} strokeWidth={2.2} />}</span>
+              <span>{t.msg}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotificationsPanel({ notifs, seen, onSeen }) {
+  useEffect(() => {
+    const t = setTimeout(() => onSeen && onSeen(), 1500); // deixa destacar as novas antes de marcar como lidas
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const style = (type) => type === "accepted" ? { I: Check, c: "#2E7D51", bg: "#EAF5EE" }
+    : type === "declined" ? { I: X, c: "#B4443C", bg: "#FDECEA" }
+    : { I: Eye, c: color.accentInk, bg: color.accentTint };
+
+  return (
+    <div className="db-pad" style={{ maxWidth: 720 }}>
+      <div style={{ marginBottom: 22 }}>
+        <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Notificações</h1>
+        <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Cada vez que um cliente interage com suas propostas, aparece aqui.</p>
+      </div>
+
+      {notifs.length ? (
+        <div style={{ background: "#fff", border: `1px solid ${color.line2}`, borderRadius: 14, overflow: "hidden" }}>
+          {notifs.map((n, i) => {
+            const s = style(n.type);
+            const isNew = new Date(n.createdAt).getTime() > seen;
+            return (
+              <div key={n.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderTop: i ? "1px solid #F3F3F3" : "none", background: isNew ? color.accentTint : "#fff", transition: "background .4s ease" }}>
+                <span style={{ width: 34, height: 34, flex: "none", borderRadius: "50%", background: s.bg, color: s.c, display: "flex", alignItems: "center", justifyContent: "center" }}><s.I size={16} strokeWidth={2.4} /></span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, color: color.ink }}>
+                    <strong style={{ fontWeight: 600 }}>{(n.client || "Alguém").trim() || "Alguém"}</strong> {NOTIF_VERB[n.type] || "interagiu com"} <span style={{ color: color.gray600 }}>“{n.title || "sua proposta"}”</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: color.gray400, display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}><Clock size={12} strokeWidth={2} />{timeAgo(n.createdAt)}</div>
+                </div>
+                {isNew && <span style={{ width: 8, height: 8, flex: "none", borderRadius: "50%", background: color.accent }} />}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ background: "#fff", border: "1px dashed #DDD", borderRadius: 16, padding: "56px 24px", textAlign: "center" }}>
+          <div style={{ width: 56, height: 56, margin: "0 auto 18px", borderRadius: 14, background: color.accentTint, color: color.accent, display: "flex", alignItems: "center", justifyContent: "center" }}><Bell size={26} strokeWidth={1.9} /></div>
+          <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 19, marginBottom: 6 }}>Nada por aqui ainda</div>
+          <p style={{ fontSize: 14.5, color: color.gray500, margin: 0 }}>Quando um cliente abrir ou responder uma proposta, você fica sabendo aqui.</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -797,16 +1077,47 @@ function DesignGallery({ onUse }) {
 }
 
 function ClientsPanel({ rows }) {
+  const [period, setPeriod] = useState("all");
+  const thisYear = new Date().getFullYear();
+  const MONTHS_FULL = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+  const YEARS = [thisYear, thisYear - 1, thisYear - 2];
+  const [selM, setSelM] = useState("");            // "01".."12" ou "" (Todos)
+  const [selY, setSelY] = useState(String(thisYear));
+  const monthKey = selM ? `${selY}-${selM}` : "";  // "YYYY-MM" quando um mês específico está escolhido
   const OPENED = ["Visualizada", "Aceita", "Recusada"];
   const num = (v) => Number(v) || 0;
-  const receita = rows.filter((r) => r.status === "Aceita").reduce((a, r) => a + num(r.value), 0);
-  const emAberto = rows.filter((r) => r.status === "Enviada" || r.status === "Visualizada").reduce((a, r) => a + num(r.value), 0);
-  const enviadas = rows.filter((r) => r.status && r.status !== "Rascunho").length;
-  const aceitas = rows.filter((r) => r.status === "Aceita").length;
+  const PERIODS = [["all", "Tudo"], ["today", "Hoje"], ["7d", "7 dias"], ["month", "Este mês"], ["lastmonth", "Mês passado"]];
+
+  // Intervalo [início, fim) em ms — um mês escolhido tem prioridade sobre o preset.
+  const range = () => {
+    if (monthKey) {
+      const [y, m] = monthKey.split("-").map(Number);
+      return [new Date(y, m - 1, 1).getTime(), new Date(y, m, 1).getTime()];
+    }
+    const now = new Date();
+    if (period === "today") { const s = new Date(now); s.setHours(0, 0, 0, 0); return [s.getTime(), Infinity]; }
+    if (period === "7d") return [Date.now() - 7 * 864e5, Infinity];
+    if (period === "month") return [new Date(now.getFullYear(), now.getMonth(), 1).getTime(), Infinity];
+    if (period === "lastmonth") return [new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime(), new Date(now.getFullYear(), now.getMonth(), 1).getTime()];
+    return null; // Tudo
+  };
+  const rowTime = (r) => {
+    if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t)) return t; }
+    if (typeof r.updatedAt === "number") return r.updatedAt;
+    if (r.updatedAt) { const t = new Date(r.updatedAt).getTime(); if (!isNaN(t)) return t; }
+    return null;
+  };
+  const rg = range();
+  const filtered = rg ? rows.filter((r) => { const t = rowTime(r); return t != null && t >= rg[0] && t < rg[1]; }) : rows;
+
+  const receita = filtered.filter((r) => r.status === "Aceita").reduce((a, r) => a + num(r.value), 0);
+  const emAberto = filtered.filter((r) => r.status === "Enviada" || r.status === "Visualizada").reduce((a, r) => a + num(r.value), 0);
+  const enviadas = filtered.filter((r) => r.status && r.status !== "Rascunho").length;
+  const aceitas = filtered.filter((r) => r.status === "Aceita").length;
   const conv = enviadas ? Math.round((aceitas / enviadas) * 100) : 0;
 
   const map = {};
-  rows.forEach((r) => {
+  filtered.forEach((r) => {
     const key = (r.client || "Sem cliente").trim() || "Sem cliente";
     if (!map[key]) map[key] = { client: key, company: "", count: 0, value: 0, accepted: 0, opened: false };
     const g = map[key];
@@ -830,13 +1141,39 @@ function ClientsPanel({ rows }) {
 
   return (
     <div className="db-pad">
-      <div style={{ marginBottom: 22 }}>
+      <div style={{ marginBottom: 18 }}>
         <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Clientes</h1>
         <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Acompanhe suas propostas por cliente e a receita do período.</p>
       </div>
 
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+        <div style={{ display: "inline-flex", background: color.surface, border: `1px solid ${color.gray200}`, borderRadius: 10, padding: 3, gap: 2 }}>
+          {PERIODS.map(([key, label]) => {
+            const on = !monthKey && period === key;
+            return (
+              <button key={key} onClick={() => { setSelM(""); setPeriod(key); }} className="db-btn"
+                style={{ fontSize: 13, fontWeight: 600, padding: "6px 12px", borderRadius: 8, background: on ? "#fff" : "transparent", color: on ? color.ink : color.gray500, boxShadow: on ? "0 1px 2px rgba(0,0,0,0.08)" : "none" }}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 13, color: color.gray500, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Calendar size={15} strokeWidth={2} color={monthKey ? color.accent : color.gray400} />Mês específico:
+          </span>
+          <select value={selM} onChange={(e) => setSelM(e.target.value)} aria-label="Mês" style={{ ...inp(), width: "auto", padding: "8px 12px", cursor: "pointer" }}>
+            <option value="">Todos</option>
+            {MONTHS_FULL.map((m, i) => <option key={i} value={String(i + 1).padStart(2, "0")}>{m}</option>)}
+          </select>
+          <select value={selY} onChange={(e) => setSelY(e.target.value)} aria-label="Ano" disabled={!selM} style={{ ...inp(), width: "auto", padding: "8px 12px", cursor: selM ? "pointer" : "not-allowed", opacity: selM ? 1 : 0.5 }}>
+            {YEARS.map((y) => <option key={y} value={String(y)}>{y}</option>)}
+          </select>
+        </div>
+      </div>
+
       <div className="db-kpi-grid">
-        <Kpi label="Receita do mês" value={brl(receita)} tint="#2E7D51" />
+        <Kpi label="Receita" value={brl(receita)} tint="#2E7D51" />
         <Kpi label="Em aberto" value={brl(emAberto)} />
         <Kpi label="Propostas enviadas" value={enviadas} />
         <Kpi label="Conversão" value={`${conv}%`} />
@@ -874,15 +1211,48 @@ function ClientsPanel({ rows }) {
   );
 }
 
-function SettingsPanel({ user, go }) {
+function SettingsPanel({ user, setUser, go, pushToast }) {
+  const [name, setName] = useState(user?.name || "");
+  const [savingName, setSavingName] = useState(false);
+  const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
+  const [savingPw, setSavingPw] = useState(false);
+  const [pwErr, setPwErr] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [bio, setBio] = useState(() => { try { return localStorage.getItem("manda_default_bio") || ""; } catch { return ""; } });
-  const [accent, setAccent] = useState(() => { try { return localStorage.getItem("manda_default_accent") || "#D97757"; } catch { return "#D97757"; } });
-  const [saved, setSaved] = useState(false);
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => { setName(user?.name || ""); }, [user]);
+  useEffect(() => { api.stats().then(setStats).catch(() => {}); }, []);
+
+  const saveName = async () => {
+    const v = name.trim();
+    if (!v || v === (user?.name || "") || savingName) return;
+    setSavingName(true);
+    try {
+      const { user: u } = await api.updateProfile({ name: v });
+      if (setUser) setUser(u);
+      if (pushToast) pushToast("Nome de exibição atualizado.", "success");
+    } catch (e) { if (pushToast) pushToast(e.message || "Não foi possível salvar o nome.", "info"); }
+    finally { setSavingName(false); }
+  };
+
+  const savePassword = async () => {
+    setPwErr("");
+    if (pw.next.length < 8) return setPwErr("A nova senha precisa de ao menos 8 caracteres.");
+    if (pw.next !== pw.confirm) return setPwErr("A confirmação não bate com a nova senha.");
+    if (pw.next === pw.current) return setPwErr("A nova senha precisa ser diferente da atual.");
+    setSavingPw(true);
+    try {
+      await api.changePassword({ current: pw.current, next: pw.next });
+      setPw({ current: "", next: "", confirm: "" });
+      if (pushToast) pushToast("Senha alterada com sucesso.", "success");
+    } catch (e) { setPwErr(e.message || "Não foi possível trocar a senha."); }
+    finally { setSavingPw(false); }
+  };
 
   const saveDefaults = () => {
-    try { localStorage.setItem("manda_default_bio", bio); localStorage.setItem("manda_default_accent", accent); } catch { /* ignore */ }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1600);
+    try { localStorage.setItem("manda_default_bio", bio); } catch { /* ignore */ }
+    if (pushToast) pushToast("Padrão da proposta salvo.", "success");
   };
   const manageBilling = async () => {
     try { const { url } = await api.billingPortal(); window.location.href = url; }
@@ -892,30 +1262,81 @@ function SettingsPanel({ user, go }) {
 
   const plan = user?.plan || "free";
   const planLabel = { free: "Grátis (sem assinatura)", basic: "Básico", pro: "Pro", business: "Business" }[plan] || plan;
+  const k = stats?.kpis;
 
   const card = { background: "#fff", border: `1px solid ${color.line2}`, borderRadius: 14, padding: "22px 24px" };
   const hTitle = { fontFamily: font.heading, fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em", marginBottom: 4 };
   const subTxt = { fontSize: "13.5px", color: color.gray500, margin: "0 0 18px" };
   const fieldLabel = { fontSize: 13, fontWeight: 600, color: color.gray700, display: "block", marginBottom: 6 };
+  const pwPatch = (key) => (e) => setPw((p) => ({ ...p, [key]: e.target.value }));
+  const nameDirty = name.trim() && name.trim() !== (user?.name || "");
+  const Stat = ({ label, value, tint }) => (
+    <div style={{ background: color.surface3, borderRadius: 12, padding: "14px 16px" }}>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 24, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: tint || color.ink }}>{value}</div>
+    </div>
+  );
 
   return (
     <div className="db-pad" style={{ maxWidth: 720 }}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Configurações</h1>
-        <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Sua conta, assinatura e os padrões das suas propostas.</p>
+        <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Sua conta, segurança e seus números.</p>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={card}>
-          <div style={hTitle}>Sua conta</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 8 }}>
+          <div style={hTitle}>Perfil</div>
+          <p style={subTxt}>Seu nome de exibição e email.</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
             <span style={{ width: 44, height: 44, flex: "none", borderRadius: "50%", background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 700, fontSize: 16 }}>
               {user ? initials(user.name) : <User size={20} strokeWidth={2} />}
             </span>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 600 }}>{user?.name || "Sua conta"}</div>
-              <div style={{ fontSize: "13.5px", color: color.gray500 }}>{user?.email || "Não conectado"}</div>
+              <div style={{ fontSize: 13, color: color.gray400 }}>Email</div>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>{user?.email || "Não conectado"}</div>
             </div>
+          </div>
+          <label style={fieldLabel}>Nome de exibição</label>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} placeholder="Seu nome" style={{ ...inp(), flex: 1, minWidth: 200 }} />
+            <button onClick={saveName} disabled={!nameDirty || savingName} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "0 18px" }}>{savingName ? "Salvando…" : "Salvar"}</button>
+          </div>
+        </div>
+
+        <div style={card}>
+          <div style={hTitle}>Segurança</div>
+          <p style={subTxt}>Troque sua senha. Pedimos a atual para confirmar que é você.</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 380 }}>
+            <div>
+              <label style={fieldLabel}>Senha atual</label>
+              <input type={showPw ? "text" : "password"} value={pw.current} onChange={pwPatch("current")} autoComplete="current-password" placeholder="••••••••" style={inp()} />
+            </div>
+            <div>
+              <label style={fieldLabel}>Nova senha</label>
+              <input type={showPw ? "text" : "password"} value={pw.next} onChange={pwPatch("next")} autoComplete="new-password" placeholder="Ao menos 8 caracteres" style={inp()} />
+            </div>
+            <div>
+              <label style={fieldLabel}>Confirmar nova senha</label>
+              <input type={showPw ? "text" : "password"} value={pw.confirm} onChange={pwPatch("confirm")} autoComplete="new-password" placeholder="Repita a nova senha" style={inp()} />
+            </div>
+            <button type="button" onClick={() => setShowPw((v) => !v)} className="db-btn" style={{ alignSelf: "flex-start", background: "none", color: color.gray500, fontSize: 12.5, padding: "2px 4px", gap: 6 }}>
+              <Eye size={14} strokeWidth={2} />{showPw ? "Ocultar senhas" : "Mostrar senhas"}
+            </button>
+            {pwErr && <div role="alert" style={{ fontSize: 13, color: "#B4443C", background: "#FDECEA", border: "1px solid #F5D2CD", padding: "9px 11px", borderRadius: 9 }}>{pwErr}</div>}
+            <button onClick={savePassword} disabled={savingPw || !pw.current || !pw.next} className="db-btn db-btn-dark" style={{ alignSelf: "flex-start", fontSize: 14, padding: "10px 18px" }}><Lock size={14} strokeWidth={2.2} />{savingPw ? "Trocando…" : "Trocar senha"}</button>
+          </div>
+        </div>
+
+        <div style={card}>
+          <div style={hTitle}>Seus números</div>
+          <p style={subTxt}>Um resumo das suas propostas.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+            <Stat label="Propostas enviadas" value={k ? k.enviadas : "—"} />
+            <Stat label="Aceitas" value={k ? k.aceitas : "—"} tint="#2E7D51" />
+            <Stat label="Conversão" value={k ? `${k.conversao}%` : "—"} />
+            <Stat label="Receita do mês" value={k ? brl(k.receita) : "—"} tint="#2E7D51" />
+            <Stat label="Em aberto" value={k ? brl(k.emAberto) : "—"} />
           </div>
         </div>
 
@@ -932,18 +1353,11 @@ function SettingsPanel({ user, go }) {
 
         <div style={card}>
           <div style={hTitle}>Padrões da proposta</div>
-          <p style={subTxt}>Preenchidos automaticamente em cada proposta nova.</p>
+          <p style={subTxt}>Preenchido automaticamente em cada proposta nova.</p>
           <label style={fieldLabel}>Sobre mim (padrão)</label>
-          <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={3} placeholder="Uma breve apresentação sua, usada em toda proposta." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
-          <div style={{ ...fieldLabel, marginTop: 16 }}>Cor padrão</div>
-          <div style={{ display: "flex", gap: 9 }}>
-            {SWATCHES.map((c) => (
-              <button key={c} className="db-swatch" onClick={() => setAccent(c)} aria-label={`Cor ${c}`} style={{ background: c, boxShadow: accent === c ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : `0 0 0 1px ${color.line}` }} />
-            ))}
-          </div>
-          <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 12 }}>
-            <button onClick={saveDefaults} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px" }}>Salvar padrões</button>
-            {saved && <span style={{ fontSize: 13, color: "#2E7D51", fontWeight: 600 }}>Salvo!</span>}
+          <textarea value={bio} onChange={(e) => setBio(e.target.value)} maxLength={LIMITS.bio} rows={3} placeholder="Uma breve apresentação sua, usada em toda proposta." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
+          <div style={{ marginTop: 16 }}>
+            <button onClick={saveDefaults} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px" }}>Salvar padrão</button>
           </div>
         </div>
 
