@@ -22,7 +22,7 @@ const BLANK_DOC = {
   client: "", company: "", clientEmail: "", title: "",
   scope: "", items: [{ desc: "", value: "" }],
   start: "", end: "", payment: "", revisions: "", validity: "", bio: "",
-  accent: "#D97757", accent2: "#6C48B0", gradient: false, logo: null, template: "minimal",
+  accent: "#0A0A0A", accent2: "#6C48B0", gradient: false, logo: null, template: "minimal",
 };
 
 const MAX_ITEMS = 20;
@@ -36,6 +36,13 @@ const LIMITS = {
   client: 80, company: 80, title: 120, scope: 5000, itemDesc: 120, itemValue: 12,
   start: 60, end: 60, payment: 300, revisions: 120, validity: 60, bio: 600,
 };
+
+// Chaves do localStorage escopadas por usuário (evita vazar entre contas no mesmo navegador).
+const ONB_KEY = "manda_onboarding";
+const scoped = (base, email) => `${base}:${email || "anon"}`;
+function loadOnb(email) { try { return JSON.parse(localStorage.getItem(scoped(ONB_KEY, email)) || "{}") || {}; } catch { return {}; } }
+function saveOnb(email, o) { try { localStorage.setItem(scoped(ONB_KEY, email), JSON.stringify(o)); } catch { /* ignore */ } }
+const bioKeyFor = (email) => scoped("manda_default_bio", email);
 
 // Status: o backend fala inglês, a UI fala português.
 const EN2PT = { draft: "Rascunho", sent: "Enviada", viewed: "Visualizada", accepted: "Aceita", declined: "Recusada" };
@@ -96,14 +103,16 @@ export default function Dashboard({ go }) {
   const [copied, setCopied] = useState(false);
   const [toDelete, setToDelete] = useState(null);
   const [showPreview, setShowPreview] = useState(true); // toggle do painel de pré-visualização
+  const [onb, setOnb] = useState({});                   // progresso do tutorial (carregado por usuário)
+  const [showPlans, setShowPlans] = useState(false);    // modal de planos (assinar)
   const [intro, setIntro] = useState(() => { try { return sessionStorage.getItem("manda_entering") === "1"; } catch { return false; } });
   const [billingMsg, setBillingMsg] = useState(null);
   const [draftPublicId, setDraftPublicId] = useState(null); // link público da proposta em edição
   const [sending, setSending] = useState(false);            // concluindo (salvando no servidor)
   const [flowError, setFlowError] = useState("");           // erro ao concluir (ex: limite do plano)
   const [toasts, setToasts] = useState([]);                 // pop-ups que somem após 4s
-  const [notifs, setNotifs] = useState(() => loadNotifs()); // notificações (só no localStorage)
-  const [notifSeen, setNotifSeen] = useState(() => getSeen());
+  const [notifs, setNotifs] = useState([]);                 // notificações (localStorage, por usuário)
+  const [notifSeen, setNotifSeen] = useState(0);
   const firstNotifPoll = useRef(true);                      // evita "chuva" de toasts na 1ª carga
 
   // Pop-up efêmero (some sozinho em 4 segundos).
@@ -115,7 +124,7 @@ export default function Dashboard({ go }) {
   const markNotifsSeen = () => {
     const now = Date.now();
     setNotifSeen(now);
-    setSeen(now);
+    setSeen(user?.email, now);
   };
 
   // Recarrega a lista: propostas do servidor + rascunhos locais (localStorage).
@@ -135,25 +144,53 @@ export default function Dashboard({ go }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Polling só para DESCOBRIR interações do cliente no backend. O que chega é
-  // mesclado no store local (localStorage) — a fonte de verdade das notificações.
+  // Quando o usuário é conhecido: carrega o estado DELE (onboarding + notificações,
+  // escopados por email) e inicia o polling. Trocar de conta troca o escopo — nada vaza.
   useEffect(() => {
+    if (!user) return;
+    const scope = user.email;
+    setOnb(loadOnb(scope));
+    setNotifs(loadNotifs(scope));
+    setNotifSeen(getSeen(scope));
+    firstNotifPoll.current = true;
+
     let alive = true;
     const load = async () => {
       try {
         const { notifications } = await api.notifications();
         if (!alive) return;
-        const { list, added } = mergeNotifs(notifications);
+        const { list, added } = mergeNotifs(scope, notifications);
         setNotifs(list);
         if (!firstNotifPoll.current) added.forEach((n) => pushToast(notifLabel(n)));
         firstNotifPoll.current = false;
-      } catch { /* backend fora / sem login: segue com o que já está no localStorage */ }
+      } catch { /* backend fora: segue com o que está no localStorage */ }
     };
     load();
     const iv = setInterval(load, 30000);
     return () => { alive = false; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user]);
+
+  // Onboarding: só avança para quem tem plano ativo (grátis não conclui o tutorial).
+  const onbActive = !!user && user.plan !== "free";
+  const onbBioSet = (() => { try { return !!(localStorage.getItem(bioKeyFor(user?.email)) || "").trim(); } catch { return false; } })();
+  const onbSteps = {
+    create: onbActive && (!!onb.create || rows.length > 0),
+    send: onbActive && (!!onb.send || rows.some((r) => r.status && r.status !== "Rascunho")),
+    profile: onbActive && (!!onb.profile || onbBioSet),
+  };
+  const onbDone = onbSteps.create && onbSteps.send && onbSteps.profile;
+
+  useEffect(() => {
+    if (!onbActive) return; // não persiste progresso para grátis (nem sem usuário)
+    if (onb.create === onbSteps.create && onb.send === onbSteps.send && onb.profile === onbSteps.profile) return;
+    const merged = { ...onb, create: onbSteps.create, send: onbSteps.send, profile: onbSteps.profile };
+    saveOnb(user.email, merged);
+    setOnb(merged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onbSteps.create, onbSteps.send, onbSteps.profile, onbActive]);
+
+  const dismissOnb = () => { const next = { ...onb, hidden: true }; saveOnb(user?.email, next); setOnb(next); };
 
   // Retorno do checkout do Stripe (?assinatura=ok|cancelada).
   useEffect(() => {
@@ -237,9 +274,9 @@ export default function Dashboard({ go }) {
   });
 
   const newProposal = () => {
-    let bio = "", accent = "#D97757";
-    try { bio = localStorage.getItem("manda_default_bio") || ""; accent = localStorage.getItem("manda_default_accent") || "#D97757"; } catch { /* ignore */ }
-    setDoc({ ...BLANK_DOC, bio, accent });
+    let bio = "";
+    try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
+    setDoc({ ...BLANK_DOC, bio });
     setDraftId(newId());
     setDraftPublicId(null);
     setFlowError("");
@@ -254,7 +291,7 @@ export default function Dashboard({ go }) {
       items: Array.isArray(r.items) && r.items.length ? r.items : BLANK_DOC.items,
       start: r.start || "", end: r.end || "", payment: r.payment || "",
       revisions: r.revisions || "", validity: r.validity || "", bio: r.bio || "",
-      accent: r.accent || "#D97757", accent2: r.accent2 || "#6C48B0", gradient: !!r.gradient, logo: null, template: r.template || "minimal",
+      accent: r.accent || "#0A0A0A", accent2: r.accent2 || "#6C48B0", gradient: !!r.gradient, logo: null, template: r.template || "minimal",
     });
     setDraftId(r.id || newId());
     setDraftPublicId(r.publicId || null);
@@ -283,7 +320,7 @@ export default function Dashboard({ go }) {
 
   const startWithDesign = (id) => {
     let bio = "";
-    try { bio = localStorage.getItem("manda_default_bio") || ""; } catch { /* ignore */ }
+    try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
     setDoc({ ...BLANK_DOC, template: id, bio });
     setDraftId(newId());
     setDraftPublicId(null);
@@ -306,6 +343,10 @@ export default function Dashboard({ go }) {
   const finish = async () => {
     if (!canFinish || sending) return;
     setFlowError("");
+    if (user?.plan === "free") {
+      setShowPlans(true); // abre o modal de planos em vez de bloquear com texto
+      return;
+    }
     setSending(true);
     try {
       const body = toApiBody();
@@ -472,16 +513,35 @@ export default function Dashboard({ go }) {
         .db-act-un{ color:${color.gray500}; } .db-act-un:hover{ background:${color.surface}; color:${color.ink}; }
         .db-del:focus-visible{ opacity:1; outline:2px solid ${color.accent}; outline-offset:1px; }
 
-        .db-footbar{ flex:none; background:#fff; border-top:1px solid ${color.line2}; box-shadow:0 -10px 28px -20px rgba(20,20,30,0.25); display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 24px 16px; flex-wrap:wrap; }
-        .db-foot-info{ display:flex; align-items:center; gap:16px; }
-        .db-foot-label{ font-size:11px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:${color.gray400}; margin-bottom:1px; }
-        .db-foot-total{ font-family:${font.heading}; font-weight:900; font-size:22px; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; }
-        .db-foot-div{ width:1px; height:30px; background:${color.line2}; }
-        .db-foot-items{ font-size:13px; color:${color.gray500}; }
-        .db-foot-actions{ display:flex; align-items:center; gap:14px; }
-        .db-ready{ display:flex; align-items:center; gap:7px; font-size:12.5px; color:${color.gray400}; }
-        .db-ready.ok{ color:#2E7D51; font-weight:600; }
-        .db-chip{ font-size:11px; font-weight:600; color:${color.gray600}; background:${color.surface}; border:1px solid ${color.gray200}; padding:2px 8px; border-radius:999px; }
+        .db-footbar{ flex:none; background:#fff; border-top:1px solid ${color.line2}; display:flex; align-items:center; justify-content:space-between; gap:14px 20px; padding:12px 24px 14px; flex-wrap:wrap; }
+        .db-foot-summary{ display:flex; flex-direction:column; gap:1px; }
+        .db-foot-cap{ font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:${color.gray400}; }
+        .db-foot-line{ display:flex; align-items:baseline; gap:7px; }
+        .db-foot-money{ font-family:${font.heading}; font-weight:700; font-size:19px; letter-spacing:-0.01em; font-variant-numeric:tabular-nums; color:${color.ink}; }
+        .db-foot-meta{ font-size:12.5px; color:${color.gray400}; }
+        .db-foot-actions{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+        .db-foot-checks{ display:flex; align-items:center; gap:10px; }
+        .db-req{ display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; color:${color.gray400}; transition:color .18s ease; }
+        .db-req.on{ color:#2E7D51; }
+        .db-req-dot{ width:12px; height:12px; border-radius:50%; border:1.5px solid ${color.gray300}; display:inline-block; }
+        .db-finish{ font-size:15px; padding:12px 22px; border-radius:11px; box-shadow:0 8px 18px -8px rgba(217,119,87,0.55); }
+        .db-finish:disabled{ box-shadow:none; }
+        .db-foot-err{ flex-basis:100%; font-size:13px; color:#B4443C; font-weight:600; margin-top:2px; }
+        .db-onb{ background:#fff; border:1px solid ${color.line2}; border-radius:16px; padding:20px 22px; margin-bottom:22px; box-shadow:0 12px 34px -22px rgba(20,20,30,0.25); animation:dbUp .4s ease both; }
+        .db-onb-done{ background:linear-gradient(180deg, ${color.accentTint} 0%, #fff 70%); }
+        .db-onb-trophy{ width:44px; height:44px; flex:none; border-radius:50%; background:#EAF5EE; color:#2E7D51; display:flex; align-items:center; justify-content:center; }
+        .db-onb-bar{ height:7px; border-radius:999px; background:${color.surface}; overflow:hidden; }
+        .db-onb-bar span{ display:block; height:100%; background:${color.accent}; border-radius:999px; transition:width .45s cubic-bezier(.2,.8,.2,1); }
+        .db-onb-step{ display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:11px; border:1px solid ${color.line2}; transition:background .15s ease, border-color .15s ease; }
+        .db-onb-step.done{ border-color:transparent; background:${color.surface2}; }
+        .db-onb-check{ width:22px; height:22px; flex:none; border-radius:50%; border:2px solid ${color.gray300}; display:flex; align-items:center; justify-content:center; color:#fff; transition:background .2s ease, border-color .2s ease; }
+        .db-onb-check.on{ border-color:#2E7D51; background:#2E7D51; }
+        .db-planbar{ display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; background:${color.accentTint}; border:1px solid ${color.accentLine}; border-radius:14px; padding:14px 18px; margin-bottom:18px; }
+        .db-planbar-icon{ width:36px; height:36px; flex:none; border-radius:10px; background:#fff; color:${color.accentInk}; display:flex; align-items:center; justify-content:center; }
+        .db-plans-card{ position:relative; width:100%; max-width:820px; background:#fff; border:1px solid ${color.line}; border-radius:18px; box-shadow:0 30px 70px -22px rgba(20,20,30,0.35); padding:28px 28px 30px; max-height:92vh; overflow:auto; animation:dbPop .38s cubic-bezier(.2,.8,.2,1) both; }
+        .db-plans-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+        .db-plan{ border-radius:14px; padding:22px 18px 20px; background:#fff; }
+        @media (max-width:720px){ .db-plans-grid{ grid-template-columns:1fr; } }
         .db-dsn-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:22px; }
         .db-dsn-card{ border:1px solid ${color.line2}; border-radius:14px; overflow:hidden; background:#fff; transition:box-shadow .16s ease, transform .16s ease; }
         .db-dsn-card:hover{ box-shadow:0 16px 38px -20px rgba(20,20,30,0.28); transform:translateY(-3px); }
@@ -501,7 +561,7 @@ export default function Dashboard({ go }) {
         @media (max-width:680px){ .db-dsn-grid{ grid-template-columns:1fr; } }
 
         .db-flow{ position:fixed; inset:0; z-index:120; background:rgba(249,250,251,0.85); backdrop-filter:blur(5px); display:flex; align-items:center; justify-content:center; padding:24px; animation:dbFade .2s ease both; }
-        .db-flow-card{ position:relative; width:100%; max-width:440px; background:#fff; border:1px solid ${color.line}; border-radius:18px; box-shadow:0 30px 70px -22px rgba(20,20,30,0.35); padding:32px 30px; animation:dbPop .38s cubic-bezier(.2,.8,.2,1) both; }
+        .db-flow-card{ position:relative; width:100%; max-width:440px; background:#fff; border:1px solid ${color.line}; border-radius:18px; box-shadow:0 30px 70px -22px rgba(20,20,30,0.35); padding:32px 30px; animation:dbPop .38s cubic-bezier(.2,.8,.2,1) both; overflow-wrap:anywhere; word-break:break-word; }
         @keyframes dbFade{ from{ opacity:0; } to{ opacity:1; } }
         @keyframes dbPop{ 0%{ opacity:0; transform:translateY(12px) scale(.96); } 100%{ opacity:1; transform:none; } }
         .db-step{ display:flex; align-items:center; gap:12px; padding:10px 0; animation:dbStepIn .4s cubic-bezier(.2,.8,.2,1) both; }
@@ -610,6 +670,23 @@ export default function Dashboard({ go }) {
                 </button>
               </div>
             </div>
+
+            {user?.plan === "free" && (
+              <div className="db-planbar">
+                <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                  <span className="db-planbar-icon"><Lock size={16} strokeWidth={2.2} /></span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>Você está no plano grátis</div>
+                    <div style={{ fontSize: "12.5px", color: color.gray600 }}>Assine um plano para concluir e enviar propostas aos seus clientes.</div>
+                  </div>
+                </div>
+                <button onClick={() => setShowPlans(true)} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "9px 16px", flex: "none" }}>Ver planos</button>
+              </div>
+            )}
+
+            {!onb.hidden && (
+              <OnboardingCard steps={onbSteps} done={onbDone} onNew={newProposal} goSettings={() => navTo("settings")} onSkip={dismissOnb} onFinish={dismissOnb} />
+            )}
 
             <div className="db-tabs" style={{ marginBottom: 18 }}>
               {Object.keys(FILTERS).map((f) => {
@@ -830,26 +907,21 @@ export default function Dashboard({ go }) {
 
             {/* barra inferior */}
             <div className="db-footbar">
-              <div className="db-foot-info">
-                <div>
-                  <div className="db-foot-label">Total da proposta</div>
-                  <div className="db-foot-total">{brl(total)}</div>
-                </div>
-                <span className="db-foot-div" />
-                <span className="db-foot-items">{itemCount} {itemCount === 1 ? "item" : "itens"}</span>
+              <div className="db-foot-summary">
+                <span className="db-foot-cap">Você vai cobrar</span>
+                <span className="db-foot-line">
+                  <span className="db-foot-money">{brl(total)}</span>
+                  <span className="db-foot-meta">· {itemCount} {itemCount === 1 ? "item" : "itens"}</span>
+                </span>
               </div>
+
               <div className="db-foot-actions">
-                {flowError ? (
-                  <span className="db-ready" style={{ color: "#B4443C", fontWeight: 600, maxWidth: 320 }}>{flowError}</span>
-                ) : canFinish ? (
-                  <span className="db-ready ok"><Check size={15} strokeWidth={2.6} />Tudo pronto</span>
-                ) : (
-                  <span className="db-ready">Falta {missing.map((m) => <span key={m} className="db-chip">{m}</span>)}</span>
-                )}
-                <button onClick={finish} disabled={!canFinish || sending} className="db-btn db-btn-accent" style={{ fontSize: 15, padding: "12px 24px", borderRadius: 10 }}>
+                <button onClick={finish} disabled={!canFinish || sending} className="db-btn db-btn-accent db-finish">
                   <Check size={17} strokeWidth={2.6} />{sending ? "Concluindo…" : "Concluir proposta"}
                 </button>
               </div>
+
+              {flowError && <div className="db-foot-err">{flowError}</div>}
             </div>
           </div>
         )}
@@ -947,6 +1019,8 @@ export default function Dashboard({ go }) {
         </div>
       )}
 
+      {showPlans && <PlansModal onClose={() => setShowPlans(false)} />}
+
       {/* POP-UPS (somem após 4s) */}
       {toasts.length > 0 && (
         <div className="db-toasts" aria-live="polite">
@@ -1022,6 +1096,136 @@ function Field({ label, required, children }) {
       </span>
       {children}
     </label>
+  );
+}
+
+function PlansModal({ onClose }) {
+  const [annual, setAnnual] = useState(false);
+  const [busyKey, setBusyKey] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const subscribe = async (planKey) => {
+    setErr("");
+    setBusyKey(planKey);
+    try {
+      const { url } = await api.checkout(planKey, annual ? "year" : "month");
+      if (!url) throw new Error("Não foi possível iniciar o checkout. Confira a configuração do Stripe.");
+      window.location.href = url; // gateway do Stripe
+    } catch (e) { setErr(e.message || "Falha ao iniciar o checkout."); setBusyKey(""); }
+  };
+
+  const plans = [
+    { name: "Básico", key: "basic", m: "R$12", y: "R$11", yNote: "R$132/ano", cta: "Assinar Básico", variant: "ghost", popular: false,
+      features: ["2 propostas por mês", "Templates básicos", "Link compartilhável"] },
+    { name: "Pro", key: "pro", m: "R$29", y: "R$26", yNote: "R$312/ano", cta: "Assinar Pro", variant: "accent", popular: true,
+      features: ["Propostas ilimitadas", "Todos os templates", "Notificação de visualização", "Sem marca d’água"] },
+    { name: "Business", key: "business", m: "R$79", y: "R$71", yNote: "R$852/ano", cta: "Assinar Business", variant: "dark", popular: false,
+      features: ["Tudo do Pro", "Domínio personalizado", "Follow-up automático", "Suporte prioritário"] },
+  ];
+
+  return (
+    <div className="db-flow" onClick={onClose}>
+      <div className="db-plans-card" onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} aria-label="Fechar" className="db-btn" style={{ position: "absolute", top: 14, right: 14, background: "none", color: color.gray400, padding: 4 }}><X size={20} strokeWidth={2} /></button>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 22, letterSpacing: "-0.01em" }}>Escolha seu plano</div>
+          <div style={{ fontSize: "13.5px", color: color.gray500, marginTop: 4 }}>Assine para concluir e enviar suas propostas aos clientes.</div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 22 }}>
+          <div style={{ display: "inline-flex", gap: 4, background: color.surface, borderRadius: 10, padding: 4 }}>
+            <button onClick={() => setAnnual(false)} className="db-btn" style={{ fontSize: "13.5px", fontWeight: 600, padding: "7px 14px", borderRadius: 7, background: !annual ? "#fff" : "transparent", color: !annual ? color.ink : color.gray500, boxShadow: !annual ? "0 1px 2px rgba(0,0,0,0.08)" : "none" }}>Mensal</button>
+            <button onClick={() => setAnnual(true)} className="db-btn" style={{ fontSize: "13.5px", fontWeight: 600, padding: "7px 14px", borderRadius: 7, background: annual ? "#fff" : "transparent", color: annual ? color.ink : color.gray500, boxShadow: annual ? "0 1px 2px rgba(0,0,0,0.08)" : "none" }}>
+              Anual <span style={{ fontSize: 11, fontWeight: 700, color: color.accentInk, background: color.accentTint, padding: "1px 6px", borderRadius: 999, marginLeft: 4 }}>-10%</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="db-plans-grid">
+          {plans.map((p) => (
+            <div key={p.key} className="db-plan" style={{ border: p.popular ? `1.5px solid ${color.accent}` : `1px solid ${color.line2}`, position: "relative" }}>
+              {p.popular && <span style={{ position: "absolute", top: -9, left: "50%", transform: "translateX(-50%)", fontSize: 11, fontWeight: 700, color: "#fff", background: color.accent, padding: "3px 10px", borderRadius: 999, whiteSpace: "nowrap" }}>Mais popular</span>}
+              <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 17 }}>{p.name}</div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 5, margin: "8px 0 2px" }}>
+                <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 30, letterSpacing: "-0.02em" }}>{annual ? p.y : p.m}</span>
+                <span style={{ fontSize: 13, color: color.gray500, marginBottom: 4 }}>/mês</span>
+              </div>
+              <div style={{ fontSize: 12, color: color.gray400, minHeight: 16, marginBottom: 14 }}>{annual ? `${p.yNote} · cobrado anualmente` : "cobrado mensalmente"}</div>
+              <button onClick={() => subscribe(p.key)} disabled={!!busyKey} className={`db-btn db-btn-${p.variant}`} style={{ width: "100%", fontSize: 14, padding: "11px" }}>{busyKey === p.key ? "Abrindo…" : p.cta}</button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+                {p.features.map((f, j) => (
+                  <div key={j} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, lineHeight: 1.4, color: color.gray700 }}>
+                    <span style={{ flex: "none", marginTop: 1, display: "flex", color: "#2E7D51" }}><Check size={14} strokeWidth={2.6} /></span>{f}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {err && <div style={{ marginTop: 14, fontSize: 13, color: "#B4443C", textAlign: "center" }}>{err}</div>}
+        <div style={{ marginTop: 14, textAlign: "center", fontSize: 12, color: color.gray400 }}>Pagamento seguro via Stripe · cancele quando quiser</div>
+      </div>
+    </div>
+  );
+}
+
+function OnboardingCard({ steps, done, onNew, goSettings, onSkip, onFinish }) {
+  const items = [
+    { key: "create", title: "Crie sua primeira proposta", desc: "Monte um orçamento com seus itens e valores.", action: onNew, cta: "Criar proposta" },
+    { key: "send", title: "Conclua e gere o link", desc: "Finalize uma proposta para receber o link de compartilhar.", action: onNew, cta: "Concluir uma" },
+    { key: "profile", title: "Configure seu “Sobre mim”", desc: "Uma apresentação que entra em toda proposta nova.", action: goSettings, cta: "Configurações" },
+  ];
+  const doneCount = items.filter((it) => steps[it.key]).length;
+  const pct = Math.round((doneCount / items.length) * 100);
+
+  if (done) {
+    return (
+      <div className="db-onb db-onb-done">
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <span className="db-onb-trophy"><Check size={22} strokeWidth={3} /></span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em" }}>Tudo pronto! Você já domina o essencial.</div>
+            <div style={{ fontSize: "13.5px", color: color.gray500 }}>Agora é criar propostas e fechar negócios.</div>
+          </div>
+          <button onClick={onFinish} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px", flex: "none" }}>Começar a usar</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="db-onb">
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+        <div>
+          <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em" }}>Primeiros passos no Manda</div>
+          <div style={{ fontSize: "13.5px", color: color.gray500 }}>{doneCount} de {items.length} concluídos</div>
+        </div>
+        <button onClick={onSkip} className="db-btn" style={{ background: "none", color: color.gray400, fontSize: "12.5px", padding: "4px 6px", flex: "none" }}>Pular tutorial</button>
+      </div>
+      <div className="db-onb-bar"><span style={{ width: `${pct}%` }} /></div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+        {items.map((it) => {
+          const ok = steps[it.key];
+          return (
+            <div key={it.key} className={ok ? "db-onb-step done" : "db-onb-step"}>
+              <span className={ok ? "db-onb-check on" : "db-onb-check"}>{ok && <Check size={13} strokeWidth={3.2} />}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: ok ? color.gray400 : color.ink, textDecoration: ok ? "line-through" : "none" }}>{it.title}</div>
+                {!ok && <div style={{ fontSize: "12.5px", color: color.gray500 }}>{it.desc}</div>}
+              </div>
+              {!ok && <button onClick={it.action} className="db-btn db-btn-ghost" style={{ fontSize: 13, padding: "7px 12px", flex: "none" }}>{it.cta}</button>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -1218,10 +1422,13 @@ function SettingsPanel({ user, setUser, go, pushToast }) {
   const [savingPw, setSavingPw] = useState(false);
   const [pwErr, setPwErr] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [bio, setBio] = useState(() => { try { return localStorage.getItem("manda_default_bio") || ""; } catch { return ""; } });
+  const [bio, setBio] = useState(() => { try { return localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { return ""; } });
   const [stats, setStats] = useState(null);
 
-  useEffect(() => { setName(user?.name || ""); }, [user]);
+  useEffect(() => {
+    setName(user?.name || "");
+    try { setBio(localStorage.getItem(bioKeyFor(user?.email)) || ""); } catch { /* ignore */ }
+  }, [user]);
   useEffect(() => { api.stats().then(setStats).catch(() => {}); }, []);
 
   const saveName = async () => {
@@ -1251,7 +1458,7 @@ function SettingsPanel({ user, setUser, go, pushToast }) {
   };
 
   const saveDefaults = () => {
-    try { localStorage.setItem("manda_default_bio", bio); } catch { /* ignore */ }
+    try { localStorage.setItem(bioKeyFor(user?.email), bio); } catch { /* ignore */ }
     if (pushToast) pushToast("Padrão da proposta salvo.", "success");
   };
   const manageBilling = async () => {
