@@ -36,7 +36,7 @@ export default function MarketingLayout() {
           <nav style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Link to="/precos" style={{ fontSize: "14.5px", fontWeight: 500, color: color.gray700, padding: "8px 12px", borderRadius: 8 }}>Preços</Link>
             <Link to="/entrar" style={{ fontSize: "14.5px", fontWeight: 500, color: color.gray700, padding: "8px 12px", borderRadius: 8 }}>Entrar</Link>
-            <Link to="/criar-conta" style={{ fontSize: "14.5px", fontWeight: 600, color: color.white, background: color.ink, padding: "9px 16px", borderRadius: 9 }}>Comece grátis</Link>
+            <Link to="/criar-conta" style={{ fontSize: "14.5px", fontWeight: 600, color: color.white, background: color.ink, padding: "9px 16px", borderRadius: 9 }}>Começar agora</Link>
           </nav>
         </div>
       </header>
@@ -54,7 +54,7 @@ export default function MarketingLayout() {
             </p>
           </div>
           <div style={{ display: "flex", gap: 56, flexWrap: "wrap" }}>
-            <FooterCol title="Produto" links={[["Como funciona", "/"], ["Preços", "/precos"], ["Comece grátis", "/criar-conta"]]} />
+            <FooterCol title="Produto" links={[["Como funciona", "/"], ["Preços", "/precos"], ["Começar agora", "/criar-conta"]]} />
             <FooterCol title="Conta" links={[["Login", "/entrar"], ["Contato", "#"]]} />
             <FooterCol title="Social" links={[["Instagram", "#"], ["LinkedIn", "#"]]} />
           </div>

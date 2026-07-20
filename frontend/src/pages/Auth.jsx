@@ -58,6 +58,7 @@ export default function Auth({ go, tab = "signup" }) {
   const [err, setErr] = useState("");
   const [entering, setEntering] = useState(false);
   const [showPw, setShowPw] = useState(false);
+  const [agree, setAgree] = useState(false);
 
   const isLogin = mode === "login";
   const goTo = go || ((d) => navigate(d === "app" ? "/app" : "/"));
@@ -90,6 +91,7 @@ export default function Auth({ go, tab = "signup" }) {
       if (!isValidCPF(form.cpf)) return setErr("CPF inválido. Confira os números.");
       if (isCommonPassword(form.password)) return setErr("Essa senha é muito comum e fácil de adivinhar. Escolha outra.");
       if (passwordScore(form.password) < 2) return setErr("Senha fraca. Use ao menos 8 caracteres, misturando letras e números.");
+      if (!agree) return setErr("Você precisa aceitar os Termos e a Política de Privacidade.");
     }
     setBusy(true);
     try {
@@ -144,6 +146,12 @@ export default function Auth({ go, tab = "signup" }) {
       <style>{`
         .au-grid{ display:grid; grid-template-columns:1.05fr 1fr; min-height:100vh; }
         .au-aside{ position:relative; overflow:hidden; background:radial-gradient(120% 100% at 20% 10%,#2A1712 0%,#0A0A0A 62%); color:#fff; padding:44px 48px; display:flex; flex-direction:column; justify-content:space-between; }
+        .au-aside > *{ position:relative; z-index:1; }
+        .au-aside::before, .au-aside::after{ content:""; position:absolute; border-radius:50%; filter:blur(64px); z-index:0; pointer-events:none; }
+        .au-aside::before{ width:440px; height:440px; top:-130px; left:-110px; background:radial-gradient(circle, rgba(217,119,87,0.38) 0%, rgba(217,119,87,0) 70%); animation:auBlobA 19s ease-in-out infinite; }
+        .au-aside::after{ width:380px; height:380px; bottom:-120px; right:-90px; background:radial-gradient(circle, rgba(233,150,123,0.24) 0%, rgba(233,150,123,0) 70%); animation:auBlobB 23s ease-in-out infinite; }
+        @keyframes auBlobA{ 0%,100%{ transform:translate(0,0) scale(1); } 50%{ transform:translate(46px,34px) scale(1.14); } }
+        @keyframes auBlobB{ 0%,100%{ transform:translate(0,0) scale(1); } 50%{ transform:translate(-34px,-26px) scale(1.1); } }
         .au-form-wrap{ display:flex; align-items:center; justify-content:center; padding:48px 40px; background:#fff; }
         .au-mobilelogo{ display:none; margin-bottom:28px; }
 
@@ -201,7 +209,7 @@ export default function Auth({ go, tab = "signup" }) {
             Entre e monte sua próxima proposta em minutos. Seu cliente merece ver seu trabalho num formato à altura.
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {["Propostas ilimitadas no plano Pro", "Você sabe quando o cliente abriu", "Aceite com um clique"].map((t, i) => (
+            {["Até 25 propostas por mês no Pro", "Você sabe quando o cliente abriu", "Aceite com um clique"].map((t, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 15, color: color.gray200 }}>
                 <span style={{ color: color.accent, display: "flex" }}><Check size={18} strokeWidth={2.4} /></span>{t}
               </div>
@@ -224,10 +232,10 @@ export default function Auth({ go, tab = "signup" }) {
           </div>
 
           <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 28, letterSpacing: "-0.02em", margin: "0 0 6px" }}>
-            {isLogin ? "Que bom te ver de novo" : "Crie sua conta grátis"}
+            {isLogin ? "Que bom te ver de novo" : "Crie sua conta"}
           </h1>
           <p style={{ fontSize: 15, color: color.gray500, margin: "0 0 28px" }}>
-            {isLogin ? "Entre para acompanhar suas propostas." : "Leva menos de um minuto. Não precisa de cartão."}
+            {isLogin ? "Entre para acompanhar suas propostas." : "Leva menos de um minuto pra começar."}
           </p>
 
           <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -273,10 +281,17 @@ export default function Auth({ go, tab = "signup" }) {
               )}
             </label>
 
+            {!isLogin && (
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 13, color: color.gray600, cursor: "pointer", lineHeight: 1.45 }}>
+                <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16, flex: "none", accentColor: color.accent, cursor: "pointer" }} />
+                <span>Li e aceito os <a href="/termos" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: color.accent, fontWeight: 600 }}>Termos de Uso</a> e a <a href="/privacidade" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: color.accent, fontWeight: 600 }}>Política de Privacidade</a>.</span>
+              </label>
+            )}
+
             {err && <div role="alert" style={{ fontSize: 13.5, color: "#B4443C", background: "#FDECEA", border: "1px solid #F5D2CD", padding: "10px 12px", borderRadius: 9 }}>{err}</div>}
 
             <button type="submit" disabled={busy} className="au-btn au-submit">
-              {busy ? "Só um instante…" : isLogin ? "Entrar" : "Criar conta grátis"}
+              {busy ? "Só um instante…" : isLogin ? "Entrar" : "Criar conta"}
             </button>
           </form>
 

@@ -2,7 +2,7 @@ import { font, color, brl } from "../theme.js";
 
 // Conteúdo de exemplo usado nas miniaturas da galeria.
 export const SAMPLE_DOC = {
-  client: "Ana Furtado", company: "Viana Café", title: "Produção de vídeo institucional",
+  client: "Paula Rodrigues", company: "Viana Café", title: "Produção de vídeo institucional",
   scope: "Vídeo institucional de até 90 segundos para o site e as redes. Inclui roteiro, direção, uma diária de gravação e edição com trilha e legendas.",
   items: [{ desc: "Roteiro + direção", value: "1800" }, { desc: "Diária de gravação", value: "2400" }, { desc: "Edição + finalização", value: "1600" }],
   start: "10 de agosto", end: "5 de setembro",
@@ -243,11 +243,120 @@ function Colorido({ doc, accent, onAccept }) {
   );
 }
 
+/* ---------- 5. CAPA (com foto) ---------- */
+function Capa({ doc, accent, onAccept }) {
+  const items = filledItems(doc);
+  const total = sum(items);
+  const dates = [["Início", doc.start], ["Entrega", doc.end]].filter(([, v]) => has(v));
+  const hero = doc.cover
+    ? { backgroundImage: `url(${doc.cover})`, backgroundSize: "cover", backgroundPosition: "center" }
+    : { background: `linear-gradient(135deg, ${accent} 0%, ${accent}B3 100%)` };
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${color.line}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 12px 40px -16px rgba(20,20,30,0.16)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+      <div style={{ position: "relative", height: 200, ...hero }}>
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.06) 0%, rgba(0,0,0,0.6) 100%)" }} />
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "22px 24px", color: "#fff" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
+            {doc.logo
+              ? <img src={doc.logo} alt="" style={{ width: 30, height: 30, borderRadius: 8, objectFit: "cover", display: "block" }} />
+              : <span style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.22)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 900, fontSize: 14 }}>M</span>}
+            <span style={{ fontSize: "12.5px", fontWeight: 500, opacity: 0.92 }}>Proposta para {doc.client || "cliente"}{has(doc.company) ? ` · ${doc.company}` : ""}</span>
+          </div>
+          <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 25, lineHeight: 1.05, letterSpacing: "-0.02em", textShadow: "0 2px 12px rgba(0,0,0,0.35)" }}>{doc.title || "Título da proposta"}</div>
+        </div>
+      </div>
+      <div style={{ padding: "24px 26px 26px" }}>
+        {has(doc.scope) && (<>
+          <div style={kicker(color.gray400)}>Escopo</div>
+          <p style={{ fontSize: 14, lineHeight: 1.6, color: color.gray700, margin: "0 0 22px" }}>{doc.scope}</p>
+        </>)}
+        {items.length > 0 && (<>
+          <div style={kicker(color.gray400)}>Investimento</div>
+          <div style={{ border: "1px solid #EEE", borderRadius: 11, overflow: "hidden", marginBottom: 12 }}>
+            {items.map((it, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "11px 14px", borderBottom: i < items.length - 1 ? "1px solid #F2F2F2" : "none", fontSize: "13.5px" }}>
+                <span style={{ color: color.gray700 }}>{it.desc || "Item"}</span><span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+            <span style={{ fontSize: 13, color: color.gray500, fontWeight: 500 }}>Total</span>
+            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 24, letterSpacing: "-0.02em", color: accent, fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+          </div>
+        </>)}
+        {dates.length > 0 && (
+          <div style={{ display: "flex", gap: 24, marginBottom: 22 }}>
+            {dates.map(([k, v]) => (<div key={k}><div style={{ fontSize: "11.5px", color: color.gray400, marginBottom: 3 }}>{k}</div><div style={{ fontSize: 14, fontWeight: 600 }}>{v}</div></div>))}
+          </div>
+        )}
+        {has(doc.bio) && (
+          <div style={{ marginBottom: 22 }}>
+            <div style={kicker(color.gray400)}>Sobre mim</div>
+            <p style={{ fontSize: "13.5px", lineHeight: 1.6, color: color.gray600, margin: 0 }}>{doc.bio}</p>
+          </div>
+        )}
+        <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 600, color: "#fff", background: accent, border: "none", padding: 14, borderRadius: 11, cursor: "pointer" }}>Aceitar proposta</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 6. DOSSIÊ (foto escura) ---------- */
+function Dossie({ doc, accent, onAccept }) {
+  const items = filledItems(doc);
+  const total = sum(items);
+  const chips = [["Início", doc.start], ["Entrega", doc.end], ["Validade", doc.validity]].filter(([, v]) => has(v));
+  const hero = doc.cover
+    ? { backgroundImage: `url(${doc.cover})`, backgroundSize: "cover", backgroundPosition: "center" }
+    : { background: "linear-gradient(155deg, #241a16 0%, #0C0C0C 100%)" };
+  return (
+    <div style={{ background: "#0E0E0E", color: "#fff", border: "1px solid #1E1E1E", borderRadius: 16, overflow: "hidden", boxShadow: "0 16px 44px -18px rgba(0,0,0,0.5)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+      <div style={{ position: "relative", height: 224, ...hero }}>
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(14,14,14,0.96) 100%)" }} />
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "26px 26px" }}>
+          <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent, marginBottom: 10 }}>Proposta · {doc.client || "cliente"}</div>
+          <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 27, lineHeight: 1.02, letterSpacing: "-0.01em", textTransform: "uppercase" }}>{doc.title || "Título da proposta"}</div>
+        </div>
+      </div>
+      <div style={{ padding: "24px 26px 28px" }}>
+        {has(doc.scope) && <p style={{ fontSize: 14, lineHeight: 1.65, color: "#C9C9CE", margin: "0 0 22px" }}>{doc.scope}</p>}
+        {items.length > 0 && (<>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
+            {items.map((it, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "11px 0", borderBottom: "1px solid #222", fontSize: 14 }}>
+                <span style={{ color: "#D4D4D8" }}>{it.desc || "Item"}</span><span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 22 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#9A9AA0" }}>Total</span>
+            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 32, letterSpacing: "-0.03em", color: accent, fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+          </div>
+        </>)}
+        {chips.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 22 }}>
+            {chips.map(([k, v]) => (<span key={k} style={{ fontSize: "12.5px", color: "#D4D4D8", background: "#1A1A1A", border: "1px solid #262626", borderRadius: 8, padding: "6px 10px" }}><b style={{ color: "#8A8A90", fontWeight: 600 }}>{k}:</b> {v}</span>))}
+          </div>
+        )}
+        {has(doc.bio) && (
+          <div style={{ marginBottom: 22, paddingTop: 18, borderTop: "1px solid #222" }}>
+            <div style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#8A8A90", marginBottom: 6 }}>Sobre mim</div>
+            <p style={{ fontSize: 13, lineHeight: 1.6, color: "#B4B4BA", margin: 0 }}>{doc.bio}</p>
+          </div>
+        )}
+        <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 700, color: "#fff", background: accent, border: "none", padding: 14, borderRadius: 11, cursor: "pointer" }}>Aceitar proposta</button>
+      </div>
+    </div>
+  );
+}
+
 export const DESIGNS = [
   { id: "minimal", name: "Minimal", tag: "Clean", accent: "#0A0A0A", Comp: Minimal },
   { id: "bold", name: "Bold", tag: "Impacto", accent: "#D97757", Comp: Bold },
   { id: "editorial", name: "Editorial", tag: "Formal", accent: "#2E7D51", Comp: Editorial },
   { id: "colorido", name: "Colorido", tag: "Vibrante", accent: "#6C48B0", Comp: Colorido },
+  { id: "capa", name: "Capa", tag: "Com foto", accent: "#D97757", Comp: Capa, cover: true },
+  { id: "dossie", name: "Dossiê", tag: "Foto escura", accent: "#D97757", Comp: Dossie, cover: true },
 ];
 
 export function ProposalDesign({ id, doc, accent, onAccept }) {

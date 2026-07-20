@@ -6,6 +6,9 @@ import Pricing from "./pages/Pricing.jsx";
 import Auth from "./pages/Auth.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import PublicProposal from "./pages/PublicProposal.jsx";
+import Terms from "./pages/Terms.jsx";
+import Privacy from "./pages/Privacy.jsx";
+import NotFound from "./pages/NotFound.jsx";
 import { getToken } from "./lib/api.js";
 
 // Protege rotas que exigem login. Sem token, manda pro /entrar.
@@ -20,6 +23,8 @@ const TITLES = {
   "/entrar": "Entrar · Manda",
   "/criar-conta": "Criar conta · Manda",
   "/app": "Suas propostas · Manda",
+  "/termos": "Termos de Uso · Manda",
+  "/privacidade": "Política de Privacidade · Manda",
 };
 
 export default function App() {
@@ -44,11 +49,14 @@ export default function App() {
       <Route element={<MarketingLayout go={go} />}>
         <Route path="/" element={<Landing go={go} />} />
         <Route path="/precos" element={<Pricing go={go} />} />
+        <Route path="/termos" element={<Terms />} />
+        <Route path="/privacidade" element={<Privacy />} />
       </Route>
       <Route path="/entrar" element={<Auth go={go} tab="login" />} />
       <Route path="/criar-conta" element={<Auth go={go} tab="signup" />} />
       <Route path="/app" element={<RequireAuth><Dashboard go={go} /></RequireAuth>} />
       <Route path="/p/:token" element={<PublicProposal />} />
+      <Route path="*" element={<NotFound go={go} />} />
     </Routes>
   );
 }

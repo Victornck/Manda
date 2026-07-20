@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /p/
+
+Sitemap: https://manda-tan.vercel.app/sitemap.xml

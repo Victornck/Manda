@@ -24,14 +24,22 @@ export function setToken(t) {
 
 async function request(path, options = {}) {
   const token = getToken();
-  const res = await fetch(BASE + path, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
-  });
+  let res;
+  try {
+    res = await fetch(BASE + path, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers || {}),
+      },
+    });
+  } catch {
+    // fetch rejeita quando não há conexão / servidor fora do ar.
+    const err = new Error("Sem conexão com o servidor.");
+    err.network = true;
+    throw err;
+  }
   if (res.status === 204) return {};
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Falha na requisição.");

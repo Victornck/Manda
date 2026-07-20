@@ -31,21 +31,21 @@ export default function Pricing({ go }) {
       price: annual ? "R$11" : "R$12", period: "/mês", note: annual ? "R$132/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Básico", variant: "ghost",
       popular: false, titleColor: color.ink, subColor: color.gray500, featColor: color.gray700, divider: "#EEE", checkColor: color.ink,
       cardStyle: { position: "relative", background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, padding: "30px 26px" },
-      features: ["2 propostas por mês", "Acesso aos templates básicos", "Link compartilhável", "Aceite com um clique"],
+      features: ["5 propostas por mês", "Acesso aos templates básicos", "Link compartilhável", "Aceite com um clique"],
     },
     {
       name: "Pro", planKey: "pro", tagline: "Pra quem vive de proposta e quer fechar mais.",
       price: annual ? "R$26" : "R$29", period: "/mês", note: annual ? "R$312/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Pro", variant: "accent",
       popular: true, titleColor: color.white, subColor: color.gray400, featColor: color.gray200, divider: color.ink800, checkColor: "#E9967B",
       cardStyle: { position: "relative", background: color.ink, color: color.white, border: `1px solid ${color.ink}`, borderRadius: 16, padding: "30px 26px", boxShadow: "0 22px 50px -20px rgba(217,119,87,0.4)", transform: "scale(1.03)" },
-      features: ["Propostas ilimitadas", "Todos os templates", "Sem marca d’água", "Notificação de visualização", "Aceite com um clique", "Calculadora de preço"],
+      features: ["25 propostas por mês", "Todos os templates", "Sem marca d’água", "Notificação de visualização", "Aceite com um clique", "Calculadora de preço"],
     },
     {
       name: "Business", planKey: "business", tagline: "Pra quem quer marca própria e automação.",
-      price: annual ? "R$71" : "R$79", period: "/mês", note: annual ? "R$852/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Business", variant: "dark",
+      price: annual ? "R$87" : "R$97", period: "/mês", note: annual ? "R$1.044/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Business", variant: "dark",
       popular: false, titleColor: color.ink, subColor: color.gray500, featColor: color.gray700, divider: "#EEE", checkColor: color.ink,
       cardStyle: { position: "relative", background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, padding: "30px 26px" },
-      features: ["Tudo do Pro", "Domínio personalizado no link", "Follow-up automático", "Dashboard de conversão", "Suporte prioritário"],
+      features: ["Propostas ilimitadas", "Todos os templates", "Domínio personalizado no link", "Dashboard de conversão", "Suporte prioritário"],
     },
   ];
 
@@ -53,7 +53,7 @@ export default function Pricing({ go }) {
     { q: "Posso cancelar quando quiser?", a: "Pode, a qualquer momento, direto pelo painel. Você continua com acesso até o fim do período já pago e não paga nenhuma multa." },
     { q: "Tem contrato ou fidelidade?", a: "Nenhum. É mês a mês, ou ano a ano se você escolher o anual. Sem letra miúda e sem período mínimo." },
     { q: "Aceita PIX?", a: "Sim. Você paga com PIX, cartão de crédito ou boleto. No PIX o acesso libera na hora." },
-    { q: "Como funciona o limite do plano Básico?", a: "No Básico você manda 2 propostas por mês e usa os templates básicos. Chegou no limite ou quer todos os templates, é só subir pro Pro e mandar sem limite." },
+    { q: "Como funcionam os limites de cada plano?", a: "Você envia até 5 propostas por mês no Básico e 25 no Pro; no Business são ilimitadas. Rascunhos não contam — só as propostas concluídas. Chegou no limite ou quer todos os templates? É só subir de plano." },
     { q: "Preciso saber design pra usar?", a: "Não. Os templates já vêm prontos e bonitos por nicho. Você só preenche escopo, preço e prazo. O resto o Manda cuida." },
   ];
 

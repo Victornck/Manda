@@ -22,7 +22,7 @@ const BLANK_DOC = {
   client: "", company: "", clientEmail: "", title: "",
   scope: "", items: [{ desc: "", value: "" }],
   start: "", end: "", payment: "", revisions: "", validity: "", bio: "",
-  accent: "#0A0A0A", accent2: "#6C48B0", gradient: false, logo: null, template: "minimal",
+  accent: "#0A0A0A", accent2: "#6C48B0", gradient: false, logo: null, cover: null, template: "minimal",
 };
 
 const MAX_ITEMS = 20;
@@ -44,9 +44,33 @@ function loadOnb(email) { try { return JSON.parse(localStorage.getItem(scoped(ON
 function saveOnb(email, o) { try { localStorage.setItem(scoped(ONB_KEY, email), JSON.stringify(o)); } catch { /* ignore */ } }
 const bioKeyFor = (email) => scoped("manda_default_bio", email);
 
+// Comprime/redimensiona a imagem no navegador antes de salvar: logo pequena (PNG,
+// mantém transparência) e capa leve (JPEG). Mantém o armazenamento enxuto.
+function compressImage(file, key) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const isLogo = key === "logo";
+      const scale = Math.min(1, (isLogo ? 320 : 1600) / img.width, (isLogo ? 320 : 900) / img.height);
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(isLogo ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", 0.82));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("imagem inválida")); };
+    img.src = url;
+  });
+}
+
 // Status: o backend fala inglês, a UI fala português.
 const EN2PT = { draft: "Rascunho", sent: "Enviada", viewed: "Visualizada", accepted: "Aceita", declined: "Recusada" };
 const PT2EN = { Rascunho: "draft", Enviada: "sent", Visualizada: "viewed", Aceita: "accepted", Recusada: "declined" };
+// Cota mensal de propostas por plano (espelha o backend). Business é ilimitado.
+const PLAN_QUOTA = { free: 0, basic: 5, pro: 25, business: Infinity };
 // Rascunhos ficam locais (localStorage) e têm id começando com "d_".
 // Propostas concluídas vivem no servidor e têm id UUID.
 const isLocalId = (id) => String(id || "").startsWith("d_");
@@ -79,7 +103,7 @@ const fromApi = (p) => ({
   date: fmtDate(p.updatedAt || p.createdAt), scope: p.scope, items: Array.isArray(p.items) ? p.items : [],
   start: p.start, end: p.end, payment: p.payment, revisions: p.revisions, validity: p.validity,
   bio: p.bio, accent: p.accent, accent2: p.accent2 || "#6C48B0", gradient: !!p.gradient,
-  template: p.template, createdAt: p.createdAt,
+  logo: p.logo || null, cover: p.cover || null, template: p.template, createdAt: p.createdAt,
 });
 
 const STEPS = [
@@ -127,20 +151,35 @@ export default function Dashboard({ go }) {
     setSeen(user?.email, now);
   };
 
+  const [serverDown, setServerDown] = useState(false);
+
   // Recarrega a lista: propostas do servidor + rascunhos locais (localStorage).
   const refreshRows = async () => {
     const local = loadProposals();
     try {
       const { proposals } = await api.listProposals();
       setRows([...local, ...proposals.map(fromApi)]);
-    } catch {
+      setServerDown(false);
+    } catch (e) {
       setRows(local); // backend fora do ar: mostra ao menos os rascunhos locais
+      if (e?.network) setServerDown(true);
     }
   };
 
   useEffect(() => {
     api.me().then((r) => setUser(r.user)).catch(() => {});
     refreshRows();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Detecta perda/retorno de conexão do navegador.
+  useEffect(() => {
+    const goOnline = () => { setServerDown(false); refreshRows(); };
+    const goOffline = () => setServerDown(true);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    if (typeof navigator !== "undefined" && navigator.onLine === false) setServerDown(true);
+    return () => { window.removeEventListener("online", goOnline); window.removeEventListener("offline", goOffline); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -191,6 +230,14 @@ export default function Dashboard({ go }) {
   }, [onbSteps.create, onbSteps.send, onbSteps.profile, onbActive]);
 
   const dismissOnb = () => { const next = { ...onb, hidden: true }; saveOnb(user?.email, next); setOnb(next); };
+
+  // Concluiu 100%? O card de sucesso some sozinho em 7s e fica escondido para sempre.
+  useEffect(() => {
+    if (!onbActive || !onbDone || onb.hidden) return;
+    const t = setTimeout(() => dismissOnb(), 7000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onbActive, onbDone, onb.hidden]);
 
   // Retorno do checkout do Stripe (?assinatura=ok|cancelada).
   useEffect(() => {
@@ -261,7 +308,8 @@ export default function Dashboard({ go }) {
     title: doc.title, scope: doc.scope,
     items: doc.items.filter((it) => it.desc || it.value).map((it) => ({ desc: it.desc || "", value: String(it.value || "") })),
     start: doc.start, end: doc.end, payment: doc.payment, revisions: doc.revisions,
-    validity: doc.validity, bio: doc.bio, accent: doc.accent, accent2: doc.accent2, gradient: !!doc.gradient, template: doc.template,
+    validity: doc.validity, bio: doc.bio, accent: doc.accent, accent2: doc.accent2, gradient: !!doc.gradient,
+    logo: doc.logo || "", cover: doc.cover || "", template: doc.template,
   });
 
   // Rascunho guardado localmente (não consome cota do plano até ser concluído).
@@ -269,7 +317,8 @@ export default function Dashboard({ go }) {
     id: draftId, client: doc.client, company: doc.company, clientEmail: doc.clientEmail,
     title: doc.title || "Proposta sem título", value: total, status: "Rascunho", date: "Hoje",
     scope: doc.scope, items: doc.items, start: doc.start, end: doc.end,
-    payment: doc.payment, revisions: doc.revisions, validity: doc.validity, bio: doc.bio, accent: doc.accent, template: doc.template,
+    payment: doc.payment, revisions: doc.revisions, validity: doc.validity, bio: doc.bio,
+    accent: doc.accent, accent2: doc.accent2, gradient: doc.gradient, logo: doc.logo, cover: doc.cover, template: doc.template,
     updatedAt: Date.now(),
   });
 
@@ -291,7 +340,7 @@ export default function Dashboard({ go }) {
       items: Array.isArray(r.items) && r.items.length ? r.items : BLANK_DOC.items,
       start: r.start || "", end: r.end || "", payment: r.payment || "",
       revisions: r.revisions || "", validity: r.validity || "", bio: r.bio || "",
-      accent: r.accent || "#0A0A0A", accent2: r.accent2 || "#6C48B0", gradient: !!r.gradient, logo: null, template: r.template || "minimal",
+      accent: r.accent || "#0A0A0A", accent2: r.accent2 || "#6C48B0", gradient: !!r.gradient, logo: r.logo || null, cover: r.cover || null, template: r.template || "minimal",
     });
     setDraftId(r.id || newId());
     setDraftPublicId(r.publicId || null);
@@ -329,13 +378,18 @@ export default function Dashboard({ go }) {
     setView("editor");
   };
 
-  const onLogo = (e) => {
+  // Upload de imagem (logo ou capa) com limite de 2 MB.
+  const MAX_IMG = 2 * 1024 * 1024;
+  const onImage = (key) => async (e) => {
     const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setDoc((d) => ({ ...d, logo: reader.result }));
-    reader.readAsDataURL(file);
     e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { pushToast("Envie um arquivo de imagem.", "info"); return; }
+    if (file.size > MAX_IMG) { pushToast("A imagem passa de 2 MB. Escolha um arquivo menor.", "info"); return; }
+    try {
+      const dataUrl = await compressImage(file, key);
+      setDoc((d) => ({ ...d, [key]: dataUrl }));
+    } catch { pushToast("Não foi possível processar a imagem.", "info"); }
   };
 
   // Concluir: salva no servidor, marca como enviada (sent) e obtém o link público.
@@ -418,6 +472,7 @@ export default function Dashboard({ go }) {
     [byFilter, q]
   );
   const previewItems = doc.items.filter((it) => it.desc || it.value);
+  const coverTpl = !!DESIGNS.find((d) => d.id === (doc.template || "minimal"))?.cover; // template com capa?
 
   const labelStyle = { fontSize: 13, fontWeight: 600, color: color.gray700 };
   const sectionLabel = { fontSize: 12, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 10 };
@@ -434,7 +489,19 @@ export default function Dashboard({ go }) {
   ];
 
   const profileName = user?.name || "Sua conta";
-  const profileSub = user ? user.plan : "Não conectado";
+  // Propostas restantes no mês (conta só as concluídas no servidor deste mês).
+  const monthStart0 = new Date(); monthStart0.setDate(1); monthStart0.setHours(0, 0, 0, 0);
+  const usedThisMonth = rows.filter((r) => !isLocalId(r.id) && r.createdAt && new Date(r.createdAt) >= monthStart0).length;
+  const quota = PLAN_QUOTA[user?.plan] ?? 0;
+  const remaining = quota === Infinity ? Infinity : Math.max(0, quota - usedThisMonth);
+  const quotaLow = !!user && user.plan !== "free" && quota !== Infinity && remaining === 0;
+  const profileSub = !user
+    ? "Não conectado"
+    : user.plan === "free"
+      ? "Sem plano ativo"
+      : quota === Infinity
+        ? "Propostas ilimitadas"
+        : `${remaining} ${remaining === 1 ? "proposta restante" : "propostas restantes"}`;
   const senderMark = user?.name ? initials(user.name) : "M";
   const missing = [!doc.client.trim() && "Cliente", !doc.title.trim() && "Título"].filter(Boolean);
 
@@ -644,7 +711,7 @@ export default function Dashboard({ go }) {
             </span>
             <div className="db-collapsed" style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: "13.5px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{profileName}</div>
-              <div style={{ fontSize: 12, color: color.gray400 }}>{profileSub}</div>
+              <div style={{ fontSize: 12, color: quotaLow ? "#B4443C" : color.gray400, fontWeight: quotaLow ? 600 : 400 }}>{profileSub}</div>
             </div>
             <button onClick={() => { setToken(null); go && go("landing"); }} className="db-collapsed db-logout" aria-label="Sair" title="Sair"><LogOut size={17} strokeWidth={1.9} /></button>
           </div>
@@ -653,6 +720,12 @@ export default function Dashboard({ go }) {
 
       {/* MAIN */}
       <main className="db-main">
+        {serverDown && (
+          <div style={{ background: "#FEF3E2", borderBottom: "1px solid #F5D9A8", color: "#8A5A1A", fontSize: "13.5px", fontWeight: 500, padding: "10px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}><AlertTriangle size={15} strokeWidth={2} />Sem conexão com o servidor. Você ainda vê o que já carregou, mas concluir e sincronizar precisam de internet.</span>
+            <button onClick={() => refreshRows()} className="db-btn" style={{ fontSize: 13, fontWeight: 600, color: "#8A5A1A", background: "#fff", border: "1px solid #F0C98A", borderRadius: 8, padding: "6px 12px", flex: "none" }}>Tentar de novo</button>
+          </div>
+        )}
         {view === "list" ? (
           <div className="db-pad">
             <div className="db-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 22 }}>
@@ -796,14 +869,29 @@ export default function Dashboard({ go }) {
                     <div>
                       <div style={sectionLabel}>Logo</div>
                       <label className="db-btn" style={{ display: "flex", alignItems: "center", gap: 12, background: "none", border: "1px dashed #DDD", borderRadius: 11, padding: 12, width: "fit-content", cursor: "pointer" }}>
-                        <input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} />
+                        <input type="file" accept="image/*" onChange={onImage("logo")} style={{ display: "none" }} />
                         {doc.logo
                           ? <img src={doc.logo} alt="" style={{ width: 40, height: 40, borderRadius: 9, objectFit: "cover", display: "block" }} />
                           : <span style={{ width: 40, height: 40, borderRadius: 9, background: color.surface, color: color.gray400, display: "flex", alignItems: "center", justifyContent: "center" }}><ImageIcon size={20} strokeWidth={1.9} /></span>}
                         <span style={{ fontSize: "13.5px", fontWeight: 500, color: color.gray500 }}>{doc.logo ? "Trocar logo" : "Enviar sua logo"}</span>
                       </label>
                       {doc.logo && <button onClick={() => setDoc((d) => ({ ...d, logo: null }))} className="db-btn" style={{ marginTop: 8, fontSize: "12.5px", color: color.gray500, background: "none", padding: "2px 4px", gap: 5 }}><X size={13} strokeWidth={2.2} />Remover</button>}
+                      <div style={{ fontSize: "11.5px", color: color.gray400, marginTop: 6 }}>Quadrada (1:1), recomendado 400×400 px — assim não corta. PNG ou JPG, até 2 MB.</div>
                     </div>
+                    {coverTpl && (
+                      <div>
+                        <div style={sectionLabel}>Capa</div>
+                        <label className="db-btn" style={{ display: "flex", alignItems: "center", gap: 12, background: "none", border: "1px dashed #DDD", borderRadius: 11, padding: 12, width: "fit-content", cursor: "pointer" }}>
+                          <input type="file" accept="image/*" onChange={onImage("cover")} style={{ display: "none" }} />
+                          {doc.cover
+                            ? <img src={doc.cover} alt="" style={{ width: 66, height: 40, borderRadius: 9, objectFit: "cover", display: "block" }} />
+                            : <span style={{ width: 66, height: 40, borderRadius: 9, background: color.surface, color: color.gray400, display: "flex", alignItems: "center", justifyContent: "center" }}><ImageIcon size={20} strokeWidth={1.9} /></span>}
+                          <span style={{ fontSize: "13.5px", fontWeight: 500, color: color.gray500 }}>{doc.cover ? "Trocar capa" : "Enviar capa (foto)"}</span>
+                        </label>
+                        {doc.cover && <button onClick={() => setDoc((d) => ({ ...d, cover: null }))} className="db-btn" style={{ marginTop: 8, fontSize: "12.5px", color: color.gray500, background: "none", padding: "2px 4px", gap: 5 }}><X size={13} strokeWidth={2.2} />Remover</button>}
+                        <div style={{ fontSize: "11.5px", color: color.gray400, marginTop: 6 }}>Horizontal (paisagem), recomendado 1600×600 px — assim não corta. JPG ou PNG, até 2 MB.</div>
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -1122,11 +1210,11 @@ function PlansModal({ onClose }) {
 
   const plans = [
     { name: "Básico", key: "basic", m: "R$12", y: "R$11", yNote: "R$132/ano", cta: "Assinar Básico", variant: "ghost", popular: false,
-      features: ["2 propostas por mês", "Templates básicos", "Link compartilhável"] },
+      features: ["5 propostas por mês", "Templates básicos", "Link compartilhável"] },
     { name: "Pro", key: "pro", m: "R$29", y: "R$26", yNote: "R$312/ano", cta: "Assinar Pro", variant: "accent", popular: true,
-      features: ["Propostas ilimitadas", "Todos os templates", "Notificação de visualização", "Sem marca d’água"] },
-    { name: "Business", key: "business", m: "R$79", y: "R$71", yNote: "R$852/ano", cta: "Assinar Business", variant: "dark", popular: false,
-      features: ["Tudo do Pro", "Domínio personalizado", "Follow-up automático", "Suporte prioritário"] },
+      features: ["25 propostas por mês", "Todos os templates", "Notificação de visualização", "Sem marca d’água"] },
+    { name: "Business", key: "business", m: "R$97", y: "R$87", yNote: "R$1.044/ano", cta: "Assinar Business", variant: "dark", popular: false,
+      features: ["Propostas ilimitadas", "Todos os templates", "Domínio personalizado", "Suporte prioritário"] },
   ];
 
   return (
