@@ -40,6 +40,39 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Vigia de montagem: se o bundle não carregar (reloads muito rápidos
+      // interrompem os módulos no dev; rede ruim em produção), o React nunca
+      // monta e a tela ficaria branca. Aqui, se o #root continuar vazio,
+      // mostramos um aviso com botão de recarregar.
+      (function () {
+        function show() {
+          var r = document.getElementById("root");
+          if (!r || r.childNodes.length) return; // app montou: não faz nada
+          r.innerHTML =
+            '<div style="font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#18181B;background:#FAFAFA;padding:24px;text-align:center">' +
+            '<div style="width:56px;height:56px;border-radius:16px;background:#0A0A0A;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:26px">M</div>' +
+            '<div style="font-size:17px;font-weight:700">O app não terminou de carregar</div>' +
+            '<div style="font-size:14px;color:#71717A;max-width:340px;line-height:1.5">Isso pode acontecer ao recarregar muito rápido ou com a conexão oscilando. Um clique resolve.</div>' +
+            '<button onclick="location.reload()" style="margin-top:6px;font-size:15px;font-weight:600;color:#fff;background:#0A0A0A;border:none;border-radius:10px;padding:12px 22px;cursor:pointer">Recarregar</button>' +
+            "</div>";
+        }
+        // Vigia contínuo: cobre falha de carregamento E quebras depois de montar
+        // (se o app desmontar e o #root esvaziar, o aviso aparece em segundos).
+        var checks = 0;
+        var iv = setInterval(function () {
+          checks++;
+          show();
+          if (checks > 40) clearInterval(iv); // ~100s e para de vigiar
+        }, 2500);
+        window.addEventListener("error", function (e) {
+          var t = e && e.target;
+          if (t && (t.tagName === "SCRIPT" || t.tagName === "LINK")) setTimeout(show, 400);
+          else setTimeout(show, 800); // erro de runtime: confere se derrubou o app
+        }, true);
+        window.addEventListener("unhandledrejection", function () { setTimeout(show, 800); });
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

@@ -89,7 +89,7 @@ export default function PublicProposal() {
           <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} onAccept={accepted ? undefined : onAccept} />
         </div>
         <div style={{ textAlign: "center", marginTop: 22, fontSize: 13, color: color.gray400 }}>
-          Proposta enviada via <Link to="/" style={{ fontWeight: 600, color: color.gray500 }}>Manda</Link>
+          Proposta enviada via <Link to="/" title="Conheça o Manda" style={{ fontWeight: 800, color: color.ink, textUnderlineOffset: 3 }} onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }} onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>Manda</Link>
         </div>
       </div>
     </div>

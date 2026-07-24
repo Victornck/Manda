@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Check, Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { font, color } from "../theme.js";
 import { api, setToken } from "../lib/api.js";
+import CodeInput from "../components/CodeInput.jsx";
 
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const onlyDigits = (v) => v.replace(/\D/g, "").slice(0, 11);
 const maskCPF = (v) => {
   const d = onlyDigits(v);
@@ -59,6 +61,50 @@ export default function Auth({ go, tab = "signup" }) {
   const [entering, setEntering] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const [agree, setAgree] = useState(false);
+  const [googleStep, setGoogleStep] = useState(null); // null | "cpf"
+  const [googleCred, setGoogleCred] = useState("");
+  const [googleName, setGoogleName] = useState("");
+  const [googleCpf, setGoogleCpf] = useState("");
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const googleBtnRef = useRef(null);
+  const googleHandlerRef = useRef();
+
+  // Fluxo "esqueci a senha" (estilo Telegram): email → código. O código correto
+  // JÁ LOGA a pessoa; a troca de senha acontece dentro do app, em Configurações.
+  const [forgot, setForgot] = useState(null); // null | "email" | "code"
+  const [fg, setFg] = useState({ email: "", code: "" });
+  const [fgBusy, setFgBusy] = useState(false);
+  const [fgErr, setFgErr] = useState("");
+  const [fgStatus, setFgStatus] = useState(""); // "" | "error" | "success"
+  const fgPatch = (key) => (e) => setFg((s) => ({ ...s, [key]: e.target.value }));
+
+  const openForgot = () => {
+    setFg({ email: form.email || "", code: "" });
+    setFgErr(""); setFgStatus(""); setForgot("email");
+  };
+  const sendForgot = async () => {
+    setFgErr(""); setFgStatus(""); setFg((s) => ({ ...s, code: "" }));
+    if (!/^\S+@\S+\.\S+$/.test(fg.email.trim())) return setFgErr("Digite um email válido.");
+    setFgBusy(true);
+    try { await api.forgotPassword(fg.email.trim()); setForgot("code"); }
+    catch (e) { setFgErr(e.message || "Não foi possível enviar o código."); }
+    finally { setFgBusy(false); }
+  };
+  // Chamado automaticamente quando o 6º dígito entra.
+  const submitCode = async (code) => {
+    if (fgBusy || fgStatus === "success") return;
+    setFgErr(""); setFgBusy(true);
+    try {
+      const res = await api.resetLogin({ email: fg.email.trim(), code });
+      setFgStatus("success");
+      setToken(res.token);
+      setTimeout(() => { setForgot(null); proceedAfterAuth(); }, 700); // pulinho verde e entra
+    } catch (e) {
+      setFgStatus("error");
+      setFgErr(e.message || "Código incorreto.");
+      setTimeout(() => { setFgStatus(""); setFg((s) => ({ ...s, code: "" })); }, 600); // treme e limpa
+    } finally { setFgBusy(false); }
+  };
 
   const isLogin = mode === "login";
   const goTo = go || ((d) => navigate(d === "app" ? "/app" : "/"));
@@ -117,6 +163,82 @@ export default function Auth({ go, tab = "signup" }) {
     }
   }
 
+  // Depois de autenticar: se veio de um plano, vai ao checkout; senão, entra no app.
+  async function proceedAfterAuth() {
+    if (pendingPlan) {
+      try {
+        const { url } = await api.checkout(pendingPlan, pendingInterval);
+        if (url) { window.location.href = url; return; }
+      } catch { /* segue pro app */ }
+    }
+    setEntering(true);
+  }
+
+  async function handleGoogle(credential) {
+    setErr("");
+    try {
+      const res = await api.googleAuth({ credential });
+      if (res.needsCpf) {
+        setGoogleCred(credential);
+        setGoogleName(res.name || "");
+        setGoogleStep("cpf");
+        return;
+      }
+      setToken(res.token);
+      await proceedAfterAuth();
+    } catch (e) {
+      setErr(e.message || "Não foi possível entrar com o Google.");
+    }
+  }
+
+  async function submitGoogleCpf() {
+    setErr("");
+    if (!isValidCPF(googleCpf)) return setErr("CPF inválido. Confira os números.");
+    if (!agree) return setErr("Você precisa aceitar os Termos e a Política de Privacidade.");
+    setGoogleBusy(true);
+    try {
+      const res = await api.googleAuth({ credential: googleCred, cpf: onlyDigits(googleCpf) });
+      setToken(res.token);
+      setGoogleStep(null);
+      await proceedAfterAuth();
+    } catch (e) {
+      setErr(e.message || "Não foi possível criar sua conta.");
+    } finally {
+      setGoogleBusy(false);
+    }
+  }
+
+  // Mantém o callback do Google sempre com a versão mais recente do handler.
+  googleHandlerRef.current = handleGoogle;
+
+  // Carrega o Google Identity Services e desenha o botão oficial.
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
+    let cancelled = false;
+    const draw = () => {
+      if (cancelled || !window.google?.accounts?.id || !googleBtnRef.current) return;
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: (resp) => googleHandlerRef.current && googleHandlerRef.current(resp.credential),
+      });
+      googleBtnRef.current.innerHTML = "";
+      window.google.accounts.id.renderButton(googleBtnRef.current, {
+        theme: "outline", size: "large", width: 400, text: isLogin ? "signin_with" : "signup_with", locale: "pt-BR",
+      });
+    };
+    if (window.google?.accounts?.id) { draw(); return () => { cancelled = true; }; }
+    let s = document.getElementById("gis-script");
+    if (!s) {
+      s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client";
+      s.async = true; s.defer = true; s.id = "gis-script";
+      document.head.appendChild(s);
+    }
+    s.addEventListener("load", draw);
+    return () => { cancelled = true; s && s.removeEventListener("load", draw); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLogin]);
+
   const tabBase = { flex: 1, fontFamily: font.body, fontSize: "14.5px", fontWeight: 600, padding: 9, borderRadius: 8, border: "none", cursor: "pointer", transition: "all .15s" };
   const active = { ...tabBase, background: color.white, color: color.ink, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" };
   const idle = { ...tabBase, background: "transparent", color: color.gray500 };
@@ -152,6 +274,13 @@ export default function Auth({ go, tab = "signup" }) {
         .au-aside::after{ width:380px; height:380px; bottom:-120px; right:-90px; background:radial-gradient(circle, rgba(233,150,123,0.24) 0%, rgba(233,150,123,0) 70%); animation:auBlobB 23s ease-in-out infinite; }
         @keyframes auBlobA{ 0%,100%{ transform:translate(0,0) scale(1); } 50%{ transform:translate(46px,34px) scale(1.14); } }
         @keyframes auBlobB{ 0%,100%{ transform:translate(0,0) scale(1); } 50%{ transform:translate(-34px,-26px) scale(1.1); } }
+
+        /* Painel esquerdo: blocos de texto com divisórias finas */
+        .au-steps{ margin-top:42px; max-width:360px; }
+        .au-step{ padding:18px 0; border-top:1px solid rgba(255,255,255,0.1); }
+        .au-step:last-child{ border-bottom:1px solid rgba(255,255,255,0.1); }
+        .au-step-t{ font-family:${font.heading}; font-weight:700; font-size:15.5px; letter-spacing:-0.01em; color:#fff; margin-bottom:3px; }
+        .au-step-d{ font-size:13.5px; line-height:1.5; color:${color.gray400}; }
         .au-form-wrap{ display:flex; align-items:center; justify-content:center; padding:48px 40px; background:#fff; }
         .au-mobilelogo{ display:none; margin-bottom:28px; }
 
@@ -165,8 +294,14 @@ export default function Auth({ go, tab = "signup" }) {
         .au-submit{ width:100%; font-size:15.5px; color:#fff; background:${color.ink}; padding:14px; margin-top:4px; }
         .au-submit:hover:not(:disabled){ background:#262626; }
         .au-submit:disabled{ opacity:.7; cursor:wait; }
-        .au-google{ width:100%; font-size:15px; color:${color.ink900}; background:#fff; border:1px solid ${color.gray200}; padding:13px; display:flex; align-items:center; justify-content:center; gap:10px; }
+        .au-google{ width:100%; font-size:15px; color:${color.ink900}; background:#fff; border:1px solid ${color.gray200}; padding:13px; display:flex; align-items:center; justify-content:center; gap:10px; border-radius:10px; transition:border-color .16s ease, background .16s ease; }
         .au-google:hover{ border-color:${color.ink}; background:${color.surface3}; }
+        /* Botão do Google com o NOSSO design: o oficial fica transparente por cima */
+        .au-gwrap{ position:relative; width:100%; }
+        .au-gwrap .au-google{ pointer-events:none; }
+        .au-gwrap:hover .au-google{ border-color:${color.ink}; background:${color.surface3}; }
+        .au-greal{ position:absolute; inset:0; z-index:1; opacity:0.001; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+        .au-greal > div{ width:100%; }
 
         .au-tab:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
         .au-link{ background:none; border:none; padding:0; cursor:pointer; font-family:${font.body}; font-weight:600; color:${color.accent}; }
@@ -202,18 +337,28 @@ export default function Auth({ go, tab = "signup" }) {
           <Logo onDark />
         </button>
         <div style={{ maxWidth: 400 }}>
-          <h2 style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 44, lineHeight: 1.02, letterSpacing: "-0.03em", margin: "0 0 18px" }}>
-            Bora fechar<br />mais um? <span style={{ color: color.accent }}>→</span>
+          <h2 style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 42, lineHeight: 1.04, letterSpacing: "-0.03em", margin: "0 0 16px" }}>
+            {isLogin ? <>Bora fechar<br />mais um? <span style={{ color: color.accent }}>→</span></> : <>Sua proposta,<br />com cara de <span style={{ color: color.accent }}>agência.</span></>}
           </h2>
-          <p style={{ fontSize: 17, lineHeight: 1.55, color: color.gray300, margin: "0 0 34px" }}>
-            Entre e monte sua próxima proposta em minutos. Seu cliente merece ver seu trabalho num formato à altura.
+          <p style={{ fontSize: 16, lineHeight: 1.55, color: color.gray300, margin: 0 }}>
+            {isLogin
+              ? "Entre e monte sua próxima proposta em minutos. Seu cliente merece ver seu trabalho num formato à altura."
+              : "Do primeiro rascunho ao sim do cliente, tudo num lugar só."}
           </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {["Até 25 propostas por mês no Pro", "Você sabe quando o cliente abriu", "Aceite com um clique"].map((t, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 15, color: color.gray200 }}>
-                <span style={{ color: color.accent, display: "flex" }}><Check size={18} strokeWidth={2.4} /></span>{t}
-              </div>
-            ))}
+
+          <div className="au-steps">
+            <div className="au-step">
+              <div className="au-step-t">Crie em minutos</div>
+              <div className="au-step-d">Modelos prontos por nicho, com cara de agência. Sem brigar com o Docs.</div>
+            </div>
+            <div className="au-step">
+              <div className="au-step-t">Envie por link</div>
+              <div className="au-step-d">O cliente abre no celular ou no computador. Você sabe na hora que ele abriu.</div>
+            </div>
+            <div className="au-step">
+              <div className="au-step-t">Feche com um clique</div>
+              <div className="au-step-d">Aceite registrado com data e hora. Sem burocracia, sem contrato à parte.</div>
+            </div>
           </div>
         </div>
         <div style={{ fontSize: 13, color: color.gray500 }}>Feito no Brasil 🇧🇷 para freelancers</div>
@@ -261,7 +406,7 @@ export default function Auth({ go, tab = "signup" }) {
             <label style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={labelStyle}>Senha</span>
-                {isLogin && <button type="button" onClick={() => {}} className="au-link au-linksm">Esqueci a senha</button>}
+                {isLogin && <button type="button" onClick={openForgot} className="au-link au-linksm">Esqueci a senha</button>}
               </div>
               <div style={{ position: "relative" }}>
                 <input className="au-input" type={showPw ? "text" : "password"} value={form.password} onChange={upd("password")} placeholder="••••••••" autoComplete={isLogin ? "current-password" : "new-password"} required style={{ paddingRight: 44 }} />
@@ -301,9 +446,19 @@ export default function Auth({ go, tab = "signup" }) {
             <span style={{ flex: 1, height: 1, background: color.line }} />
           </div>
 
-          <button onClick={() => setErr("Login com Google chega em breve. Use email e senha por enquanto.")} className="au-btn au-google">
-            <GoogleIcon />{isLogin ? "Entrar com Google" : "Cadastrar com Google"}
-          </button>
+          {GOOGLE_CLIENT_ID ? (
+            <div className="au-gwrap">
+              {/* Visual nosso; o botão real do Google fica invisível por cima e captura o clique */}
+              <span className="au-btn au-google" aria-hidden="true">
+                <GoogleIcon />{isLogin ? "Entrar com Google" : "Cadastrar com Google"}
+              </span>
+              <div ref={googleBtnRef} className="au-greal" aria-label={isLogin ? "Entrar com Google" : "Cadastrar com Google"} />
+            </div>
+          ) : (
+            <button onClick={() => setErr("Login com Google ainda não configurado. Falta definir VITE_GOOGLE_CLIENT_ID.")} className="au-btn au-google">
+              <GoogleIcon />{isLogin ? "Entrar com Google" : "Cadastrar com Google"}
+            </button>
+          )}
 
           <p style={{ textAlign: "center", fontSize: 14, color: color.gray500, margin: "26px 0 0" }}>
             {isLogin ? "Ainda não tem conta? " : "Já tem conta? "}
@@ -321,6 +476,76 @@ export default function Auth({ go, tab = "signup" }) {
           <div className="au-enter-title">{isLogin ? "Bora fechar mais um" : `Boas-vindas${firstName ? ", " + firstName : ""}`}</div>
           <div className="au-enter-sub">Preparando seu espaço…</div>
           <div className="au-enter-bar"><span /></div>
+        </div>
+      )}
+
+      {/* Etapa extra: CPF no primeiro login pelo Google */}
+      {googleStep === "cpf" && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(10,10,12,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div style={{ width: "100%", maxWidth: 400, background: "#fff", borderRadius: 16, padding: "28px 26px", boxShadow: "0 40px 90px -30px rgba(0,0,0,0.5)" }}>
+            <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 4 }}>Quase lá{googleName ? `, ${googleName.split(" ")[0]}` : ""}!</div>
+            <p style={{ fontSize: 14, lineHeight: 1.5, color: color.gray500, margin: "0 0 18px" }}>Falta só o seu CPF pra criar sua conta. Uma conta por CPF.</p>
+            <input className="au-input" type="text" inputMode="numeric" value={googleCpf} onChange={(e) => setGoogleCpf(maskCPF(e.target.value))} placeholder="000.000.000-00" autoComplete="off" />
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 13, color: color.gray600, cursor: "pointer", lineHeight: 1.45, margin: "14px 0 0" }}>
+              <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16, flex: "none", accentColor: color.accent, cursor: "pointer" }} />
+              <span>Li e aceito os <a href="/termos" target="_blank" rel="noopener noreferrer" style={{ color: color.accent, fontWeight: 600 }}>Termos de Uso</a> e a <a href="/privacidade" target="_blank" rel="noopener noreferrer" style={{ color: color.accent, fontWeight: 600 }}>Política de Privacidade</a>.</span>
+            </label>
+            {err && <div role="alert" style={{ fontSize: 13.5, color: "#B4443C", background: "#FDECEA", border: "1px solid #F5D2CD", padding: "10px 12px", borderRadius: 9, margin: "14px 0 0" }}>{err}</div>}
+            <button onClick={submitGoogleCpf} disabled={googleBusy} className="au-btn au-submit" style={{ marginTop: 16 }}>{googleBusy ? "Criando…" : "Criar conta"}</button>
+            <button type="button" onClick={() => { setGoogleStep(null); setGoogleCred(""); setErr(""); }} className="au-link" style={{ display: "block", margin: "12px auto 0" }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {/* Esqueci a senha (estilo Telegram): o código certo já loga */}
+      {forgot && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(10,10,12,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div style={{ width: "100%", maxWidth: 400, background: "#fff", borderRadius: 16, padding: "28px 26px", boxShadow: "0 40px 90px -30px rgba(0,0,0,0.5)" }}>
+            <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 4 }}>
+              {forgot === "email" ? "Esqueceu a senha?" : fgStatus === "success" ? "Tudo certo!" : "Confira seu email"}
+            </div>
+            <p style={{ fontSize: 14, lineHeight: 1.5, color: color.gray500, margin: "0 0 18px" }}>
+              {forgot === "email"
+                ? "Digite seu email e enviaremos um código de 6 dígitos. Com ele você entra direto e troca a senha em Configurações."
+                : fgStatus === "success"
+                  ? "Código confirmado. Entrando…"
+                  : `Enviamos um código para ${fg.email}. Digite abaixo para entrar. Ele expira em 10 minutos.`}
+            </p>
+
+            {forgot === "email" ? (
+              <>
+                <label style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                  <span style={labelStyle}>Email</span>
+                  <input className="au-input" type="email" value={fg.email} onChange={fgPatch("email")} onKeyDown={(e) => { if (e.key === "Enter") sendForgot(); }} placeholder="voce@email.com" autoComplete="email" autoFocus />
+                </label>
+                {fgErr && <div role="alert" style={{ fontSize: 13.5, color: "#B4443C", background: "#FDECEA", border: "1px solid #F5D2CD", padding: "10px 12px", borderRadius: 9, margin: "14px 0 0" }}>{fgErr}</div>}
+                <button onClick={sendForgot} disabled={fgBusy} className="au-btn au-submit" style={{ marginTop: 16 }}>
+                  {fgBusy ? "Enviando…" : "Enviar código"}
+                </button>
+              </>
+            ) : (
+              <>
+                <CodeInput
+                  value={fg.code}
+                  onChange={(v) => { setFg((s) => ({ ...s, code: v })); if (fgErr) setFgErr(""); }}
+                  onComplete={submitCode}
+                  status={fgStatus}
+                  disabled={fgBusy || fgStatus === "success"}
+                  autoFocus
+                />
+                {fgErr && fgStatus !== "success" && (
+                  <div role="alert" style={{ fontSize: 13.5, color: "#B4443C", textAlign: "center", margin: "12px 0 0" }}>{fgErr}</div>
+                )}
+                {fgStatus !== "success" && (
+                  <button type="button" onClick={sendForgot} disabled={fgBusy} className="au-link au-linksm" style={{ display: "block", margin: "16px auto 0" }}>Reenviar código</button>
+                )}
+              </>
+            )}
+
+            {fgStatus !== "success" && (
+              <button type="button" onClick={() => { setForgot(null); setFgErr(""); setFgStatus(""); }} className="au-link" style={{ display: "block", margin: "12px auto 0" }}>Cancelar</button>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -96,7 +96,7 @@ export default function Landing({ go }) {
 
   const steps = [
     { n: 1, title: "Escolhe o template", body: "Modelos prontos por nicho, já com escopo, itens e faixa de preço do seu mercado.", Icon: LayoutGrid },
-    { n: 2, title: "Personaliza em minutos", body: "Um editor direto, no estilo documento. Você preenche escopo, preço e prazo sem burocracia.", Icon: PencilLine },
+    { n: 2, title: "Personaliza em minutos", body: "Um editor direto, no estilo documento. Você preenche escopo, preço e prazo enquanto a prévia se monta do lado.", Icon: PencilLine },
     { n: 3, title: "Envia e acompanha", body: "Manda o link e recebe um aviso quando o cliente abre e quando aceita. Nada de PDF perdido na caixa de entrada.", Icon: Send },
   ];
 
@@ -110,7 +110,7 @@ export default function Landing({ go }) {
   const features = [
     { title: "Link compartilhável", body: "Nada de anexo em PDF. O cliente abre a proposta no navegador, do celular ou do computador.", soon: false, Icon: LinkIcon },
     { title: "Você sabe quando abriu", body: "Um aviso chega no instante em que o cliente abre a proposta. Chega de perguntar se ele viu.", soon: false, Icon: Eye },
-    { title: "Aceite com um clique", body: "O cliente aprova ali mesmo, com data e hora registradas. Sem contrato à parte, sem burocracia.", soon: false, Icon: BadgeCheck },
+    { title: "Aceite com um clique", body: "O cliente aprova ali mesmo, com data e hora registradas. Sem imprimir, assinar e escanear.", soon: false, Icon: BadgeCheck },
     { title: "Calculadora de preço", body: "Sugestão de valor por tipo de serviço pra você parar de chutar o orçamento.", soon: false, Icon: Calculator },
     { title: "Follow-up automático", body: "Um lembrete sai sozinho quando o cliente some. Você fecha mais sem parecer insistente.", soon: true, Icon: History },
     { title: "Painel de conversão", body: "Quantas propostas você enviou, quantas fecharam e qual o seu ticket médio, tudo num lugar só.", soon: false, Icon: LineChart },
@@ -119,7 +119,7 @@ export default function Landing({ go }) {
   const outcomes = [
     { title: "Menos tempo montando", quote: "Troque a tarde inteira no Docs por uma proposta pronta em dez minutos.", Icon: Clock },
     { title: "Mais respostas do cliente", quote: "Saiba a hora certa do follow-up: você vê quando ele abre a proposta.", Icon: Eye },
-    { title: "Fechamento no preço cheio", quote: "Mande com cara de agência e feche pelo valor que você merece.", Icon: BadgeCheck },
+    { title: "Fechamento no preço cheio", quote: "Proposta bem apresentada segura o preço. Cliente que confia não pede desconto.", Icon: BadgeCheck },
   ];
 
   const audiences = [
@@ -413,7 +413,7 @@ export default function Landing({ go }) {
         <div style={{ maxWidth: 1120, margin: "0 auto" }}>
           <div data-reveal style={{ maxWidth: 620, marginBottom: 44 }}>
             <h2 className="lp-h2">Tudo que uma boa proposta precisa</h2>
-            <p style={{ fontSize: 17, lineHeight: 1.55, color: color.gray600, margin: "14px 0 0" }}>Cada recurso existe pra você fechar mais rápido e com menos esforço.</p>
+            <p style={{ fontSize: 17, lineHeight: 1.55, color: color.gray600, margin: "14px 0 0" }}>Nada de recurso de enfeite. Só o que te ajuda a fechar mais rápido.</p>
           </div>
 
           {/* Palco: a tela real do app (ProposalDesign) num painel com gradiente,
@@ -493,7 +493,7 @@ export default function Landing({ go }) {
               <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: color.accent, marginBottom: 14 }}>Pra quem é</div>
               <h3 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, lineHeight: 1.1, letterSpacing: "-0.02em", margin: 0 }}>Do vídeo ao código, tem modelo pro seu nicho</h3>
               <p className="lp-aud-p">O Manda é para freelancers e pequenos negócios que vivem de enviar proposta. Se hoje você monta um orçamento no Google Docs, no Word ou no Excel e manda um PDF, o Manda troca isso por uma <strong style={{ color: color.ink, fontWeight: 600 }}>proposta comercial profissional</strong> enviada por link: o cliente abre no celular ou no computador, você vê na hora quando ele abriu, e ele aceita com um clique.</p>
-              <p className="lp-aud-p">Também atende redatores, consultores, produtores de eventos, arquitetos e agências — com modelos prontos por nicho e aceite com data e hora registradas.</p>
+              <p className="lp-aud-p">Redator, consultor, arquiteto, produtor de eventos ou agência: se você vive de mandar orçamento, tem modelo pronto pra você. E todo aceite fica registrado com data e hora.</p>
             </div>
             <div data-reveal className="lp-aud-grid">
               {audiences.map((a, i) => (
@@ -535,7 +535,7 @@ export default function Landing({ go }) {
             <button onClick={() => setShowSeo(false)} aria-label="Fechar" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", cursor: "pointer", color: color.gray400, padding: 4 }}><X size={20} strokeWidth={2} /></button>
             <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: color.accent, marginBottom: 8 }}>SEO</div>
             <h3 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 22, letterSpacing: "-0.01em", margin: "0 0 6px" }}>Termos e nichos que o Manda atende</h3>
-            <p style={{ fontSize: 14, lineHeight: 1.55, color: color.gray500, margin: "0 0 20px" }}>Propostas e orçamentos profissionais para freelancers e pequenos negócios no Brasil — de vídeo e design a social media, código, fotografia e mais.</p>
+            <p style={{ fontSize: 14, lineHeight: 1.55, color: color.gray500, margin: "0 0 20px" }}>Propostas e orçamentos profissionais para freelancers e pequenos negócios no Brasil: de vídeo e design a social media, código e fotografia.</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {SEO_KEYWORDS.map((k, i) => (
                 <span key={i} style={{ fontSize: "12.5px", color: color.gray700, background: color.surface, border: `1px solid ${color.line}`, borderRadius: 999, padding: "5px 11px" }}>{k}</span>

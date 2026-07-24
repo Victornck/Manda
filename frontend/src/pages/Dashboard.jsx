@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
-  Bell, Eye, Clock, Lock, Calendar, RotateCcw,
+  Bell, Eye, Clock, Lock, Calendar, RotateCcw, Download,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, brl, initials } from "../theme.js";
 import { api, setToken } from "../lib/api.js";
 import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
-import { loadNotifs, mergeNotifs, getSeen, setSeen } from "../lib/notifs.js";
+import { loadNotifs, mergeNotifs, getSeen, getReadSet, markRead, removeNotifs } from "../lib/notifs.js";
 import { DESIGNS, ProposalDesign, SAMPLE_DOC } from "../templates/designs.jsx";
+import CodeInput from "../components/CodeInput.jsx";
 
 const FILTERS = {
   Todas: null,
@@ -43,6 +45,9 @@ const scoped = (base, email) => `${base}:${email || "anon"}`;
 function loadOnb(email) { try { return JSON.parse(localStorage.getItem(scoped(ONB_KEY, email)) || "{}") || {}; } catch { return {}; } }
 function saveOnb(email, o) { try { localStorage.setItem(scoped(ONB_KEY, email), JSON.stringify(o)); } catch { /* ignore */ } }
 const bioKeyFor = (email) => scoped("manda_default_bio", email);
+// Preferência: pop-ups (toasts) quando o cliente interage. Padrão: ligado.
+const toastPrefKey = (email) => scoped("manda_pref_toasts", email);
+const toastsEnabled = (email) => { try { return localStorage.getItem(toastPrefKey(email)) !== "off"; } catch { return true; } };
 
 // Comprime/redimensiona a imagem no navegador antes de salvar: logo pequena (PNG,
 // mantém transparência) e capa leve (JPEG). Mantém o armazenamento enxuto.
@@ -114,11 +119,34 @@ const STEPS = [
 ];
 
 export default function Dashboard({ go }) {
-  const [view, setView] = useState("list");
+  // Aba ↔ URL: recarregar a página mantém a aba, e voltar/avançar do navegador
+  // navega entre abas. O editor fica fora da URL (estado de trabalho, não página).
+  const TAB_TO_VIEW = { templates: "templates", clientes: "clients", notificacoes: "notifications", configuracoes: "settings" };
+  const VIEW_TO_TAB = { templates: "templates", clients: "clientes", notifications: "notificacoes", settings: "configuracoes" };
+  const { tab: urlTab } = useParams();
+  const navigate = useNavigate();
+  const [view, setView] = useState(() => TAB_TO_VIEW[urlTab || ""] || "list");
+
+  // URL mudou (voltar/avançar): segue, exceto se estiver no meio de uma edição.
+  useEffect(() => {
+    const v = TAB_TO_VIEW[urlTab || ""] || "list";
+    setView((cur) => (cur === "editor" || cur === v ? cur : v));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlTab]);
+
+  // Aba mudou: reflete na URL (o editor não mexe nela).
+  useEffect(() => {
+    if (view === "editor") return;
+    const slug = VIEW_TO_TAB[view];
+    const path = slug ? `/app/${slug}` : "/app";
+    if (window.location.pathname !== path) navigate(path);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
   const [filter, setFilter] = useState("Todas");
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState(() => loadProposals());
   const [user, setUser] = useState(null);
+  const [booting, setBooting] = useState(true); // 1ª carga (com retry) ainda em andamento
   const [doc, setDoc] = useState(BLANK_DOC);
   const [draftId, setDraftId] = useState(null);
   const [flow, setFlow] = useState("editing"); // editing | finishing | done
@@ -128,7 +156,19 @@ export default function Dashboard({ go }) {
   const [toDelete, setToDelete] = useState(null);
   const [showPreview, setShowPreview] = useState(true); // toggle do painel de pré-visualização
   const [onb, setOnb] = useState({});                   // progresso do tutorial (carregado por usuário)
+  const [onbLoaded, setOnbLoaded] = useState(false);    // só persiste/mostra DEPOIS de carregar o salvo
+  const [onbCelebrate, setOnbCelebrate] = useState(false); // banner "Tudo pronto" (7s, só em memória)
   const [showPlans, setShowPlans] = useState(false);    // modal de planos (assinar)
+  const plansAutoShown = useRef(false);
+
+  // Conta sem plano ativo (nunca assinou ou pagamento caducou e o reconciliador
+  // bloqueou): já abre os planos uma vez, sem esperar a pessoa tentar criar.
+  useEffect(() => {
+    if (user && user.plan === "free" && !plansAutoShown.current) {
+      plansAutoShown.current = true;
+      setShowPlans(true);
+    }
+  }, [user]);
   const [intro, setIntro] = useState(() => { try { return sessionStorage.getItem("manda_entering") === "1"; } catch { return false; } });
   const [billingMsg, setBillingMsg] = useState(null);
   const [draftPublicId, setDraftPublicId] = useState(null); // link público da proposta em edição
@@ -136,7 +176,7 @@ export default function Dashboard({ go }) {
   const [flowError, setFlowError] = useState("");           // erro ao concluir (ex: limite do plano)
   const [toasts, setToasts] = useState([]);                 // pop-ups que somem após 4s
   const [notifs, setNotifs] = useState([]);                 // notificações (localStorage, por usuário)
-  const [notifSeen, setNotifSeen] = useState(0);
+  const [notifRead, setNotifRead] = useState(new Set());    // ids lidos (por usuário)
   const firstNotifPoll = useRef(true);                      // evita "chuva" de toasts na 1ª carga
 
   // Pop-up efêmero (some sozinho em 4 segundos).
@@ -145,13 +185,15 @@ export default function Dashboard({ go }) {
     setToasts((t) => [...t, { id, msg, kind }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
   };
-  const markNotifsSeen = () => {
-    const now = Date.now();
-    setNotifSeen(now);
-    setSeen(user?.email, now);
-  };
+  // Lida/não lida e exclusão (persistem no localStorage do usuário).
+  const notifSetRead = (ids, read) => setNotifRead(new Set(markRead(user?.email, ids, read)));
+  const notifDelete = (ids) => setNotifs(removeNotifs(user?.email, ids));
 
   const [serverDown, setServerDown] = useState(false);
+  const [usage, setUsage] = useState({ used: 0, limit: 0 }); // uso do mês x limite (do backend)
+
+  // Uso do mês (append-only no servidor): NÃO diminui ao apagar propostas.
+  const refreshUsage = () => { api.usage().then(setUsage).catch(() => {}); };
 
   // Recarrega a lista: propostas do servidor + rascunhos locais (localStorage).
   const refreshRows = async () => {
@@ -166,9 +208,32 @@ export default function Dashboard({ go }) {
     }
   };
 
+  // Carga inicial com RETRY. Num reload rápido, a primeira chamada pode falhar
+  // (rede oscilando, servidor acordando) e antes ela era engolida em silêncio:
+  // perfil ficava "não conectado" e propostas do servidor sumiam até um F5.
+  // Agora tenta de novo em 0,7s / 1,5s / 3s antes de assumir que está fora.
   useEffect(() => {
-    api.me().then((r) => setUser(r.user)).catch(() => {});
-    refreshRows();
+    let alive = true;
+    const attempt = async (n = 0) => {
+      if (!alive) return;
+      try {
+        const [{ user: u }, { proposals }] = await Promise.all([api.me(), api.listProposals()]);
+        if (!alive) return;
+        setUser(u);
+        setRows([...loadProposals(), ...proposals.map(fromApi)]);
+        setServerDown(false);
+        setBooting(false);
+        refreshUsage();
+      } catch (e) {
+        if (!alive) return;
+        if (n < 3) { setTimeout(() => attempt(n + 1), [700, 1500, 3000][n]); return; }
+        setBooting(false);
+        setRows(loadProposals()); // ao menos os rascunhos locais
+        if (e?.network) setServerDown(true);
+      }
+    };
+    attempt();
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -188,9 +253,18 @@ export default function Dashboard({ go }) {
   useEffect(() => {
     if (!user) return;
     const scope = user.email;
+    setOnbLoaded(false);
+    setOnbCelebrate(false);
     setOnb(loadOnb(scope));
-    setNotifs(loadNotifs(scope));
-    setNotifSeen(getSeen(scope));
+    setOnbLoaded(true);
+    const list = loadNotifs(scope);
+    setNotifs(list);
+    // Migração: no modelo antigo, "lida" era uma marca d'água por data.
+    // Converte uma vez para o modelo por id e segue só com ele.
+    const legacySeen = getSeen(scope);
+    const rs = getReadSet(scope);
+    const legacyIds = legacySeen ? list.filter((n) => new Date(n.createdAt).getTime() <= legacySeen && !rs.has(n.id)).map((n) => n.id) : [];
+    setNotifRead(legacyIds.length ? new Set(markRead(scope, legacyIds)) : rs);
     firstNotifPoll.current = true;
 
     let alive = true;
@@ -200,7 +274,7 @@ export default function Dashboard({ go }) {
         if (!alive) return;
         const { list, added } = mergeNotifs(scope, notifications);
         setNotifs(list);
-        if (!firstNotifPoll.current) added.forEach((n) => pushToast(notifLabel(n)));
+        if (!firstNotifPoll.current && toastsEnabled(scope)) added.forEach((n) => pushToast(notifLabel(n)));
         firstNotifPoll.current = false;
       } catch { /* backend fora: segue com o que está no localStorage */ }
     };
@@ -213,31 +287,44 @@ export default function Dashboard({ go }) {
   // Onboarding: só avança para quem tem plano ativo (grátis não conclui o tutorial).
   const onbActive = !!user && user.plan !== "free";
   const onbBioSet = (() => { try { return !!(localStorage.getItem(bioKeyFor(user?.email)) || "").trim(); } catch { return false; } })();
+  const concluiuAlguma = usage.used > 0; // append-only: não some ao apagar propostas
   const onbSteps = {
-    create: onbActive && (!!onb.create || rows.length > 0),
-    send: onbActive && (!!onb.send || rows.some((r) => r.status && r.status !== "Rascunho")),
+    create: onbActive && (!!onb.create || concluiuAlguma || rows.length > 0),
+    send: onbActive && (!!onb.send || concluiuAlguma || rows.some((r) => r.status && r.status !== "Rascunho")),
     profile: onbActive && (!!onb.profile || onbBioSet),
   };
   const onbDone = onbSteps.create && onbSteps.send && onbSteps.profile;
 
   useEffect(() => {
-    if (!onbActive) return; // não persiste progresso para grátis (nem sem usuário)
-    if (onb.create === onbSteps.create && onb.send === onbSteps.send && onb.profile === onbSteps.profile) return;
-    const merged = { ...onb, create: onbSteps.create, send: onbSteps.send, profile: onbSteps.profile };
+    if (!onbActive || !onbLoaded) return; // nunca grava antes de carregar o estado salvo
+    if (onb.hidden) return;               // dispensado: não há mais o que persistir
+    // Só PROMOVE passos (false → true). Nunca rebaixa: dados da API ainda carregando
+    // não podem apagar progresso já salvo.
+    const merged = {
+      ...onb,
+      create: !!onb.create || onbSteps.create,
+      send: !!onb.send || onbSteps.send,
+      profile: !!onb.profile || onbSteps.profile,
+    };
+    if (merged.create === !!onb.create && merged.send === !!onb.send && merged.profile === !!onb.profile) return;
     saveOnb(user.email, merged);
     setOnb(merged);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onbSteps.create, onbSteps.send, onbSteps.profile, onbActive]);
+  }, [onbSteps.create, onbSteps.send, onbSteps.profile, onbActive, onbLoaded, onb.hidden]);
 
   const dismissOnb = () => { const next = { ...onb, hidden: true }; saveOnb(user?.email, next); setOnb(next); };
 
   // Concluiu 100%? O card de sucesso some sozinho em 7s e fica escondido para sempre.
+  // Concluiu 100%? Persiste o "some pra sempre" NA HORA (reload nunca mais mostra)
+  // e celebra por 7s só em memória, nesta sessão.
   useEffect(() => {
-    if (!onbActive || !onbDone || onb.hidden) return;
-    const t = setTimeout(() => dismissOnb(), 7000);
+    if (!onbActive || !onbLoaded || !onbDone || onb.hidden) return;
+    dismissOnb();
+    setOnbCelebrate(true);
+    const t = setTimeout(() => setOnbCelebrate(false), 7000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onbActive, onbDone, onb.hidden]);
+  }, [onbActive, onbLoaded, onbDone, onb.hidden]);
 
   // Retorno do checkout do Stripe (?assinatura=ok|cancelada).
   useEffect(() => {
@@ -272,6 +359,34 @@ export default function Dashboard({ go }) {
   }, []);
 
   const updDoc = (field) => (e) => { const v = e.target.value; setDoc((d) => ({ ...d, [field]: v })); };
+
+  // Clientes conhecidos (de todas as propostas) para o autocomplete do editor.
+  // Escolher um preenche empresa e email, mantendo o vínculo consistente:
+  // as propostas do mesmo cliente se agrupam pelo email (ou nome) em Clientes.
+  const normClient = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const knownClients = useMemo(() => {
+    const m = {};
+    rows.forEach((r) => {
+      const key = String(r.clientEmail || "").trim().toLowerCase() || normClient(r.client);
+      if (!key) return;
+      if (!m[key]) m[key] = { name: (r.client || "").trim(), company: r.company || "", email: r.clientEmail || "" };
+      else {
+        if (!m[key].company && r.company) m[key].company = r.company;
+        if (!m[key].email && r.clientEmail) m[key].email = r.clientEmail;
+      }
+    });
+    return Object.values(m).filter((c) => c.name);
+  }, [rows]);
+  const pickClient = (e) => {
+    const v = e.target.value;
+    const hit = knownClients.find((c) => normClient(c.name) === normClient(v));
+    setDoc((d) => ({
+      ...d,
+      client: v,
+      company: d.company || (hit ? hit.company : ""),
+      clientEmail: d.clientEmail || (hit ? hit.email : ""),
+    }));
+  };
   const updItem = (i, key) => (e) => {
     let v = e.target.value;
     if (key === "value") v = v.replace(/[^0-9]/g, "");
@@ -288,6 +403,35 @@ export default function Dashboard({ go }) {
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
     pushToast("Link copiado para a área de transferência.", "success");
+  };
+
+  // Gera um PDF a partir do próprio design da proposta (o mesmo que o cliente vê).
+  const pdfRef = useRef(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const downloadPdf = async () => {
+    if (!pdfRef.current || pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+      const canvas = await html2canvas(pdfRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+      const img = canvas.toDataURL("image/png");
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pw = pdf.internal.pageSize.getWidth();
+      const ph = pdf.internal.pageSize.getHeight();
+      const imgH = (canvas.height * pw) / canvas.width;
+      let left = imgH;
+      let pos = 0;
+      pdf.addImage(img, "PNG", 0, pos, pw, imgH);
+      left -= ph;
+      while (left > 0) { pos -= ph; pdf.addPage(); pdf.addImage(img, "PNG", 0, pos, pw, imgH); left -= ph; }
+      const name = String(doc.client || doc.title || "proposta").replace(/[^\w\s-]/g, "").trim().slice(0, 40) || "proposta";
+      pdf.save(`proposta-${name}.pdf`);
+      pushToast("PDF gerado.", "success");
+    } catch {
+      pushToast("Não foi possível gerar o PDF. Rode: npm install html2canvas jspdf", "info");
+    } finally {
+      setPdfBusy(false);
+    }
   };
   const sendByEmail = () => {
     const url = shareUrl();
@@ -351,14 +495,9 @@ export default function Dashboard({ go }) {
   const onRowKey = (r) => (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(r); } };
 
   const navTo = async (v) => {
-    if (view === "editor" && flow !== "done" && hasContent) {
-      if (draftId && !isLocalId(draftId)) {
-        // já é proposta do servidor: atualiza o conteúdo (sem mexer no status)
-        try { await api.updateProposal(draftId, toApiBody()); } catch { /* ignore */ }
-      } else {
-        // rascunho novo/local
-        upsertProposal(buildLocalDraft());
-      }
+    // Só rascunhos locais são salvos ao sair. Proposta concluída é imutável.
+    if (view === "editor" && flow !== "done" && hasContent && (!draftId || isLocalId(draftId))) {
+      upsertProposal(buildLocalDraft());
       await refreshRows();
     }
     setFlowError("");
@@ -415,6 +554,7 @@ export default function Dashboard({ go }) {
       setDraftId(sent.id);
       setDraftPublicId(sent.publicId);
       await refreshRows();
+      refreshUsage();
       setFlow("finishing");
     } catch (err) {
       setFlowError(err.message || "Não foi possível concluir. Tente de novo.");
@@ -473,12 +613,14 @@ export default function Dashboard({ go }) {
   );
   const previewItems = doc.items.filter((it) => it.desc || it.value);
   const coverTpl = !!DESIGNS.find((d) => d.id === (doc.template || "minimal"))?.cover; // template com capa?
+  // Proposta concluída (id do servidor) é imutável — não pode ser editada nem reenviada.
+  const locked = view === "editor" && !!draftId && !isLocalId(draftId);
 
   const labelStyle = { fontSize: 13, fontWeight: 600, color: color.gray700 };
   const sectionLabel = { fontSize: 12, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 10 };
   const pvSection = { fontSize: "11.5px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 8 };
 
-  const unread = notifs.filter((n) => new Date(n.createdAt).getTime() > notifSeen).length;
+  const unread = notifs.filter((n) => !notifRead.has(n.id)).length;
 
   const nav = [
     { key: "list", label: "Propostas", Icon: FileText },
@@ -489,17 +631,15 @@ export default function Dashboard({ go }) {
   ];
 
   const profileName = user?.name || "Sua conta";
-  // Propostas restantes no mês (conta só as concluídas no servidor deste mês).
-  const monthStart0 = new Date(); monthStart0.setDate(1); monthStart0.setHours(0, 0, 0, 0);
-  const usedThisMonth = rows.filter((r) => !isLocalId(r.id) && r.createdAt && new Date(r.createdAt) >= monthStart0).length;
-  const quota = PLAN_QUOTA[user?.plan] ?? 0;
-  const remaining = quota === Infinity ? Infinity : Math.max(0, quota - usedThisMonth);
-  const quotaLow = !!user && user.plan !== "free" && quota !== Infinity && remaining === 0;
+  // Propostas restantes: vêm do USO append-only do backend (não some ao apagar).
+  const usageUnlimited = usage.limit == null; // null = ilimitado (Business)
+  const remaining = usageUnlimited ? Infinity : Math.max(0, usage.limit - usage.used);
+  const quotaLow = !!user && user.plan !== "free" && !usageUnlimited && remaining === 0;
   const profileSub = !user
-    ? "Não conectado"
+    ? (booting ? "Carregando…" : "Não conectado")
     : user.plan === "free"
       ? "Sem plano ativo"
-      : quota === Infinity
+      : usageUnlimited
         ? "Propostas ilimitadas"
         : `${remaining} ${remaining === 1 ? "proposta restante" : "propostas restantes"}`;
   const senderMark = user?.name ? initials(user.name) : "M";
@@ -610,9 +750,25 @@ export default function Dashboard({ go }) {
         .db-plan{ border-radius:14px; padding:22px 18px 20px; background:#fff; }
         @media (max-width:720px){ .db-plans-grid{ grid-template-columns:1fr; } }
         .db-dsn-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:22px; }
-        .db-dsn-card{ border:1px solid ${color.line2}; border-radius:14px; overflow:hidden; background:#fff; transition:box-shadow .16s ease, transform .16s ease; }
-        .db-dsn-card:hover{ box-shadow:0 16px 38px -20px rgba(20,20,30,0.28); transform:translateY(-3px); }
+        .db-dsn-card{ border:1px solid ${color.line2}; border-radius:14px; overflow:hidden; background:#fff; transition:box-shadow .16s ease, transform .16s ease, border-color .16s ease; }
+        .db-dsn-card:hover{ box-shadow:0 20px 44px -20px rgba(20,20,30,0.3); transform:translateY(-4px); border-color:${color.gray200}; }
         .db-dsn-thumb{ position:relative; height:300px; overflow:hidden; background:${color.surface2}; border-bottom:1px solid ${color.line2}; }
+        .db-dsn-thumb::after{ content:""; position:absolute; left:0; right:0; bottom:0; height:56px; background:linear-gradient(180deg, rgba(245,245,247,0) 0%, ${color.surface2} 96%); pointer-events:none; }
+        .db-dsn-badges{ position:absolute; top:12px; left:12px; z-index:2; display:flex; gap:6px; }
+        .db-dsn-badge{ font-size:10.5px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; border-radius:999px; padding:4px 9px; }
+        .db-dsn-badge.novo{ color:#fff; background:${color.accent}; box-shadow:0 6px 14px -6px ${color.accent}99; }
+        .db-dsn-badge.pro{ color:${color.ink900}; background:#fff; border:1px solid ${color.gray200}; }
+        .db-dsn-hover{ position:absolute; inset:0; z-index:3; display:flex; align-items:center; justify-content:center; background:rgba(14,14,16,0.32); opacity:0; transition:opacity .18s ease; }
+        .db-dsn-card:hover .db-dsn-hover{ opacity:1; }
+        .db-dsn-cta{ font-size:14px; font-weight:700; color:${color.ink900}; background:#fff; padding:12px 20px; border-radius:11px; box-shadow:0 14px 34px -12px rgba(0,0,0,0.45); }
+        .db-dsn-cta:hover{ background:${color.surface3}; }
+        .db-dsn-chips{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:22px; }
+        .db-dsn-chip{ display:inline-flex; align-items:center; gap:7px; font-family:${font.body}; font-size:13.5px; font-weight:600; color:${color.gray600}; background:#fff; border:1px solid ${color.gray200}; border-radius:999px; padding:8px 14px; cursor:pointer; transition:background .15s ease, border-color .15s ease, color .15s ease; }
+        .db-dsn-chip:hover{ border-color:${color.gray300}; }
+        .db-dsn-chip.on{ color:#fff; background:${color.ink}; border-color:${color.ink}; }
+        .db-dsn-chip-n{ font-size:11px; font-weight:700; color:${color.gray400}; background:${color.surface}; border-radius:999px; padding:1px 7px; }
+        .db-dsn-chip.on .db-dsn-chip-n{ color:#fff; background:rgba(255,255,255,0.18); }
+        .db-dsn-chip:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
         .db-swatch{ width:24px; height:24px; border:none; border-radius:50%; cursor:pointer; padding:0; transition:transform .12s ease; }
         .db-swatch:hover{ transform:scale(1.12); }
         .db-swatch:focus-visible{ outline:2px solid ${color.ink}; outline-offset:2px; }
@@ -622,7 +778,50 @@ export default function Dashboard({ go }) {
         .db-cli-wrap{ overflow-x:auto; background:#fff; border:1px solid ${color.line2}; border-radius:14px; }
         .db-cli-head, .db-cli-row{ display:grid; grid-template-columns:minmax(200px,2fr) 110px 90px 90px 130px; column-gap:16px; align-items:center; padding:14px 20px; }
         .db-cli-head{ background:${color.surface3}; border-bottom:1px solid #EEE; font-size:11.5px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; color:${color.gray400}; }
-        .db-cli-row{ border-top:1px solid #F3F3F3; }
+        .db-cli-row{ border-top:1px solid #F3F3F3; transition:background .12s ease; }
+        .db-cli-row:hover{ background:${color.surface3}; }
+        .db-tip{ position:relative; cursor:help; }
+        .db-tip::after{ content:attr(data-tip); position:absolute; bottom:calc(100% + 7px); right:0; background:${color.ink}; color:#fff; font-size:11.5px; font-weight:600; padding:6px 10px; border-radius:7px; white-space:nowrap; opacity:0; transform:translateY(3px); pointer-events:none; transition:opacity .15s ease, transform .15s ease; z-index:6; box-shadow:0 10px 24px -10px rgba(0,0,0,0.4); }
+        .db-tip:hover::after{ opacity:1; transform:none; }
+
+        /* Notificações: checkbox custom + troca ícone→checkbox no hover (estilo Gmail) */
+        .db-chk{ position:relative; width:20px; height:20px; flex:none; cursor:pointer; display:inline-block; }
+        .db-chk input{ position:absolute; inset:0; opacity:0; cursor:pointer; margin:0; z-index:1; }
+        .db-chk .db-chk-box{ position:absolute; inset:0; border-radius:6px; border:1.5px solid ${color.gray300}; background:#fff; display:flex; align-items:center; justify-content:center; color:#fff; transition:background .15s ease, border-color .15s ease; }
+        .db-chk .db-chk-box svg{ opacity:0; transform:scale(.5); transition:opacity .12s ease, transform .15s cubic-bezier(.2,.8,.2,1); }
+        .db-chk:hover .db-chk-box{ border-color:${color.gray400}; }
+        .db-chk input:checked + .db-chk-box{ background:${color.accent}; border-color:${color.accent}; }
+        .db-chk input:checked + .db-chk-box svg{ opacity:1; transform:scale(1); }
+        .db-chk input:focus-visible + .db-chk-box{ outline:2px solid ${color.accent}; outline-offset:2px; }
+        .db-ntf-row{ display:flex; align-items:center; gap:12px; padding:13px 18px; background:#fff; transition:background .15s ease; }
+        .db-ntf-row + .db-ntf-row{ border-top:1px solid #F3F3F3; }
+        .db-ntf-row.un{ background:#FDF9F6; }
+        .db-ntf-row:hover{ background:${color.surface3}; }
+        .db-ntf-row.sel, .db-ntf-row.sel:hover{ background:${color.accentTint}; }
+        .db-ntf-lead{ position:relative; width:34px; height:34px; flex:none; }
+        .db-ntf-ico{ position:absolute; inset:0; border-radius:50%; display:flex; align-items:center; justify-content:center; transition:opacity .13s ease, transform .13s ease; }
+        .db-ntf-lead .db-chk{ position:absolute; top:7px; left:7px; opacity:0; transform:scale(.75); transition:opacity .13s ease, transform .13s ease; }
+        .db-ntf-row:hover .db-ntf-lead .db-chk, .db-ntf-row.sel .db-ntf-lead .db-chk{ opacity:1; transform:none; }
+        .db-ntf-row:hover .db-ntf-ico, .db-ntf-row.sel .db-ntf-ico{ opacity:0; transform:scale(.8); }
+        .db-ntf-dot{ flex:none; width:28px; height:28px; border-radius:50%; background:none; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .13s ease; }
+        .db-ntf-dot:hover{ background:rgba(20,20,30,0.06); }
+        .db-ntf-dot:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
+        .db-ntf-dot i{ width:9px; height:9px; border-radius:50%; background:${color.accent}; transition:background .15s ease, box-shadow .15s ease; }
+        .db-ntf-dot.read i{ background:transparent; box-shadow:inset 0 0 0 1.5px ${color.gray300}; }
+        .db-ntf-dot.read:hover i{ box-shadow:inset 0 0 0 1.5px ${color.accent}; }
+        @media (hover:none){
+          .db-ntf-lead .db-chk{ opacity:1; transform:none; }
+          .db-ntf-ico{ opacity:0; }
+        }
+
+        /* Interruptor (Configurações) */
+        .db-sw{ position:relative; width:42px; height:24px; flex:none; display:inline-block; }
+        .db-sw input{ position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; z-index:1; }
+        .db-sw i{ position:absolute; inset:0; border-radius:999px; background:${color.gray300}; transition:background .18s ease; }
+        .db-sw i::after{ content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.25); transition:transform .18s cubic-bezier(.2,.8,.2,1); }
+        .db-sw input:checked + i{ background:${color.accent}; }
+        .db-sw input:checked + i::after{ transform:translateX(18px); }
+        .db-sw input:focus-visible + i{ outline:2px solid ${color.accent}; outline-offset:2px; }
         @media (max-width:900px){ .db-kpi-grid{ grid-template-columns:repeat(2,1fr); } }
         @media (max-width:520px){ .db-kpi-grid{ grid-template-columns:1fr; } }
         @media (max-width:680px){ .db-dsn-grid{ grid-template-columns:1fr; } }
@@ -731,7 +930,10 @@ export default function Dashboard({ go }) {
             <div className="db-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 22 }}>
               <div>
                 <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Suas propostas</h1>
-                <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Acompanhe o status de cada proposta num lugar só.</p>
+                <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>
+                  Acompanhe o status de cada proposta num lugar só.
+                  {booting && <span style={{ marginLeft: 8, color: color.gray400, fontSize: 13 }}><span className="db-spin" style={{ display: "inline-block", width: 11, height: 11, borderWidth: 1.5, borderColor: "rgba(0,0,0,0.12)", borderTopColor: color.gray400, verticalAlign: "-1px", marginRight: 5 }} />sincronizando…</span>}
+                </p>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <label className="db-search">
@@ -757,8 +959,8 @@ export default function Dashboard({ go }) {
               </div>
             )}
 
-            {!onb.hidden && (
-              <OnboardingCard steps={onbSteps} done={onbDone} onNew={newProposal} goSettings={() => navTo("settings")} onSkip={dismissOnb} onFinish={dismissOnb} />
+            {onbLoaded && (!onb.hidden || onbCelebrate) && (
+              <OnboardingCard steps={onbSteps} done={onbDone} onNew={newProposal} goSettings={() => navTo("settings")} onSkip={dismissOnb} onFinish={() => setOnbCelebrate(false)} />
             )}
 
             <div className="db-tabs" style={{ marginBottom: 18 }}>
@@ -821,13 +1023,13 @@ export default function Dashboard({ go }) {
             )}
           </div>
         ) : view === "templates" ? (
-          <DesignGallery onUse={startWithDesign} />
+          <DesignGallery onUse={startWithDesign} plan={user?.plan} />
         ) : view === "clients" ? (
           <ClientsPanel rows={rows} />
         ) : view === "notifications" ? (
-          <NotificationsPanel notifs={notifs} seen={notifSeen} onSeen={markNotifsSeen} />
+          <NotificationsPanel notifs={notifs} readSet={notifRead} onRead={notifSetRead} onDelete={notifDelete} />
         ) : view === "settings" ? (
-          <SettingsPanel user={user} setUser={setUser} go={go} pushToast={pushToast} />
+          <SettingsPanel user={user} setUser={setUser} go={go} pushToast={pushToast} usage={usage} />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
             {/* action bar */}
@@ -836,7 +1038,7 @@ export default function Dashboard({ go }) {
                 <ArrowLeft size={17} strokeWidth={2.2} />Propostas
               </button>
               <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 13, color: color.gray400, marginRight: 6, display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: hasContent ? "#22C55E" : color.gray300 }} />{hasContent ? "Rascunho salvo ao sair" : "Rascunho"}</span>
+                <span style={{ fontSize: 13, color: locked ? "#8A5A1A" : color.gray400, marginRight: 6, display: "flex", alignItems: "center", gap: 6 }}>{locked ? <><Lock size={13} strokeWidth={2.2} />Enviada, somente leitura</> : <><span style={{ width: 7, height: 7, borderRadius: "50%", background: hasContent ? "#22C55E" : color.gray300 }} />{hasContent ? "Rascunho salvo ao sair" : "Rascunho"}</>}</span>
                 <button onClick={() => setShowPreview((v) => !v)} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "9px 15px" }} aria-pressed={showPreview}><Eye size={15} strokeWidth={2} />{showPreview ? "Ocultar prévia" : "Pré-visualizar"}</button>
               </div>
             </div>
@@ -845,7 +1047,12 @@ export default function Dashboard({ go }) {
             <div className="db-split" style={{ flex: 1, display: "grid", gridTemplateColumns: showPreview ? "1fr 1fr" : "1fr", minHeight: 0 }}>
               {/* editor side */}
               <div style={{ overflow: "auto", padding: "32px 36px", borderRight: showPreview ? `1px solid ${color.line2}` : "none" }}>
-                <div style={{ maxWidth: 440, margin: "0 auto", display: "flex", flexDirection: "column", gap: 26 }}>
+                {locked && (
+                  <div style={{ maxWidth: 440, margin: "0 auto 20px", display: "flex", alignItems: "center", gap: 10, background: "#FEF3E2", border: "1px solid #F5D9A8", color: "#8A5A1A", borderRadius: 12, padding: "12px 14px", fontSize: "13.5px", fontWeight: 500 }}>
+                    <Lock size={15} strokeWidth={2} style={{ flex: "none" }} />Esta proposta já foi enviada e não pode ser editada. Para outro cliente, crie uma nova.
+                  </div>
+                )}
+                <div style={{ maxWidth: 440, margin: "0 auto", display: "flex", flexDirection: "column", gap: 26, pointerEvents: locked ? "none" : "auto", opacity: locked ? 0.6 : 1 }}>
                   <div>
                     <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 4 }}>Monte sua proposta</div>
                     <div style={{ fontSize: "13.5px", color: color.gray500 }}>Preencha os campos e veja a proposta tomando forma à direita.</div>
@@ -876,7 +1083,7 @@ export default function Dashboard({ go }) {
                         <span style={{ fontSize: "13.5px", fontWeight: 500, color: color.gray500 }}>{doc.logo ? "Trocar logo" : "Enviar sua logo"}</span>
                       </label>
                       {doc.logo && <button onClick={() => setDoc((d) => ({ ...d, logo: null }))} className="db-btn" style={{ marginTop: 8, fontSize: "12.5px", color: color.gray500, background: "none", padding: "2px 4px", gap: 5 }}><X size={13} strokeWidth={2.2} />Remover</button>}
-                      <div style={{ fontSize: "11.5px", color: color.gray400, marginTop: 6 }}>Quadrada (1:1), recomendado 400×400 px — assim não corta. PNG ou JPG, até 2 MB.</div>
+                      <div style={{ fontSize: "11.5px", color: color.gray400, marginTop: 6 }}>Quadrada (1:1), recomendado 400×400 px pra não cortar. PNG ou JPG, até 2 MB.</div>
                     </div>
                     {coverTpl && (
                       <div>
@@ -889,7 +1096,7 @@ export default function Dashboard({ go }) {
                           <span style={{ fontSize: "13.5px", fontWeight: 500, color: color.gray500 }}>{doc.cover ? "Trocar capa" : "Enviar capa (foto)"}</span>
                         </label>
                         {doc.cover && <button onClick={() => setDoc((d) => ({ ...d, cover: null }))} className="db-btn" style={{ marginTop: 8, fontSize: "12.5px", color: color.gray500, background: "none", padding: "2px 4px", gap: 5 }}><X size={13} strokeWidth={2.2} />Remover</button>}
-                        <div style={{ fontSize: "11.5px", color: color.gray400, marginTop: 6 }}>Horizontal (paisagem), recomendado 1600×600 px — assim não corta. JPG ou PNG, até 2 MB.</div>
+                        <div style={{ fontSize: "11.5px", color: color.gray400, marginTop: 6 }}>Horizontal (paisagem), recomendado 1600×600 px pra não cortar. JPG ou PNG, até 2 MB.</div>
                       </div>
                     )}
                   </div>
@@ -910,7 +1117,7 @@ export default function Dashboard({ go }) {
                     </div>
                     <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: color.gray600, cursor: "pointer" }}>
                       <input type="checkbox" checked={!!doc.gradient} onChange={(e) => setDoc((d) => ({ ...d, gradient: e.target.checked }))} />
-                      Usar gradiente <span style={{ color: color.gray400, fontSize: 12 }}>(nos modelos Bold e Colorido)</span>
+                      Usar gradiente <span style={{ color: color.gray400, fontSize: 12 }}>(nos modelos Bold, Colorido e Aurora)</span>
                     </label>
                     {doc.gradient && (
                       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
@@ -925,7 +1132,12 @@ export default function Dashboard({ go }) {
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                    <Field label="Cliente" required><input className="db-input" value={doc.client} onChange={updDoc("client")} maxLength={LIMITS.client} placeholder="Nome do cliente" style={inp()} /></Field>
+                    <Field label="Cliente" required>
+                      <input className="db-input" list="db-known-clients" value={doc.client} onChange={pickClient} maxLength={LIMITS.client} placeholder="Nome do cliente" style={inp()} />
+                      <datalist id="db-known-clients">
+                        {knownClients.map((c, i) => <option key={i} value={c.name}>{c.company || c.email || ""}</option>)}
+                      </datalist>
+                    </Field>
                     <Field label="Empresa"><input className="db-input" value={doc.company} onChange={updDoc("company")} maxLength={LIMITS.company} placeholder="Empresa" style={inp()} /></Field>
                   </div>
                   <Field label="Título da proposta" required><input className="db-input" value={doc.title} onChange={updDoc("title")} maxLength={LIMITS.title} placeholder="Ex: Produção de vídeo institucional" style={inp()} /></Field>
@@ -1004,9 +1216,16 @@ export default function Dashboard({ go }) {
               </div>
 
               <div className="db-foot-actions">
-                <button onClick={finish} disabled={!canFinish || sending} className="db-btn db-btn-accent db-finish">
-                  <Check size={17} strokeWidth={2.6} />{sending ? "Concluindo…" : "Concluir proposta"}
-                </button>
+                {locked ? (
+                  <>
+                    <button onClick={copyLink} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "11px 18px" }}><Link2 size={15} strokeWidth={2.2} />{copied ? "Copiado!" : "Copiar link"}</button>
+                    <button onClick={downloadPdf} disabled={pdfBusy} className="db-btn db-btn-dark db-finish" style={{ fontSize: 14, padding: "11px 18px" }}><Download size={15} strokeWidth={2.2} />{pdfBusy ? "Gerando…" : "Baixar PDF"}</button>
+                  </>
+                ) : (
+                  <button onClick={finish} disabled={!canFinish || sending} className="db-btn db-btn-accent db-finish">
+                    <Check size={17} strokeWidth={2.6} />{sending ? "Concluindo…" : "Concluir proposta"}
+                  </button>
+                )}
               </div>
 
               {flowError && <div className="db-foot-err">{flowError}</div>}
@@ -1014,6 +1233,13 @@ export default function Dashboard({ go }) {
           </div>
         )}
       </main>
+
+      {/* Cópia oculta da proposta, só para gerar o PDF (mesmo design do cliente) */}
+      {view === "editor" && (
+        <div ref={pdfRef} aria-hidden="true" style={{ position: "fixed", left: -99999, top: 0, width: 720, background: "#fff", padding: 24, pointerEvents: "none", zIndex: -1 }}>
+          <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} />
+        </div>
+      )}
 
       {/* FLOW DE CONCLUSÃO */}
       {view === "editor" && flow !== "editing" && (
@@ -1068,8 +1294,14 @@ export default function Dashboard({ go }) {
                   </div>
                 </div>
 
-                <div className="db-in-3" style={{ display: "flex", gap: 10, marginTop: 24 }}>
-                  <button onClick={() => setFlow("editing")} className="db-btn db-btn-ghost" style={{ flex: 1, fontSize: 14, padding: "11px 0" }}><Pencil size={15} strokeWidth={2.2} />Editar</button>
+                <button onClick={downloadPdf} disabled={pdfBusy} className="db-in-3 db-btn db-btn-ghost" style={{ width: "100%", marginTop: 14, fontSize: 14, padding: "11px 0" }}>
+                  <Download size={15} strokeWidth={2.2} />{pdfBusy ? "Gerando PDF…" : "Baixar em PDF"}
+                </button>
+
+                <div className="db-in-3" style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                  {!locked && (
+                    <button onClick={() => setFlow("editing")} className="db-btn db-btn-ghost" style={{ flex: 1, fontSize: 14, padding: "11px 0" }}><Pencil size={15} strokeWidth={2.2} />Editar</button>
+                  )}
                   <button onClick={() => { setView("list"); setFlow("editing"); }} className="db-btn db-btn-ghost" style={{ flex: 1, fontSize: 14, padding: "11px 0" }}>Ir para propostas</button>
                 </div>
               </div>
@@ -1124,42 +1356,109 @@ export default function Dashboard({ go }) {
   );
 }
 
-function NotificationsPanel({ notifs, seen, onSeen }) {
-  useEffect(() => {
-    const t = setTimeout(() => onSeen && onSeen(), 1500); // deixa destacar as novas antes de marcar como lidas
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+function NotificationsPanel({ notifs, readSet, onRead, onDelete }) {
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(new Set());
+  const [confirmAll, setConfirmAll] = useState(false); // "Excluir todas" em 2 passos
 
   const style = (type) => type === "accepted" ? { I: Check, c: "#2E7D51", bg: "#EAF5EE" }
     : type === "declined" ? { I: X, c: "#B4443C", bg: "#FDECEA" }
     : { I: Eye, c: color.accentInk, bg: color.accentTint };
 
+  const norm = (s) => String(s || "").toLowerCase();
+  const list = q.trim()
+    ? notifs.filter((n) => norm(n.client).includes(norm(q)) || norm(n.title).includes(norm(q)) || norm(NOTIF_VERB[n.type]).includes(norm(q)))
+    : notifs;
+  const unreadCount = notifs.filter((n) => !readSet.has(n.id)).length;
+
+  const toggleSel = (id) => setSel((s) => { const x = new Set(s); x.has(id) ? x.delete(id) : x.add(id); return x; });
+  const allVisibleSel = list.length > 0 && list.every((n) => sel.has(n.id));
+  const toggleAllVisible = () => setSel(allVisibleSel ? new Set() : new Set(list.map((n) => n.id)));
+  const selIds = [...sel];
+  const clearSel = () => setSel(new Set());
+
+  const actBtn = { fontSize: "12.5px", fontWeight: 600, padding: "7px 11px", borderRadius: 8, background: "#fff", border: `1px solid ${color.gray200}`, color: color.gray700 };
+
+  useEffect(() => { if (!confirmAll) return; const t = setTimeout(() => setConfirmAll(false), 3500); return () => clearTimeout(t); }, [confirmAll]);
+
+  const Chk = ({ checked, onChange, label }) => (
+    <span className="db-chk">
+      <input type="checkbox" checked={checked} onChange={onChange} aria-label={label} />
+      <span className="db-chk-box"><Check size={13} strokeWidth={3.2} /></span>
+    </span>
+  );
+
   return (
     <div className="db-pad" style={{ maxWidth: 720 }}>
-      <div style={{ marginBottom: 22 }}>
+      <div style={{ marginBottom: 18 }}>
         <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Notificações</h1>
         <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Cada vez que um cliente interage com suas propostas, aparece aqui.</p>
       </div>
 
-      {notifs.length ? (
+      {notifs.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <label className="db-search" style={{ flex: "1 1 200px", maxWidth: 300 }}>
+            <Search size={15} strokeWidth={2} color={color.gray400} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por cliente ou proposta" aria-label="Buscar notificações" />
+          </label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginLeft: "auto" }}>
+            {sel.size > 0 ? (
+              <>
+                <button onClick={() => { onRead(selIds, true); clearSel(); }} className="db-btn" style={actBtn}><Check size={13} strokeWidth={2.4} />Marcar lidas</button>
+                <button onClick={() => { onRead(selIds, false); clearSel(); }} className="db-btn" style={actBtn}><Bell size={13} strokeWidth={2.2} />Não lidas</button>
+                <button onClick={() => { onDelete(selIds); clearSel(); }} className="db-btn" style={{ ...actBtn, color: "#B4443C", borderColor: "#F5D2CD" }}><Trash2 size={13} strokeWidth={2.2} />Excluir ({sel.size})</button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => onRead(notifs.map((n) => n.id), true)} disabled={!unreadCount} className="db-btn" style={{ ...actBtn, opacity: unreadCount ? 1 : 0.5 }}><Check size={13} strokeWidth={2.4} />Marcar todas como lidas</button>
+                <button onClick={() => { confirmAll ? (onDelete(notifs.map((n) => n.id)), setConfirmAll(false)) : setConfirmAll(true); }} className="db-btn"
+                  style={{ ...actBtn, color: "#fff", background: confirmAll ? "#B4443C" : "#fff", borderColor: confirmAll ? "#B4443C" : "#F5D2CD", ...(confirmAll ? {} : { color: "#B4443C" }) }}>
+                  <Trash2 size={13} strokeWidth={2.2} />{confirmAll ? "Confirmar exclusão?" : "Excluir todas"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {list.length ? (
         <div style={{ background: "#fff", border: `1px solid ${color.line2}`, borderRadius: 14, overflow: "hidden" }}>
-          {notifs.map((n, i) => {
+          <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "10px 18px 10px 25px", background: color.surface3, borderBottom: "1px solid #EEE" }}>
+            <Chk checked={allVisibleSel} onChange={toggleAllVisible} label="Selecionar todas as visíveis" />
+            <span style={{ fontSize: "11.5px", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: color.gray400 }}>
+              {sel.size ? `${sel.size} selecionada${sel.size > 1 ? "s" : ""}` : unreadCount ? `${unreadCount} não lida${unreadCount > 1 ? "s" : ""}` : "Tudo lido"}
+            </span>
+          </div>
+          {list.map((n) => {
             const s = style(n.type);
-            const isNew = new Date(n.createdAt).getTime() > seen;
+            const isUnread = !readSet.has(n.id);
+            const isSel = sel.has(n.id);
             return (
-              <div key={n.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderTop: i ? "1px solid #F3F3F3" : "none", background: isNew ? color.accentTint : "#fff", transition: "background .4s ease" }}>
-                <span style={{ width: 34, height: 34, flex: "none", borderRadius: "50%", background: s.bg, color: s.c, display: "flex", alignItems: "center", justifyContent: "center" }}><s.I size={16} strokeWidth={2.4} /></span>
+              <div key={n.id} className={`db-ntf-row${isUnread ? " un" : ""}${isSel ? " sel" : ""}`}>
+                <span className="db-ntf-lead">
+                  <span className="db-ntf-ico" style={{ background: s.bg, color: s.c }}><s.I size={16} strokeWidth={2.4} /></span>
+                  <Chk checked={isSel} onChange={() => toggleSel(n.id)} label={`Selecionar notificação de ${n.client || "cliente"}`} />
+                </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, color: color.ink }}>
-                    <strong style={{ fontWeight: 600 }}>{(n.client || "Alguém").trim() || "Alguém"}</strong> {NOTIF_VERB[n.type] || "interagiu com"} <span style={{ color: color.gray600 }}>“{n.title || "sua proposta"}”</span>
+                    <strong style={{ fontWeight: isUnread ? 700 : 600 }}>{(n.client || "Alguém").trim() || "Alguém"}</strong> {NOTIF_VERB[n.type] || "interagiu com"} <span style={{ color: color.gray600 }}>“{n.title || "sua proposta"}”</span>
                   </div>
                   <div style={{ fontSize: 12, color: color.gray400, display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}><Clock size={12} strokeWidth={2} />{timeAgo(n.createdAt)}</div>
                 </div>
-                {isNew && <span style={{ width: 8, height: 8, flex: "none", borderRadius: "50%", background: color.accent }} />}
+                <span className="db-tip" data-tip={isUnread ? "Marcar como lida" : "Marcar como não lida"} style={{ flex: "none", display: "flex" }}>
+                  <button onClick={() => onRead([n.id], isUnread)} className={`db-ntf-dot${isUnread ? "" : " read"}`} aria-label={isUnread ? "Marcar como lida" : "Marcar como não lida"}>
+                    <i />
+                  </button>
+                </span>
               </div>
             );
           })}
+        </div>
+      ) : notifs.length ? (
+        <div style={{ background: "#fff", border: "1px dashed #DDD", borderRadius: 16, padding: "44px 24px", textAlign: "center" }}>
+          <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Nada encontrado</div>
+          <p style={{ fontSize: 14, color: color.gray500, margin: "0 0 16px" }}>Nenhuma notificação corresponde à sua busca.</p>
+          <button onClick={() => setQ("")} className="db-btn db-btn-ghost" style={{ fontSize: 13.5, padding: "9px 16px" }}>Limpar busca</button>
         </div>
       ) : (
         <div style={{ background: "#fff", border: "1px dashed #DDD", borderRadius: 16, padding: "56px 24px", textAlign: "center" }}>
@@ -1339,19 +1638,51 @@ function NoResults({ onClear }) {
   );
 }
 
-function DesignGallery({ onUse }) {
+const TPL_CATS = [
+  ["todos", "Todos"],
+  ["clean", "Clean"],
+  ["vibrante", "Vibrantes"],
+  ["foto", "Com foto"],
+  ["escuro", "Escuros"],
+  ["criativo", "Criativos"],
+];
+const BASIC_TPL_IDS = ["minimal", "bold"]; // espelha o plano Básico do backend
+
+function DesignGallery({ onUse, plan }) {
+  const [cat, setCat] = useState("todos");
+  const list = cat === "todos" ? DESIGNS : DESIGNS.filter((d) => d.cat === cat);
+  const showPro = plan === "basic" || plan === "free" || !plan;
   return (
     <div className="db-pad">
-      <div style={{ marginBottom: 24 }}>
+      <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Modelos de proposta</h1>
         <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Cada modelo é um design diferente. Escolha um e personalize a cor, a logo e os textos depois.</p>
       </div>
+
+      <div className="db-dsn-chips" role="tablist" aria-label="Filtrar modelos por estilo">
+        {TPL_CATS.map(([id, label]) => {
+          const n = id === "todos" ? DESIGNS.length : DESIGNS.filter((d) => d.cat === id).length;
+          return (
+            <button key={id} role="tab" aria-selected={cat === id} onClick={() => setCat(id)} className={cat === id ? "db-dsn-chip on" : "db-dsn-chip"}>
+              {label}<span className="db-dsn-chip-n">{n}</span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="db-dsn-grid">
-        {DESIGNS.map((d) => (
-          <div key={d.id} className="db-dsn-card">
+        {list.map((d, i) => (
+          <div key={d.id} className="db-dsn-card" style={{ animation: `dbUp .4s ${i * 0.05}s ease both` }}>
             <div className="db-dsn-thumb">
               <div style={{ position: "absolute", top: 0, left: "50%", width: 460, transform: "translateX(-50%) scale(0.62)", transformOrigin: "top center", pointerEvents: "none" }}>
                 <ProposalDesign id={d.id} doc={SAMPLE_DOC} accent={d.accent} />
+              </div>
+              <div className="db-dsn-badges">
+                {d.novo && <span className="db-dsn-badge novo">Novo</span>}
+                {showPro && !BASIC_TPL_IDS.includes(d.id) && <span className="db-dsn-badge pro">Pro</span>}
+              </div>
+              <div className="db-dsn-hover">
+                <button onClick={() => onUse(d.id)} className="db-btn db-dsn-cta">Usar este modelo</button>
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px" }}>
@@ -1408,23 +1739,86 @@ function ClientsPanel({ rows }) {
   const aceitas = filtered.filter((r) => r.status === "Aceita").length;
   const conv = enviadas ? Math.round((aceitas / enviadas) * 100) : 0;
 
+  // Vínculo proposta → cliente. A chave é o EMAIL do cliente (identificador
+  // natural: único e sem variação de grafia); sem email, cai no nome
+  // normalizado (minúsculas, espaços colapsados). Empresa NÃO identifica:
+  // clientes pessoa física não têm, e todos os vazios virariam um só.
+  const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const clientKey = (r) =>
+    String(r.clientEmail || "").trim().toLowerCase() || normName(r.client) || "sem cliente";
   const map = {};
   filtered.forEach((r) => {
-    const key = (r.client || "Sem cliente").trim() || "Sem cliente";
-    if (!map[key]) map[key] = { client: key, company: "", count: 0, value: 0, accepted: 0, opened: false };
+    const key = clientKey(r);
+    if (!map[key]) map[key] = { client: (r.client || "Sem cliente").trim() || "Sem cliente", company: "", email: String(r.clientEmail || "").trim(), count: 0, value: 0, accepted: 0, opened: false, props: [] };
     const g = map[key];
     g.count += 1;
     g.value += num(r.value);
+    g.props.push(r);
     if (OPENED.includes(r.status)) g.opened = true;
     if (r.status === "Aceita") g.accepted += 1;
     if (!g.company && r.company) g.company = r.company;
   });
   const clients = Object.values(map).sort((a, b) => b.value - a.value);
+  const totalVal = clients.reduce((a, c) => a + c.value, 0);
 
-  const Kpi = ({ label, value, tint }) => (
+  // Detalhe do cliente: link da proposta e download do PDF direto daqui.
+  const [openClient, setOpenClient] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const [pdfRow, setPdfRow] = useState(null);     // proposta renderizada oculta p/ virar PDF
+  const [pdfBusyId, setPdfBusyId] = useState(null);
+  const cliPdfRef = useRef(null);
+  useEffect(() => {
+    if (!openClient) return;
+    const onKey = (e) => { if (e.key === "Escape") setOpenClient(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openClient]);
+
+  const copyLinkFor = (r) => {
+    if (!r.publicId) return;
+    const url = `${window.location.origin}/p/${r.publicId}`;
+    if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
+    setCopiedId(r.id);
+    setTimeout(() => setCopiedId(null), 1800);
+  };
+
+  const downloadPdfFor = async (r) => {
+    if (pdfBusyId) return;
+    setPdfBusyId(r.id);
+    setPdfRow(r);
+    try {
+      await new Promise((ok) => setTimeout(ok, 80)); // deixa o React montar a cópia oculta
+      if (!cliPdfRef.current) return;
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+      const canvas = await html2canvas(cliPdfRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+      const img = canvas.toDataURL("image/png");
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pw = pdf.internal.pageSize.getWidth();
+      const ph = pdf.internal.pageSize.getHeight();
+      const imgH = (canvas.height * pw) / canvas.width;
+      let left = imgH, pos = 0;
+      pdf.addImage(img, "PNG", 0, pos, pw, imgH);
+      left -= ph;
+      while (left > 0) { pos -= ph; pdf.addPage(); pdf.addImage(img, "PNG", 0, pos, pw, imgH); left -= ph; }
+      const name = String(r.client || r.title || "proposta").replace(/[^\w\s-]/g, "").trim().slice(0, 40) || "proposta";
+      pdf.save(`proposta-${name}.pdf`);
+    } catch { /* geração falhou: sem quebra, o usuário tenta de novo */ }
+    finally { setPdfBusyId(null); setPdfRow(null); }
+  };
+
+  // Dinheiro com tipografia calma: "R$" pequeno e discreto, número na fonte de
+  // texto (não no display pesado), com dígitos tabulares.
+  const nf = (v) => new Intl.NumberFormat("pt-BR").format(num(v));
+  const Money = ({ v, size = 24, tint }) => (
+    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5, fontVariantNumeric: "tabular-nums" }}>
+      <span style={{ fontSize: Math.round(size * 0.52), fontWeight: 600, color: color.gray400, letterSpacing: "0.02em" }}>R$</span>
+      <span style={{ fontFamily: font.body, fontSize: size, fontWeight: 650, letterSpacing: "-0.01em", color: tint || color.ink900 }}>{nf(v)}</span>
+    </span>
+  );
+  const Kpi = ({ label, children }) => (
     <div style={{ background: "#fff", border: `1px solid ${color.line2}`, borderRadius: 14, padding: "16px 18px" }}>
-      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 8 }}>{label}</div>
-      <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 26, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: tint || color.ink }}>{value}</div>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 9 }}>{label}</div>
+      <div style={{ minHeight: 29, display: "flex", alignItems: "baseline" }}>{children}</div>
     </div>
   );
   const YesNo = ({ on }) => on
@@ -1451,24 +1845,31 @@ function ClientsPanel({ rows }) {
           })}
         </div>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 13, color: color.gray500, display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <Calendar size={15} strokeWidth={2} color={monthKey ? color.accent : color.gray400} />Mês específico:
-          </span>
-          <select value={selM} onChange={(e) => setSelM(e.target.value)} aria-label="Mês" style={{ ...inp(), width: "auto", padding: "8px 12px", cursor: "pointer" }}>
-            <option value="">Todos</option>
-            {MONTHS_FULL.map((m, i) => <option key={i} value={String(i + 1).padStart(2, "0")}>{m}</option>)}
-          </select>
-          <select value={selY} onChange={(e) => setSelY(e.target.value)} aria-label="Ano" disabled={!selM} style={{ ...inp(), width: "auto", padding: "8px 12px", cursor: selM ? "pointer" : "not-allowed", opacity: selM ? 1 : 0.5 }}>
-            {YEARS.map((y) => <option key={y} value={String(y)}>{y}</option>)}
-          </select>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 2, background: monthKey ? "#fff" : color.surface, border: `1px solid ${monthKey ? color.accent : color.gray200}`, borderRadius: 10, padding: "3px 10px 3px 12px", transition: "border-color .15s ease, background .15s ease" }}>
+            <Calendar size={15} strokeWidth={2} color={monthKey ? color.accent : color.gray400} style={{ marginRight: 6 }} />
+            <select value={selM} onChange={(e) => setSelM(e.target.value)} aria-label="Mês" style={{ fontFamily: font.body, fontSize: 13, fontWeight: 600, color: selM ? color.ink : color.gray500, background: "transparent", border: "none", outline: "none", padding: "7px 2px", cursor: "pointer" }}>
+              <option value="">Escolher mês</option>
+              {MONTHS_FULL.map((m, i) => <option key={i} value={String(i + 1).padStart(2, "0")}>{m}</option>)}
+            </select>
+            {selM && (
+              <select value={selY} onChange={(e) => setSelY(e.target.value)} aria-label="Ano" style={{ fontFamily: font.body, fontSize: 13, fontWeight: 600, color: color.ink, background: "transparent", border: "none", outline: "none", padding: "7px 2px", cursor: "pointer" }}>
+                {YEARS.map((y) => <option key={y} value={String(y)}>{y}</option>)}
+              </select>
+            )}
+          </div>
+          {monthKey && (
+            <button onClick={() => setSelM("")} className="db-btn" aria-label="Limpar mês" style={{ fontSize: 12.5, fontWeight: 600, color: color.gray500, background: "none", padding: "6px 8px", gap: 5 }}>
+              <X size={13} strokeWidth={2.4} />Limpar
+            </button>
+          )}
         </div>
       </div>
 
       <div className="db-kpi-grid">
-        <Kpi label="Receita" value={brl(receita)} tint="#2E7D51" />
-        <Kpi label="Em aberto" value={brl(emAberto)} />
-        <Kpi label="Propostas enviadas" value={enviadas} />
-        <Kpi label="Conversão" value={`${conv}%`} />
+        <Kpi label="Receita"><Money v={receita} tint={receita > 0 ? "#2E7D51" : undefined} /></Kpi>
+        <Kpi label="Em aberto"><Money v={emAberto} /></Kpi>
+        <Kpi label="Propostas enviadas"><span style={{ fontFamily: font.body, fontSize: 24, fontWeight: 650, letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums" }}>{enviadas}</span></Kpi>
+        <Kpi label="Conversão"><span style={{ fontFamily: font.body, fontSize: 24, fontWeight: 650, letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums" }}>{conv}<span style={{ fontSize: 14, fontWeight: 600, color: color.gray400, marginLeft: 2 }}>%</span></span></Kpi>
       </div>
 
       {clients.length ? (
@@ -1477,18 +1878,22 @@ function ClientsPanel({ rows }) {
             <span>Cliente</span><span>Propostas</span><span>Abriu</span><span>Aceitou</span><span style={{ textAlign: "right" }}>Valor total</span>
           </div>
           {clients.map((c, i) => (
-            <div key={i} className="db-cli-row">
+            <div key={i} className="db-cli-row" role="button" tabIndex={0} onClick={() => setOpenClient(c)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenClient(c); } }}
+              aria-label={`Ver propostas de ${c.client}`} style={{ cursor: "pointer" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                 <span style={{ width: 34, height: 34, flex: "none", borderRadius: 9, background: avatarPalette[i % 4].bg, color: avatarPalette[i % 4].ink, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 700, fontSize: "12.5px" }}>{initials(c.client)}</span>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.client}</div>
-                  <div style={{ fontSize: "12.5px", color: color.gray400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.company || "—"}</div>
+                  <div style={{ fontSize: "12.5px", color: color.gray400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.company || c.email || "—"}</div>
                 </div>
               </div>
               <span style={{ fontSize: 14, color: color.gray700, fontVariantNumeric: "tabular-nums" }}>{c.count}</span>
               <span><YesNo on={c.opened} /></span>
               <span>{c.accepted ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "11.5px", fontWeight: 600, color: "#2E7D51" }}><Check size={13} strokeWidth={3} />{c.accepted}</span> : <YesNo on={false} />}</span>
-              <span style={{ fontSize: 14, fontWeight: 600, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{brl(c.value)}</span>
+              <span className="db-tip" data-tip={totalVal > 0 ? `${Math.round((c.value / totalVal) * 100)}% do valor total do período` : "Sem valores no período"} style={{ display: "flex", justifyContent: "flex-end" }}>
+                <Money v={c.value} size={14.5} />
+              </span>
             </div>
           ))}
         </div>
@@ -1499,22 +1904,83 @@ function ClientsPanel({ rows }) {
           <p style={{ fontSize: 14.5, color: color.gray500, margin: 0 }}>Crie e envie propostas para ver seus clientes e a receita aqui.</p>
         </div>
       )}
+
+      {/* Detalhe do cliente: propostas com link e PDF */}
+      {openClient && (
+        <div onClick={() => setOpenClient(null)} style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(10,10,12,0.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`Propostas de ${openClient.client}`} style={{ width: "100%", maxWidth: 560, maxHeight: "82vh", overflow: "auto", background: "#fff", borderRadius: 18, padding: "26px 26px 24px", boxShadow: "0 40px 90px -30px rgba(0,0,0,0.5)", position: "relative" }}>
+            <button onClick={() => setOpenClient(null)} aria-label="Fechar" className="db-btn" style={{ position: "absolute", top: 14, right: 14, background: "none", color: color.gray400, padding: 4 }}><X size={19} strokeWidth={2} /></button>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+              <span style={{ width: 40, height: 40, flex: "none", borderRadius: 11, background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 700, fontSize: 14 }}>{initials(openClient.client)}</span>
+              <div>
+                <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 19, letterSpacing: "-0.01em" }}>{openClient.client}</div>
+                {(openClient.company || openClient.email) && <div style={{ fontSize: 13, color: color.gray500 }}>{openClient.company || openClient.email}</div>}
+              </div>
+            </div>
+            <p style={{ fontSize: "13.5px", color: color.gray500, margin: "10px 0 18px" }}>{openClient.props.length} {openClient.props.length === 1 ? "proposta no período" : "propostas no período"}. Copie o link ou baixe o PDF.</p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {openClient.props.map((r) => {
+                const sc = statusColors[r.status] || statusColors.Rascunho;
+                return (
+                  <div key={r.id} style={{ border: `1px solid ${color.line2}`, borderRadius: 13, padding: "14px 16px" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.title || "Proposta sem título"}</div>
+                        <div style={{ fontSize: 12, color: color.gray400, marginTop: 2 }}>{r.date}</div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "none" }}>
+                        <Money v={r.value} size={14.5} />
+                        <span style={{ fontSize: "11px", fontWeight: 600, color: sc.c, background: sc.bg, border: `1px solid ${sc.b}`, borderRadius: 999, padding: "3px 9px" }}>{r.status}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {r.publicId ? (
+                        <button onClick={() => copyLinkFor(r)} className="db-btn db-btn-ghost" style={{ fontSize: 13, padding: "8px 13px", color: copiedId === r.id ? "#2E7D51" : undefined }}>
+                          {copiedId === r.id ? <><Check size={14} strokeWidth={2.6} />Copiado!</> : <><Link2 size={14} strokeWidth={2.2} />Copiar link</>}
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: "12.5px", color: color.gray400, alignSelf: "center" }}>Rascunho ainda sem link</span>
+                      )}
+                      <button onClick={() => downloadPdfFor(r)} disabled={!!pdfBusyId} className="db-btn db-btn-ghost" style={{ fontSize: 13, padding: "8px 13px" }}>
+                        <Download size={14} strokeWidth={2.2} />{pdfBusyId === r.id ? "Gerando…" : "Baixar PDF"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cópia oculta da proposta escolhida, só para gerar o PDF */}
+      {pdfRow && (
+        <div ref={cliPdfRef} aria-hidden="true" style={{ position: "fixed", left: -99999, top: 0, width: 720, background: "#fff", padding: 24, pointerEvents: "none", zIndex: -1 }}>
+          <ProposalDesign id={pdfRow.template} doc={pdfRow} accent={pdfRow.accent} />
+        </div>
+      )}
     </div>
   );
 }
 
-function SettingsPanel({ user, setUser, go, pushToast }) {
+function SettingsPanel({ user, setUser, go, pushToast, usage }) {
   const [name, setName] = useState(user?.name || "");
   const [savingName, setSavingName] = useState(false);
-  const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
+  const [pw, setPw] = useState({ next: "", confirm: "", code: "" });
+  const [pwStage, setPwStage] = useState("form"); // "form" (define a senha) → "code" (valida o código)
+  const [pwCodeStatus, setPwCodeStatus] = useState(""); // "" | "error" | "success"
+  const [sendingCode, setSendingCode] = useState(false);
   const [savingPw, setSavingPw] = useState(false);
   const [pwErr, setPwErr] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [bio, setBio] = useState(() => { try { return localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { return ""; } });
   const [stats, setStats] = useState(null);
+  const [toastsOn, setToastsOn] = useState(() => toastsEnabled(user?.email));
 
   useEffect(() => {
     setName(user?.name || "");
+    setToastsOn(toastsEnabled(user?.email));
     try { setBio(localStorage.getItem(bioKeyFor(user?.email)) || ""); } catch { /* ignore */ }
   }, [user]);
   useEffect(() => { api.stats().then(setStats).catch(() => {}); }, []);
@@ -1531,18 +1997,37 @@ function SettingsPanel({ user, setUser, go, pushToast }) {
     finally { setSavingName(false); }
   };
 
-  const savePassword = async () => {
+  // Passo 1: valida a nova senha localmente e pede o código de confirmação por email.
+  const requestPwCode = async () => {
     setPwErr("");
     if (pw.next.length < 8) return setPwErr("A nova senha precisa de ao menos 8 caracteres.");
     if (pw.next !== pw.confirm) return setPwErr("A confirmação não bate com a nova senha.");
-    if (pw.next === pw.current) return setPwErr("A nova senha precisa ser diferente da atual.");
+    setSendingCode(true);
+    try {
+      await api.requestPasswordCode();
+      setPwStage("code");
+      if (pushToast) pushToast("Enviamos um código de confirmação para o seu email.", "success");
+    } catch (e) { setPwErr(e.message || "Não foi possível enviar o código."); }
+    finally { setSendingCode(false); }
+  };
+
+  // Passo 2: confirma o código e efetiva a troca. Roda sozinho no 6º dígito.
+  const savePassword = async (codeArg) => {
+    const code = (typeof codeArg === "string" ? codeArg : pw.code).trim();
+    if (savingPw || pwCodeStatus === "success") return;
+    setPwErr("");
+    if (!code) return setPwErr("Digite o código que enviamos por email.");
     setSavingPw(true);
     try {
-      await api.changePassword({ current: pw.current, next: pw.next });
-      setPw({ current: "", next: "", confirm: "" });
+      await api.changePassword({ code, next: pw.next });
+      setPwCodeStatus("success");
       if (pushToast) pushToast("Senha alterada com sucesso.", "success");
-    } catch (e) { setPwErr(e.message || "Não foi possível trocar a senha."); }
-    finally { setSavingPw(false); }
+      setTimeout(() => { setPw({ next: "", confirm: "", code: "" }); setPwStage("form"); setPwCodeStatus(""); }, 800);
+    } catch (e) {
+      setPwCodeStatus("error");
+      setPwErr(e.message || "Não foi possível trocar a senha.");
+      setTimeout(() => { setPwCodeStatus(""); setPw((p) => ({ ...p, code: "" })); }, 600);
+    } finally { setSavingPw(false); }
   };
 
   const saveDefaults = () => {
@@ -1555,9 +2040,24 @@ function SettingsPanel({ user, setUser, go, pushToast }) {
   };
   const logout = () => { setToken(null); if (go) go("landing"); };
 
+  const toggleToasts = () => {
+    const next = !toastsOn;
+    setToastsOn(next);
+    try { localStorage.setItem(toastPrefKey(user?.email), next ? "on" : "off"); } catch { /* ignore */ }
+    if (pushToast && next) pushToast("Pop-ups ativados. Assim que um cliente interagir, você vê um destes.", "success");
+  };
+
+  const isAdmin = user?.role === "admin";
   const plan = user?.plan || "free";
-  const planLabel = { free: "Grátis (sem assinatura)", basic: "Básico", pro: "Pro", business: "Business" }[plan] || plan;
+  const planLabel = isAdmin ? "Admin" : ({ free: "Sem assinatura", basic: "Básico", pro: "Pro", business: "Business" }[plan] || plan);
   const k = stats?.kpis;
+
+  // Uso do mês (cota real do backend, não burlável).
+  const unlimited = usage && usage.limit == null;
+  const uUsed = usage?.used || 0;
+  const uLimit = usage?.limit || 0;
+  const uPct = unlimited ? 100 : uLimit ? Math.min(100, Math.round((uUsed / uLimit) * 100)) : 0;
+  const nearLimit = !unlimited && uLimit > 0 && uUsed / uLimit >= 0.8;
 
   const card = { background: "#fff", border: `1px solid ${color.line2}`, borderRadius: 14, padding: "22px 24px" };
   const hTitle = { fontFamily: font.heading, fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em", marginBottom: 4 };
@@ -1565,10 +2065,14 @@ function SettingsPanel({ user, setUser, go, pushToast }) {
   const fieldLabel = { fontSize: 13, fontWeight: 600, color: color.gray700, display: "block", marginBottom: 6 };
   const pwPatch = (key) => (e) => setPw((p) => ({ ...p, [key]: e.target.value }));
   const nameDirty = name.trim() && name.trim() !== (user?.name || "");
-  const Stat = ({ label, value, tint }) => (
+  const nf = (v) => new Intl.NumberFormat("pt-BR").format(Number(v) || 0);
+  const Stat = ({ label, value, money, tint }) => (
     <div style={{ background: color.surface3, borderRadius: 12, padding: "14px 16px" }}>
       <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 6 }}>{label}</div>
-      <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 24, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: tint || color.ink }}>{value}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 5, fontFamily: font.body, fontWeight: 650, fontSize: 21, letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums", color: tint || color.ink900 }}>
+        {money && <span style={{ fontSize: 12, fontWeight: 600, color: color.gray400 }}>R$</span>}
+        {money ? nf(value) : value}
+      </div>
     </div>
   );
 
@@ -1581,45 +2085,96 @@ function SettingsPanel({ user, setUser, go, pushToast }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={card}>
-          <div style={hTitle}>Perfil</div>
-          <p style={subTxt}>Seu nome de exibição e email.</p>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
-            <span style={{ width: 44, height: 44, flex: "none", borderRadius: "50%", background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 700, fontSize: 16 }}>
-              {user ? initials(user.name) : <User size={20} strokeWidth={2} />}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+            <span style={{ width: 52, height: 52, flex: "none", borderRadius: "50%", background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 700, fontSize: 18 }}>
+              {user ? initials(user.name) : <User size={22} strokeWidth={2} />}
             </span>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, color: color.gray400 }}>Email</div>
-              <div style={{ fontSize: 14, fontWeight: 500 }}>{user?.email || "Não conectado"}</div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user?.name || "Sua conta"}</div>
+              <div style={{ fontSize: "13.5px", color: color.gray500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user?.email || "Não conectado"}</div>
             </div>
+            <span style={{ flex: "none", fontFamily: font.body, fontSize: 12.5, fontWeight: 600, color: plan === "free" ? color.gray500 : "#fff", background: plan === "free" ? "transparent" : color.ink, border: plan === "free" ? `1px solid ${color.gray200}` : "none", padding: "6px 12px", borderRadius: 8 }}>{planLabel}</span>
           </div>
           <label style={fieldLabel}>Nome de exibição</label>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} placeholder="Seu nome" style={{ ...inp(), flex: 1, minWidth: 200 }} />
-            <button onClick={saveName} disabled={!nameDirty || savingName} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "0 18px" }}>{savingName ? "Salvando…" : "Salvar"}</button>
+            <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveName(); }} maxLength={120} placeholder="Seu nome" style={{ ...inp(), flex: 1, minWidth: 200 }} />
+            <button onClick={saveName} disabled={!nameDirty || savingName} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "0 18px", opacity: nameDirty ? 1 : 0.55 }}>{savingName ? "Salvando…" : "Salvar"}</button>
           </div>
+          <div style={{ fontSize: 12, color: color.gray400, marginTop: 7 }}>É o nome que aparece para os seus clientes.</div>
         </div>
 
         <div style={card}>
           <div style={hTitle}>Segurança</div>
-          <p style={subTxt}>Troque sua senha. Pedimos a atual para confirmar que é você.</p>
+          <p style={subTxt}>Para trocar a senha, enviamos um código para o seu email e você confirma aqui.</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 380 }}>
             <div>
-              <label style={fieldLabel}>Senha atual</label>
-              <input type={showPw ? "text" : "password"} value={pw.current} onChange={pwPatch("current")} autoComplete="current-password" placeholder="••••••••" style={inp()} />
-            </div>
-            <div>
               <label style={fieldLabel}>Nova senha</label>
-              <input type={showPw ? "text" : "password"} value={pw.next} onChange={pwPatch("next")} autoComplete="new-password" placeholder="Ao menos 8 caracteres" style={inp()} />
+              <input type={showPw ? "text" : "password"} value={pw.next} onChange={pwPatch("next")} disabled={pwStage === "code"} autoComplete="new-password" placeholder="Ao menos 8 caracteres" style={{ ...inp(), opacity: pwStage === "code" ? 0.6 : 1 }} />
             </div>
             <div>
               <label style={fieldLabel}>Confirmar nova senha</label>
-              <input type={showPw ? "text" : "password"} value={pw.confirm} onChange={pwPatch("confirm")} autoComplete="new-password" placeholder="Repita a nova senha" style={inp()} />
+              <input type={showPw ? "text" : "password"} value={pw.confirm} onChange={pwPatch("confirm")} disabled={pwStage === "code"} autoComplete="new-password" placeholder="Repita a nova senha" style={{ ...inp(), opacity: pwStage === "code" ? 0.6 : 1 }} />
             </div>
             <button type="button" onClick={() => setShowPw((v) => !v)} className="db-btn" style={{ alignSelf: "flex-start", background: "none", color: color.gray500, fontSize: 12.5, padding: "2px 4px", gap: 6 }}>
               <Eye size={14} strokeWidth={2} />{showPw ? "Ocultar senhas" : "Mostrar senhas"}
             </button>
+
+            {pwStage === "code" && (
+              <div style={{ borderTop: `1px solid ${color.line2}`, paddingTop: 14, marginTop: 2 }}>
+                <label style={fieldLabel}>Código enviado para {user?.email}</label>
+                <CodeInput value={pw.code} onChange={(v) => { setPw((p) => ({ ...p, code: v })); if (pwErr) setPwErr(""); }} onComplete={savePassword} status={pwCodeStatus} disabled={savingPw || pwCodeStatus === "success"} autoFocus />
+                <button type="button" onClick={requestPwCode} disabled={sendingCode} className="db-btn" style={{ background: "none", color: color.gray500, fontSize: 12.5, padding: "6px 2px 0", gap: 6 }}>
+                  <RotateCcw size={13} strokeWidth={2} />{sendingCode ? "Reenviando…" : "Reenviar código"}
+                </button>
+              </div>
+            )}
+
             {pwErr && <div role="alert" style={{ fontSize: 13, color: "#B4443C", background: "#FDECEA", border: "1px solid #F5D2CD", padding: "9px 11px", borderRadius: 9 }}>{pwErr}</div>}
-            <button onClick={savePassword} disabled={savingPw || !pw.current || !pw.next} className="db-btn db-btn-dark" style={{ alignSelf: "flex-start", fontSize: 14, padding: "10px 18px" }}><Lock size={14} strokeWidth={2.2} />{savingPw ? "Trocando…" : "Trocar senha"}</button>
+
+            {pwStage === "form" ? (
+              <button onClick={requestPwCode} disabled={sendingCode || !pw.next || !pw.confirm} className="db-btn db-btn-dark" style={{ alignSelf: "flex-start", fontSize: 14, padding: "10px 18px" }}>
+                <Mail size={14} strokeWidth={2.2} />{sendingCode ? "Enviando…" : "Enviar código"}
+              </button>
+            ) : (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button onClick={savePassword} disabled={savingPw || !pw.code.trim()} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px" }}><Lock size={14} strokeWidth={2.2} />{savingPw ? "Trocando…" : "Confirmar troca"}</button>
+                <button onClick={() => { setPwStage("form"); setPw((p) => ({ ...p, code: "" })); setPwErr(""); }} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 16px" }}>Cancelar</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={card}>
+          <div style={hTitle}>Plano e uso</div>
+          <p style={subTxt}>Sua cota do mês e a gestão da assinatura.</p>
+          {plan === "free" ? (
+            <p style={{ fontSize: 14, color: color.gray600, margin: "0 0 14px" }}>Você ainda não tem um plano ativo. Assine para criar e enviar propostas.</p>
+          ) : (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                <span style={{ fontSize: "13.5px", fontWeight: 600, color: color.gray700 }}>
+                  {unlimited ? "Propostas ilimitadas" : `${uUsed} de ${uLimit} propostas usadas`}
+                </span>
+                <span style={{ fontSize: 12, color: nearLimit ? "#B4443C" : color.gray400 }}>
+                  {isAdmin ? "Admin" : unlimited ? "Business" : nearLimit ? "Perto do limite" : "Renova todo mês"}
+                </span>
+              </div>
+              <div style={{ height: 8, borderRadius: 999, background: color.surface, overflow: "hidden" }}>
+                <span style={{ display: "block", height: "100%", width: `${uPct}%`, borderRadius: 999, background: unlimited ? "#2E7D51" : nearLimit ? "#B4443C" : color.accent, transition: "width .4s cubic-bezier(.2,.8,.2,1)" }} />
+              </div>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {isAdmin ? (
+              <span style={{ fontSize: "13px", color: color.gray500 }}>Conta de administrador: acesso total, sem cobrança.</span>
+            ) : plan === "free" ? (
+              <button onClick={() => go && go("pricing")} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 18px" }}>Ver planos</button>
+            ) : (
+              <>
+                <button onClick={manageBilling} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 18px" }}>Gerenciar assinatura</button>
+                <button onClick={() => go && go("pricing")} className="db-btn" style={{ fontSize: 14, padding: "10px 14px", background: "none", color: color.gray500, fontWeight: 600 }}>Mudar de plano</button>
+              </>
+            )}
           </div>
         </div>
 
@@ -1627,22 +2182,12 @@ function SettingsPanel({ user, setUser, go, pushToast }) {
           <div style={hTitle}>Seus números</div>
           <p style={subTxt}>Um resumo das suas propostas.</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
-            <Stat label="Propostas enviadas" value={k ? k.enviadas : "—"} />
+            <Stat label="Enviadas" value={k ? k.enviadas : "—"} />
             <Stat label="Aceitas" value={k ? k.aceitas : "—"} tint="#2E7D51" />
             <Stat label="Conversão" value={k ? `${k.conversao}%` : "—"} />
-            <Stat label="Receita do mês" value={k ? brl(k.receita) : "—"} tint="#2E7D51" />
-            <Stat label="Em aberto" value={k ? brl(k.emAberto) : "—"} />
-          </div>
-        </div>
-
-        <div style={card}>
-          <div style={hTitle}>Plano e cobrança</div>
-          <p style={subTxt}>Seu plano atual e a gestão da assinatura.</p>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: color.accentInk, background: color.accentTint, border: `1px solid ${color.accentLine}`, padding: "6px 12px", borderRadius: 999 }}>{planLabel}</span>
-            {plan === "free"
-              ? <button onClick={() => go && go("pricing")} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 18px" }}>Ver planos</button>
-              : <button onClick={manageBilling} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 18px" }}>Gerenciar assinatura</button>}
+            <Stat label="Ticket médio" value={k ? (k.aceitas ? Math.round(k.receita / k.aceitas) : 0) : "—"} money={!!k} />
+            <Stat label="Receita do mês" value={k ? k.receita : "—"} money={!!k} tint="#2E7D51" />
+            <Stat label="Em aberto" value={k ? k.emAberto : "—"} money={!!k} />
           </div>
         </div>
 
@@ -1651,15 +2196,33 @@ function SettingsPanel({ user, setUser, go, pushToast }) {
           <p style={subTxt}>Preenchido automaticamente em cada proposta nova.</p>
           <label style={fieldLabel}>Sobre mim (padrão)</label>
           <textarea value={bio} onChange={(e) => setBio(e.target.value)} maxLength={LIMITS.bio} rows={3} placeholder="Uma breve apresentação sua, usada em toda proposta." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
-          <div style={{ marginTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 12 }}>
             <button onClick={saveDefaults} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px" }}>Salvar padrão</button>
+            <span style={{ fontSize: 12, color: color.gray400, fontVariantNumeric: "tabular-nums" }}>{bio.length}/{LIMITS.bio}</span>
           </div>
         </div>
 
         <div style={card}>
-          <div style={hTitle}>Sessão</div>
-          <p style={subTxt}>Encerra sua sessão neste dispositivo.</p>
-          <button onClick={logout} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 18px" }}><LogOut size={15} strokeWidth={2} />Sair da conta</button>
+          <div style={hTitle}>Notificações</div>
+          <p style={subTxt}>Como você fica sabendo das interações dos clientes.</p>
+          <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, cursor: "pointer" }}>
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: "block", fontSize: 14, fontWeight: 600 }}>Pop-ups na tela</span>
+              <span style={{ display: "block", fontSize: "12.5px", color: color.gray500, marginTop: 2 }}>Um aviso rápido aparece quando um cliente abre ou responde uma proposta. A aba Notificações registra tudo mesmo com isso desligado.</span>
+            </span>
+            <span className="db-sw">
+              <input type="checkbox" checked={toastsOn} onChange={toggleToasts} aria-label="Ativar pop-ups de interação" />
+              <i />
+            </span>
+          </label>
+        </div>
+
+        <div style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+          <div>
+            <div style={hTitle}>Sessão</div>
+            <p style={{ ...subTxt, margin: 0 }}>Encerra sua sessão neste dispositivo.</p>
+          </div>
+          <button onClick={logout} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 18px", flex: "none" }}><LogOut size={15} strokeWidth={2} />Sair da conta</button>
         </div>
       </div>
     </div>
