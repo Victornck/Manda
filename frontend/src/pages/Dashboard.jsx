@@ -3,14 +3,15 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
-  Bell, Eye, Clock, Lock, Calendar, RotateCcw, Download,
+  Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, brl, initials } from "../theme.js";
 import { api, setToken } from "../lib/api.js";
 import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
 import { loadNotifs, mergeNotifs, getSeen, getReadSet, markRead, removeNotifs } from "../lib/notifs.js";
-import { DESIGNS, ProposalDesign, SAMPLE_DOC } from "../templates/designs.jsx";
+import { DESIGNS, ProposalDesign, sampleFor } from "../templates/designs.jsx";
 import CodeInput from "../components/CodeInput.jsx";
+import { PRICE_TABLE, COMPLEXITY, URGENCY, suggest, fmtBRL, DEFAULT_CONSUMO, PROJECT_DIFFICULTY } from "../lib/pricing.js";
 
 const FILTERS = {
   Todas: null,
@@ -24,14 +25,14 @@ const BLANK_DOC = {
   client: "", company: "", clientEmail: "", title: "",
   scope: "", items: [{ desc: "", value: "" }],
   start: "", end: "", payment: "", revisions: "", validity: "", bio: "",
-  accent: "#0A0A0A", accent2: "#6C48B0", gradient: false, logo: null, cover: null, template: "minimal",
+  accent: "#0A0A0A", accent2: "#6C48B0", gradient: false, theme: "claro", watermark: "", logo: null, cover: null, template: "minimal",
 };
 
 const MAX_ITEMS = 20;
 const STATUS_OPTIONS = ["Rascunho", "Enviada", "Visualizada", "Aceita", "Recusada"];
 
 // Cores de atalho — o usuário também pode escolher QUALQUER cor no seletor.
-const PRESET_COLORS = ["#D97757", "#3A5BB5", "#2E7D51", "#6C48B0", "#0A0A0A", "#C6407E", "#E0A100"];
+const PRESET_COLORS = ["#D97757", "#E0A100", "#C6407E", "#9B2C3A", "#6C48B0", "#4F46E5", "#3A5BB5", "#0E7C86", "#2E7D51", "#0A0A0A"];
 
 // Limites de caracteres por campo (sempre <= aos do backend, para não falhar no salvamento).
 const LIMITS = {
@@ -47,6 +48,10 @@ function saveOnb(email, o) { try { localStorage.setItem(scoped(ONB_KEY, email), 
 const bioKeyFor = (email) => scoped("manda_default_bio", email);
 // Preferência: pop-ups (toasts) quando o cliente interage. Padrão: ligado.
 const toastPrefKey = (email) => scoped("manda_pref_toasts", email);
+// Perfil de custos da calculadora (ferramentas, hora, margem): estável por usuário.
+const calcProfileKey = (email) => scoped("manda_calc_profile", email);
+// Templates cujo selo "Novo" o usuário já dispensou (some ao clicar).
+const tplSeenKey = (email) => scoped("manda_tpl_seen", email);
 const toastsEnabled = (email) => { try { return localStorage.getItem(toastPrefKey(email)) !== "off"; } catch { return true; } };
 
 // Comprime/redimensiona a imagem no navegador antes de salvar: logo pequena (PNG,
@@ -107,7 +112,7 @@ const fromApi = (p) => ({
   title: p.title, value: Number(p.value) || 0, status: EN2PT[p.status] || "Rascunho",
   date: fmtDate(p.updatedAt || p.createdAt), scope: p.scope, items: Array.isArray(p.items) ? p.items : [],
   start: p.start, end: p.end, payment: p.payment, revisions: p.revisions, validity: p.validity,
-  bio: p.bio, accent: p.accent, accent2: p.accent2 || "#6C48B0", gradient: !!p.gradient,
+  bio: p.bio, accent: p.accent, accent2: p.accent2 || "#6C48B0", gradient: !!p.gradient, theme: p.theme || "claro", watermark: p.watermark || "",
   logo: p.logo || null, cover: p.cover || null, template: p.template, createdAt: p.createdAt,
 });
 
@@ -121,8 +126,8 @@ const STEPS = [
 export default function Dashboard({ go }) {
   // Aba ↔ URL: recarregar a página mantém a aba, e voltar/avançar do navegador
   // navega entre abas. O editor fica fora da URL (estado de trabalho, não página).
-  const TAB_TO_VIEW = { templates: "templates", clientes: "clients", notificacoes: "notifications", configuracoes: "settings" };
-  const VIEW_TO_TAB = { templates: "templates", clients: "clientes", notifications: "notificacoes", settings: "configuracoes" };
+  const TAB_TO_VIEW = { templates: "templates", calculadora: "calc", clientes: "clients", notificacoes: "notifications", configuracoes: "settings" };
+  const VIEW_TO_TAB = { templates: "templates", calc: "calculadora", clients: "clientes", notifications: "notificacoes", settings: "configuracoes" };
   const { tab: urlTab } = useParams();
   const navigate = useNavigate();
   const [view, setView] = useState(() => TAB_TO_VIEW[urlTab || ""] || "list");
@@ -149,6 +154,8 @@ export default function Dashboard({ go }) {
   const [booting, setBooting] = useState(true); // 1ª carga (com retry) ainda em andamento
   const [doc, setDoc] = useState(BLANK_DOC);
   const [draftId, setDraftId] = useState(null);
+  const pristineRef = useRef("");  // snapshot do doc ao abrir; só salva rascunho se mudar
+  const [editorFrom, setEditorFrom] = useState("list"); // aba de onde o editor foi aberto
   const [flow, setFlow] = useState("editing"); // editing | finishing | done
   const [step, setStep] = useState(0);
   const [sealing, setSealing] = useState(false);
@@ -206,6 +213,16 @@ export default function Dashboard({ go }) {
       setRows(local); // backend fora do ar: mostra ao menos os rascunhos locais
       if (e?.network) setServerDown(true);
     }
+  };
+
+  // Busca novas notificações sob demanda (usado pelo botão de recarregar).
+  const refreshNotifs = async () => {
+    if (!user) return;
+    try {
+      const { notifications } = await api.notifications();
+      const { list } = mergeNotifs(user.email, notifications);
+      setNotifs(list);
+    } catch { /* ignore */ }
   };
 
   // Carga inicial com RETRY. Num reload rápido, a primeira chamada pode falhar
@@ -393,6 +410,24 @@ export default function Dashboard({ go }) {
     setDoc((d) => ({ ...d, items: d.items.map((it, idx) => (idx === i ? { ...it, [key]: v } : it)) }));
   };
   const addItem = () => setDoc((d) => (d.items.length >= MAX_ITEMS ? d : { ...d, items: [...d.items, { desc: "", value: "" }] }));
+  const toggleItemHidden = (i) => setDoc((d) => ({ ...d, items: d.items.map((it, idx) => (idx === i ? { ...it, hidden: !it.hidden } : it)) }));
+
+  // Calculadora de preço. Insere um item novo (ou preenche o último vazio) com a
+  // descrição do serviço e o valor sugerido escolhido.
+  const [showCalc, setShowCalc] = useState(false);
+  const applyPrice = (desc, value, list) => {
+    setDoc((d) => {
+      let items = [...d.items];
+      // Descarta a última linha se estiver vazia (não duplica um item em branco).
+      const last = items[items.length - 1];
+      if (items.length && !String(last.desc || "").trim() && !String(last.value || "").trim()) items = items.slice(0, -1);
+      const incoming = (list && list.length) ? list : [{ desc, value: String(value) }];
+      items = [...items, ...incoming].slice(0, MAX_ITEMS);
+      if (!items.length) items = [{ desc: "", value: "" }];
+      return { ...d, items };
+    });
+    setShowCalc(false);
+  };
   const removeItem = (i) => () => setDoc((d) => ({ ...d, items: d.items.filter((_, idx) => idx !== i) }));
 
   const shareUrl = () => (draftPublicId ? `${window.location.origin}/p/${draftPublicId}` : "");
@@ -440,19 +475,24 @@ export default function Dashboard({ go }) {
     window.location.href = `mailto:${doc.clientEmail || ""}?subject=${subject}&body=${body}`;
   };
 
-  const total = doc.items.reduce((a, it) => a + (parseInt(it.value, 10) || 0), 0);
-  const itemCount = doc.items.filter((it) => it.desc || it.value).length;
+  const total = doc.items.reduce((a, it) => a + (it.hidden ? 0 : parseInt(it.value, 10) || 0), 0);
+  const itemCount = doc.items.filter((it) => !it.hidden && (it.desc || it.value)).length;
   const hasContent = doc.client || doc.company || doc.title || doc.scope || doc.start || doc.end ||
     doc.payment || doc.revisions || doc.validity || doc.bio || doc.items.some((it) => it.desc || it.value);
   const canFinish = doc.client.trim() !== "" && doc.title.trim() !== "";
+
+  // Templates travados por plano (espelha a regra do backend). Básico só tem
+  // minimal e bold; Pro/Business e admin têm todos. Admin entra como business.
+  const planTier = user?.role === "admin" ? "business" : (user?.plan || "free");
+  const tplLocked = (id) => ["free", "basic"].includes(planTier) && !BASIC_TPL_IDS.includes(id);
 
   // Corpo enviado à API (formato do proposalSchema do backend).
   const toApiBody = () => ({
     client: doc.client, company: doc.company, clientEmail: doc.clientEmail,
     title: doc.title, scope: doc.scope,
-    items: doc.items.filter((it) => it.desc || it.value).map((it) => ({ desc: it.desc || "", value: String(it.value || "") })),
+    items: doc.items.filter((it) => it.desc || it.value).map((it) => ({ desc: it.desc || "", value: String(it.value || ""), hidden: !!it.hidden })),
     start: doc.start, end: doc.end, payment: doc.payment, revisions: doc.revisions,
-    validity: doc.validity, bio: doc.bio, accent: doc.accent, accent2: doc.accent2, gradient: !!doc.gradient,
+    validity: doc.validity, bio: doc.bio, accent: doc.accent, accent2: doc.accent2, gradient: !!doc.gradient, theme: doc.theme || "claro", watermark: doc.watermark || "",
     logo: doc.logo || "", cover: doc.cover || "", template: doc.template,
   });
 
@@ -469,25 +509,45 @@ export default function Dashboard({ go }) {
   const newProposal = () => {
     let bio = "";
     try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
-    setDoc({ ...BLANK_DOC, bio });
+    const d = { ...BLANK_DOC, bio };
+    setDoc(d);
+    pristineRef.current = JSON.stringify(d); // abriu em branco: só vira rascunho se editar
     setDraftId(newId());
     setDraftPublicId(null);
+    setEditorFrom("list");
+    setFlowError("");
+    setFlow("editing");
+    setView("editor");
+  };
+  // Abre uma proposta nova já com os itens vindos da Calculadora.
+  const startProposalWithItem = (desc, value, list) => {
+    let bio = "";
+    try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
+    const items = (list && list.length) ? list.slice(0, MAX_ITEMS) : [{ desc, value: String(value) }];
+    setDoc({ ...BLANK_DOC, bio, items });
+    pristineRef.current = ""; // veio da calculadora com valores: já conta como conteúdo
+    setDraftId(newId());
+    setDraftPublicId(null);
+    setEditorFrom("calc");
     setFlowError("");
     setFlow("editing");
     setView("editor");
   };
   const openRow = (r) => {
-    setDoc({
+    const d = {
       ...BLANK_DOC,
       client: r.client || "", company: r.company || "", title: r.title === "Proposta sem título" ? "" : (r.title || ""),
       clientEmail: r.clientEmail || "", scope: r.scope || "",
       items: Array.isArray(r.items) && r.items.length ? r.items : BLANK_DOC.items,
       start: r.start || "", end: r.end || "", payment: r.payment || "",
       revisions: r.revisions || "", validity: r.validity || "", bio: r.bio || "",
-      accent: r.accent || "#0A0A0A", accent2: r.accent2 || "#6C48B0", gradient: !!r.gradient, logo: r.logo || null, cover: r.cover || null, template: r.template || "minimal",
-    });
+      accent: r.accent || "#0A0A0A", accent2: r.accent2 || "#6C48B0", gradient: !!r.gradient, theme: r.theme || "claro", watermark: r.watermark || "", logo: r.logo || null, cover: r.cover || null, template: r.template || "minimal",
+    };
+    setDoc(d);
+    pristineRef.current = JSON.stringify(d); // abriu uma existente: só re-salva se editar
     setDraftId(r.id || newId());
     setDraftPublicId(r.publicId || null);
+    setEditorFrom("list");
     setFlowError("");
     setFlow("editing");
     setView("editor");
@@ -495,8 +555,10 @@ export default function Dashboard({ go }) {
   const onRowKey = (r) => (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(r); } };
 
   const navTo = async (v) => {
-    // Só rascunhos locais são salvos ao sair. Proposta concluída é imutável.
-    if (view === "editor" && flow !== "done" && hasContent && (!draftId || isLocalId(draftId))) {
+    // Salva rascunho local só se HOUVE mudança desde a abertura. Abrir uma
+    // proposta e sair sem mexer não cria (nem duplica) rascunho.
+    const changed = JSON.stringify(doc) !== pristineRef.current;
+    if (view === "editor" && flow !== "done" && changed && hasContent && (!draftId || isLocalId(draftId))) {
       upsertProposal(buildLocalDraft());
       await refreshRows();
     }
@@ -504,14 +566,40 @@ export default function Dashboard({ go }) {
     setFlow("editing");
     setView(v);
   };
-  const exitEditor = () => navTo("list");
+  const exitEditor = () => navTo(editorFrom);
+
+  // Limpar todos os campos da proposta (mantém o modelo e as cores escolhidas).
+  // Dois cliques pra confirmar, já que apaga tudo que foi digitado.
+  const [clearArm, setClearArm] = useState(false);
+  const clearFields = () => {
+    setDoc((d) => ({ ...BLANK_DOC, template: d.template, accent: d.accent, accent2: d.accent2, gradient: d.gradient }));
+    pushToast("Campos limpos.", "info");
+  };
+  const clearFieldsClick = () => {
+    if (clearArm) { clearFields(); setClearArm(false); return; }
+    setClearArm(true);
+    setTimeout(() => setClearArm(false), 3000);
+  };
+
+  // Clicar num campo da prévia foca o input correspondente no editor.
+  const focusField = (field) => {
+    const id = { title: "ed-title", client: "ed-client", scope: "ed-scope", bio: "ed-bio", items: "ed-item0" }[field];
+    if (!id) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => el.focus({ preventScroll: true }), 120);
+  };
 
   const startWithDesign = (id) => {
     let bio = "";
     try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
-    setDoc({ ...BLANK_DOC, template: id, bio });
+    const d = { ...BLANK_DOC, template: id, bio };
+    setDoc(d);
+    pristineRef.current = JSON.stringify(d); // escolheu um template em branco: idem
     setDraftId(newId());
     setDraftPublicId(null);
+    setEditorFrom("templates");
     setFlowError("");
     setFlow("editing");
     setView("editor");
@@ -625,6 +713,7 @@ export default function Dashboard({ go }) {
   const nav = [
     { key: "list", label: "Propostas", Icon: FileText },
     { key: "templates", label: "Templates", Icon: LayoutGrid },
+    { key: "calc", label: "Calculadora", Icon: Calculator },
     { key: "clients", label: "Clientes", Icon: Users },
     { key: "notifications", label: "Notificações", Icon: Bell, badge: unread },
     { key: "settings", label: "Configurações", Icon: Settings },
@@ -769,9 +858,29 @@ export default function Dashboard({ go }) {
         .db-dsn-chip-n{ font-size:11px; font-weight:700; color:${color.gray400}; background:${color.surface}; border-radius:999px; padding:1px 7px; }
         .db-dsn-chip.on .db-dsn-chip-n{ color:#fff; background:rgba(255,255,255,0.18); }
         .db-dsn-chip:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
-        .db-swatch{ width:24px; height:24px; border:none; border-radius:50%; cursor:pointer; padding:0; transition:transform .12s ease; }
-        .db-swatch:hover{ transform:scale(1.12); }
+        .db-swatch{ width:27px; height:27px; border:none; border-radius:50%; cursor:pointer; padding:0; display:inline-flex; align-items:center; justify-content:center; color:#fff; box-shadow:0 0 0 1px rgba(0,0,0,0.08); transition:transform .14s cubic-bezier(.2,.8,.2,1); }
+        .db-swatch:hover{ transform:scale(1.18); }
+        .db-swatch.on{ transform:scale(1.1); }
+        .db-swatch svg{ filter:drop-shadow(0 1px 1.5px rgba(0,0,0,0.4)); animation:dbPop .25s ease both; }
         .db-swatch:focus-visible{ outline:2px solid ${color.ink}; outline-offset:2px; }
+        /* botão de cor aleatória */
+        .db-dice{ width:31px; height:31px; border-radius:9px; border:1px dashed ${color.gray300}; background:#fff; color:${color.gray500}; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:transform .16s ease, border-color .16s ease, color .16s ease; }
+        .db-dice:hover{ transform:rotate(-14deg) scale(1.05); border-color:${color.accent}; color:${color.accent}; }
+        .db-dice:active{ transform:rotate(8deg) scale(.95); }
+        /* pill do seletor de cor com chip vivo */
+        .db-colorpill{ display:inline-flex; align-items:center; gap:9px; border:1px solid ${color.gray200}; border-radius:11px; padding:5px 12px 5px 6px; background:#fff; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease; }
+        .db-colorpill:hover{ border-color:${color.gray300}; }
+        .db-colorpill:focus-within{ border-color:${color.accent}; box-shadow:0 0 0 3px rgba(217,119,87,0.14); }
+        .db-colorchip{ width:30px; height:30px; border-radius:8px; flex:none; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.12); position:relative; overflow:hidden; }
+        .db-colorchip input{ position:absolute; inset:-6px; width:150%; height:150%; border:none; padding:0; background:none; cursor:pointer; }
+        /* cartões de tema com mini prévia */
+        .db-theme{ display:flex; flex-direction:column; gap:8px; align-items:stretch; width:100px; padding:0; background:none; border:none; cursor:pointer; }
+        .db-theme-prev{ height:58px; border-radius:11px; overflow:hidden; border:1.5px solid ${color.gray200}; display:flex; flex-direction:column; transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+        .db-theme:hover .db-theme-prev{ transform:translateY(-3px); box-shadow:0 10px 22px -12px rgba(20,20,30,0.4); }
+        .db-theme.on .db-theme-prev{ border-color:${color.ink}; box-shadow:0 0 0 3px rgba(24,24,27,0.13); }
+        .db-theme-line{ height:5px; border-radius:99px; margin:0 10px; }
+        .db-theme-name{ display:flex; align-items:center; justify-content:center; gap:6px; font-size:12.5px; font-weight:600; color:${color.gray500}; }
+        .db-theme.on .db-theme-name{ color:${color.ink}; }
         .db-status-sel{ font-family:${font.body}; font-size:11.5px; font-weight:600; padding:3px 10px; border-radius:999px; cursor:pointer; outline:none; -webkit-appearance:none; appearance:none; max-width:100%; }
         .db-status-sel:focus-visible{ outline:2px solid ${color.accent}; outline-offset:1px; }
         .db-kpi-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:26px; }
@@ -834,6 +943,11 @@ export default function Dashboard({ go }) {
         @keyframes dbStepIn{ from{ opacity:0; transform:translateY(9px); } to{ opacity:1; transform:none; } }
         .db-spin{ width:20px; height:20px; flex:none; border:2px solid ${color.accentTint}; border-top-color:${color.accent}; border-radius:50%; animation:dbSpin .7s linear infinite; }
         @keyframes dbSpin{ to{ transform:rotate(360deg); } }
+        .db-rot{ animation:dbSpin .6s linear infinite; }
+        /* Campo clicável na prévia: leva o foco pro input no editor */
+        .pd-edit{ cursor:pointer; border-radius:5px; box-decoration-break:clone; -webkit-box-decoration-break:clone; transition:background .12s ease, box-shadow .12s ease; }
+        .pd-edit:hover{ background:rgba(217,119,87,0.14); box-shadow:0 0 0 3px rgba(217,119,87,0.14); }
+        .pd-edit:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
         .db-tick{ width:20px; height:20px; flex:none; border-radius:50%; background:#EAF5EE; color:#2E7D51; display:flex; align-items:center; justify-content:center; animation:dbPop .3s ease both; }
         .db-check-ring{ stroke-dasharray:151; stroke-dashoffset:151; animation:dbDraw .5s ease forwards; }
         .db-check-tick{ stroke-dasharray:40; stroke-dashoffset:40; animation:dbDraw .4s .45s ease forwards; }
@@ -940,6 +1054,7 @@ export default function Dashboard({ go }) {
                   <Search size={16} strokeWidth={2} color={color.gray400} />
                   <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por cliente ou proposta" aria-label="Buscar propostas" />
                 </label>
+                <RefreshButton onRefresh={async () => { await refreshRows(); refreshUsage(); }} label="Atualizar propostas" />
                 <button onClick={newProposal} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 16px", flex: "none" }}>
                   <Plus size={16} strokeWidth={2.4} />Nova proposta
                 </button>
@@ -1023,11 +1138,13 @@ export default function Dashboard({ go }) {
             )}
           </div>
         ) : view === "templates" ? (
-          <DesignGallery onUse={startWithDesign} plan={user?.plan} />
+          <DesignGallery onUse={startWithDesign} plan={user?.role === "admin" ? "business" : user?.plan} onUpgrade={() => setShowPlans(true)} scope={user?.email} />
+        ) : view === "calc" ? (
+          <CalculatorPanel onNewProposal={(desc, value, list) => startProposalWithItem(desc, value, list)} scope={user?.email} />
         ) : view === "clients" ? (
-          <ClientsPanel rows={rows} />
+          <ClientsPanel rows={rows} onRefresh={async () => { await refreshRows(); }} />
         ) : view === "notifications" ? (
-          <NotificationsPanel notifs={notifs} readSet={notifRead} onRead={notifSetRead} onDelete={notifDelete} />
+          <NotificationsPanel notifs={notifs} readSet={notifRead} onRead={notifSetRead} onDelete={notifDelete} onRefresh={refreshNotifs} />
         ) : view === "settings" ? (
           <SettingsPanel user={user} setUser={setUser} go={go} pushToast={pushToast} usage={usage} />
         ) : (
@@ -1035,7 +1152,7 @@ export default function Dashboard({ go }) {
             {/* action bar */}
             <div style={{ flex: "none", minHeight: 60, background: color.white, borderBottom: `1px solid ${color.line2}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 20px", flexWrap: "wrap" }}>
               <button onClick={exitEditor} className="db-btn" style={{ fontSize: 14, fontWeight: 500, color: color.gray600, background: "none", padding: "6px 8px" }}>
-                <ArrowLeft size={17} strokeWidth={2.2} />Propostas
+                <ArrowLeft size={17} strokeWidth={2.2} />{{ templates: "Templates", calc: "Calculadora" }[editorFrom] || "Propostas"}
               </button>
               <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 13, color: locked ? "#8A5A1A" : color.gray400, marginRight: 6, display: "flex", alignItems: "center", gap: 6 }}>{locked ? <><Lock size={13} strokeWidth={2.2} />Enviada, somente leitura</> : <><span style={{ width: 7, height: 7, borderRadius: "50%", background: hasContent ? "#22C55E" : color.gray300 }} />{hasContent ? "Rascunho salvo ao sair" : "Rascunho"}</>}</span>
@@ -1053,9 +1170,16 @@ export default function Dashboard({ go }) {
                   </div>
                 )}
                 <div style={{ maxWidth: 440, margin: "0 auto", display: "flex", flexDirection: "column", gap: 26, pointerEvents: locked ? "none" : "auto", opacity: locked ? 0.6 : 1 }}>
-                  <div>
-                    <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 4 }}>Monte sua proposta</div>
-                    <div style={{ fontSize: "13.5px", color: color.gray500 }}>Preencha os campos e veja a proposta tomando forma à direita.</div>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                    <div>
+                      <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 4 }}>Monte sua proposta</div>
+                      <div style={{ fontSize: "13.5px", color: color.gray500 }}>Preencha os campos e veja a proposta tomando forma à direita.</div>
+                    </div>
+                    {hasContent && (
+                      <button onClick={clearFieldsClick} className="db-btn" style={{ flex: "none", fontSize: "12.5px", fontWeight: 600, gap: 5, color: clearArm ? "#B4443C" : color.gray500, background: "none", padding: "6px 9px", borderRadius: 8, border: `1px solid ${clearArm ? "#F5D2CD" : color.gray200}` }}>
+                        <RotateCcw size={13} strokeWidth={2.2} />{clearArm ? "Confirmar?" : "Limpar campos"}
+                      </button>
+                    )}
                   </div>
 
                   <div>
@@ -1063,10 +1187,12 @@ export default function Dashboard({ go }) {
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {DESIGNS.map((d) => {
                         const on = (doc.template || "minimal") === d.id;
+                        const locked = tplLocked(d.id);
                         return (
-                          <button key={d.id} onClick={() => setDoc((cur) => ({ ...cur, template: d.id }))} className="db-btn"
-                            style={{ fontSize: "13px", fontWeight: 600, padding: "8px 13px", borderRadius: 9, border: `1px solid ${on ? color.ink : color.gray200}`, background: on ? color.ink : "#fff", color: on ? "#fff" : color.ink900 }}>
-                            {d.name}
+                          <button key={d.id} onClick={() => (locked ? setShowPlans(true) : setDoc((cur) => ({ ...cur, template: d.id })))} className="db-btn"
+                            title={locked ? "Disponível no Pro. Clique para ver os planos." : undefined}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "13px", fontWeight: 600, padding: "8px 13px", borderRadius: 9, border: `1px solid ${on ? color.ink : color.gray200}`, background: on ? color.ink : "#fff", color: on ? "#fff" : locked ? color.gray400 : color.ink900 }}>
+                            {d.name}{locked && <Lock size={12} strokeWidth={2.2} />}
                           </button>
                         );
                       })}
@@ -1102,49 +1228,115 @@ export default function Dashboard({ go }) {
                   </div>
 
                   <div>
-                    <div style={sectionLabel}>Cor</div>
+                    <div style={sectionLabel}>Cor de destaque</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, border: `1px solid ${color.gray200}`, borderRadius: 10, padding: "5px 10px", cursor: "pointer" }}>
-                        <input type="color" value={doc.accent} onChange={(e) => setDoc((d) => ({ ...d, accent: e.target.value }))} style={{ width: 26, height: 26, border: "none", background: "none", padding: 0, cursor: "pointer" }} aria-label="Escolher cor" />
-                        <input value={doc.accent} onChange={(e) => setDoc((d) => ({ ...d, accent: e.target.value }))} maxLength={20} style={{ width: 82, border: "none", outline: "none", fontFamily: font.body, fontSize: 13, textTransform: "uppercase", color: color.ink }} aria-label="Cor em hexadecimal" />
+                      <label className="db-colorpill">
+                        <span className="db-colorchip" style={{ background: doc.accent }}>
+                          <input type="color" value={doc.accent} onChange={(e) => setDoc((d) => ({ ...d, accent: e.target.value }))} aria-label="Escolher cor" />
+                        </span>
+                        <input value={doc.accent} onChange={(e) => setDoc((d) => ({ ...d, accent: e.target.value }))} maxLength={20} style={{ width: 74, border: "none", outline: "none", fontFamily: font.body, fontSize: 13, fontWeight: 600, textTransform: "uppercase", color: color.ink, background: "none" }} aria-label="Cor em hexadecimal" />
                       </label>
-                      <div style={{ display: "flex", gap: 7 }}>
-                        {PRESET_COLORS.map((c) => (
-                          <button key={c} className="db-swatch" onClick={() => setDoc((d) => ({ ...d, accent: c }))} aria-label={`Cor ${c}`} title={c}
-                            style={{ width: 22, height: 22, background: c, boxShadow: (doc.accent || "").toLowerCase() === c.toLowerCase() ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : `0 0 0 1px ${color.line}` }} />
-                        ))}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {PRESET_COLORS.map((c) => {
+                          const on = (doc.accent || "").toLowerCase() === c.toLowerCase();
+                          return (
+                            <button key={c} className={on ? "db-swatch on" : "db-swatch"} onClick={() => setDoc((d) => ({ ...d, accent: c }))} aria-label={`Cor ${c}`} title={c}
+                              style={{ background: c, boxShadow: on ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : "0 0 0 1px rgba(0,0,0,0.08)" }}>
+                              {on && <Check size={13} strokeWidth={3} />}
+                            </button>
+                          );
+                        })}
                       </div>
+                      <span className="db-tip" data-tip="Surpreenda-me" style={{ display: "flex" }}>
+                        <button className="db-dice" aria-label="Cor aleatória" onClick={() => setDoc((d) => ({ ...d, accent: "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "0").toUpperCase() }))}>
+                          <Sparkles size={15} strokeWidth={2} />
+                        </button>
+                      </span>
                     </div>
-                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: color.gray600, cursor: "pointer" }}>
-                      <input type="checkbox" checked={!!doc.gradient} onChange={(e) => setDoc((d) => ({ ...d, gradient: e.target.checked }))} />
-                      Usar gradiente <span style={{ color: color.gray400, fontSize: 12 }}>(nos modelos Bold, Colorido e Aurora)</span>
+
+                    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 16, maxWidth: 360, cursor: "pointer" }}>
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: "block", fontSize: "13.5px", fontWeight: 600 }}>Usar gradiente</span>
+                        <span style={{ display: "block", fontSize: 12, color: color.gray400, marginTop: 1 }}>Nos modelos Bold, Colorido e Aurora.</span>
+                      </span>
+                      <span className="db-sw"><input type="checkbox" checked={!!doc.gradient} onChange={(e) => setDoc((d) => ({ ...d, gradient: e.target.checked }))} aria-label="Usar gradiente" /><i /></span>
                     </label>
                     {doc.gradient && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: "12.5px", color: color.gray500 }}>Segunda cor</span>
-                        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, border: `1px solid ${color.gray200}`, borderRadius: 10, padding: "5px 10px", cursor: "pointer" }}>
-                          <input type="color" value={doc.accent2} onChange={(e) => setDoc((d) => ({ ...d, accent2: e.target.value }))} style={{ width: 26, height: 26, border: "none", background: "none", padding: 0, cursor: "pointer" }} aria-label="Segunda cor" />
-                          <input value={doc.accent2} onChange={(e) => setDoc((d) => ({ ...d, accent2: e.target.value }))} maxLength={20} style={{ width: 82, border: "none", outline: "none", fontFamily: font.body, fontSize: 13, textTransform: "uppercase", color: color.ink }} aria-label="Segunda cor em hexadecimal" />
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap", animation: "dbUp .3s ease both" }}>
+                        <label className="db-colorpill">
+                          <span className="db-colorchip" style={{ background: doc.accent2 }}>
+                            <input type="color" value={doc.accent2} onChange={(e) => setDoc((d) => ({ ...d, accent2: e.target.value }))} aria-label="Segunda cor" />
+                          </span>
+                          <input value={doc.accent2} onChange={(e) => setDoc((d) => ({ ...d, accent2: e.target.value }))} maxLength={20} style={{ width: 74, border: "none", outline: "none", fontFamily: font.body, fontSize: 13, fontWeight: 600, textTransform: "uppercase", color: color.ink, background: "none" }} aria-label="Segunda cor em hexadecimal" />
                         </label>
-                        <span style={{ width: 44, height: 26, borderRadius: 7, background: `linear-gradient(135deg, ${doc.accent}, ${doc.accent2})`, border: `1px solid ${color.line}` }} />
+                        <span className="db-tip" data-tip="Trocar as cores" style={{ display: "flex" }}>
+                          <button onClick={() => setDoc((d) => ({ ...d, accent: d.accent2, accent2: d.accent }))} className="db-btn" aria-label="Trocar as cores" style={{ width: 34, height: 34, border: `1px solid ${color.gray200}`, background: "#fff", borderRadius: 9, color: color.gray500 }}><RotateCcw size={15} strokeWidth={2} /></button>
+                        </span>
+                        <span style={{ flex: 1, minWidth: 90, height: 30, borderRadius: 9, background: `linear-gradient(135deg, ${doc.accent}, ${doc.accent2})`, border: `1px solid ${color.line}` }} />
                       </div>
                     )}
                   </div>
 
+                  <div>
+                    <div style={sectionLabel}>Tema de fundo</div>
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      {[["claro", "Claro", "#FFFFFF", "#3A3A3E"], ["creme", "Creme", "#FBF8F2", "#4E4433"], ["escuro", "Escuro", "#171719", "#C4C4CB"]].map(([id, label, bg, ink]) => {
+                        const on = (doc.theme || "claro") === id;
+                        return (
+                          <button key={id} onClick={() => setDoc((d) => ({ ...d, theme: id }))} className={on ? "db-theme on" : "db-theme"} aria-pressed={on}>
+                            <span className="db-theme-prev" style={{ background: bg }}>
+                              <span style={{ height: 8, background: doc.accent }} />
+                              <span style={{ padding: "9px 0 0", display: "flex", flexDirection: "column", gap: 5 }}>
+                                <span className="db-theme-line" style={{ background: doc.accent, width: "44%" }} />
+                                <span className="db-theme-line" style={{ background: ink, opacity: 0.55, width: "auto" }} />
+                                <span className="db-theme-line" style={{ background: ink, opacity: 0.32, marginRight: 36 }} />
+                              </span>
+                            </span>
+                            <span className="db-theme-name">{on && <Check size={13} strokeWidth={3} color={color.accent} />}{label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ fontSize: "11.5px", color: color.gray400, marginTop: 10 }}>A prévia muda com a sua cor. O destaque continua no título e nos realces.</div>
+                  </div>
+
+                  {doc.template === "grande" && (
+                    <div>
+                      <div style={sectionLabel}>Marca d'água</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        {[["", "Automática"], ["custom", "Uma letra"], ["off", "Nenhuma"]].map(([mode, label]) => {
+                          const cur = doc.watermark === "off" ? "off" : (doc.watermark ? "custom" : "");
+                          const on = cur === mode;
+                          return (
+                            <button key={mode || "auto"} onClick={() => setDoc((d) => ({ ...d, watermark: mode === "custom" ? (d.watermark && d.watermark !== "off" ? d.watermark : (d.company || d.client || "M").trim().charAt(0).toUpperCase() || "M") : mode }))} className="db-btn"
+                              style={{ fontSize: "13px", fontWeight: 600, padding: "8px 13px", borderRadius: 9, border: `1.5px solid ${on ? color.ink : color.gray200}`, background: "#fff", color: on ? color.ink : color.gray600 }}>
+                              {label}
+                            </button>
+                          );
+                        })}
+                        {doc.watermark && doc.watermark !== "off" && (
+                          <input value={doc.watermark} onChange={(e) => setDoc((d) => ({ ...d, watermark: (e.target.value.trim().charAt(0) || "").toUpperCase() }))} maxLength={1} aria-label="Letra da marca d'água"
+                            style={{ width: 44, height: 40, textAlign: "center", fontFamily: font.heading, fontWeight: 900, fontSize: 18, border: `1px solid ${color.gray200}`, borderRadius: 9, outline: "none", color: color.ink, textTransform: "uppercase" }} />
+                        )}
+                      </div>
+                      <div style={{ fontSize: "11.5px", color: color.gray400, marginTop: 8 }}>A letra gigante ao fundo da proposta. Automática usa a inicial do cliente ou da empresa.</div>
+                    </div>
+                  )}
+
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                     <Field label="Cliente" required>
-                      <input className="db-input" list="db-known-clients" value={doc.client} onChange={pickClient} maxLength={LIMITS.client} placeholder="Nome do cliente" style={inp()} />
+                      <input id="ed-client" className="db-input" list="db-known-clients" value={doc.client} onChange={pickClient} maxLength={LIMITS.client} placeholder="Nome do cliente" style={inp()} />
                       <datalist id="db-known-clients">
                         {knownClients.map((c, i) => <option key={i} value={c.name}>{c.company || c.email || ""}</option>)}
                       </datalist>
                     </Field>
                     <Field label="Empresa"><input className="db-input" value={doc.company} onChange={updDoc("company")} maxLength={LIMITS.company} placeholder="Empresa" style={inp()} /></Field>
                   </div>
-                  <Field label="Título da proposta" required><input className="db-input" value={doc.title} onChange={updDoc("title")} maxLength={LIMITS.title} placeholder="Ex: Produção de vídeo institucional" style={inp()} /></Field>
+                  <Field label="Título da proposta" required><input id="ed-title" className="db-input" value={doc.title} onChange={updDoc("title")} maxLength={LIMITS.title} placeholder="Ex: Produção de vídeo institucional" style={inp()} /></Field>
 
                   <div>
                     <div style={sectionLabel}>Escopo</div>
-                    <textarea className="db-input" value={doc.scope} onChange={updDoc("scope")} maxLength={LIMITS.scope} rows={4} placeholder="Descreva o que está incluído no serviço." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
+                    <textarea id="ed-scope" className="db-input" value={doc.scope} onChange={updDoc("scope")} maxLength={LIMITS.scope} rows={4} placeholder="Descreva o que está incluído no serviço." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
                     <div style={{ fontSize: "12px", color: color.gray400, marginTop: 5, textAlign: "right" }}>{doc.scope.length}/{LIMITS.scope}</div>
                   </div>
 
@@ -1152,19 +1344,25 @@ export default function Dashboard({ go }) {
                     <div style={sectionLabel}>Investimento</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {doc.items.map((it, i) => (
-                        <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <input className="db-input" value={it.desc} onChange={updItem(i, "desc")} maxLength={LIMITS.itemDesc} placeholder="Item" style={{ ...inp(), flex: 1 }} />
-                          <div className="db-input" style={{ display: "flex", alignItems: "center", gap: 4, flex: "none", width: 118, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "0 10px", background: color.white }}>
+                        <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", opacity: it.hidden ? 0.55 : 1 }}>
+                          <input id={i === 0 ? "ed-item0" : undefined} className="db-input" value={it.desc} onChange={updItem(i, "desc")} maxLength={LIMITS.itemDesc} placeholder="Item" style={{ ...inp(), flex: 1, textDecoration: it.hidden ? "line-through" : "none", color: it.hidden ? color.gray400 : color.ink }} />
+                          <div className="db-input" style={{ display: "flex", alignItems: "center", gap: 4, flex: "none", width: 118, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "0 10px", background: it.hidden ? color.surface : color.white }}>
                             <span style={{ fontSize: 13, color: color.gray400 }}>R$</span>
-                            <input value={it.value} onChange={updItem(i, "value")} maxLength={LIMITS.itemValue} inputMode="numeric" placeholder="0" style={{ width: "100%", border: "none", outline: "none", fontFamily: font.body, fontSize: 14, padding: "10px 0", background: "transparent" }} />
+                            <input value={it.value} onChange={updItem(i, "value")} maxLength={LIMITS.itemValue} inputMode="numeric" placeholder="0" style={{ width: "100%", border: "none", outline: "none", fontFamily: font.body, fontSize: 14, padding: "10px 0", background: "transparent", textDecoration: it.hidden ? "line-through" : "none", color: it.hidden ? color.gray400 : color.ink }} />
                           </div>
+                          <span className="db-tip" data-tip={it.hidden ? "Cliente não vê nem paga. Clique para mostrar" : "Ocultar do cliente (não cobra)"} style={{ flex: "none", display: "flex" }}>
+                            <button onClick={() => toggleItemHidden(i)} className="db-btn" aria-label={it.hidden ? "Mostrar item ao cliente" : "Ocultar item do cliente"} aria-pressed={it.hidden} style={{ flex: "none", width: 34, height: 38, border: "1px solid #EEE", background: color.white, borderRadius: 9, color: it.hidden ? color.gray300 : color.gray500 }}>{it.hidden ? <EyeOff size={15} strokeWidth={2} /> : <Eye size={15} strokeWidth={2} />}</button>
+                          </span>
                           <button onClick={removeItem(i)} className="db-btn" aria-label="Remover item" style={{ flex: "none", width: 34, height: 38, border: "1px solid #EEE", background: color.white, borderRadius: 9, color: color.gray400 }}><Trash2 size={15} strokeWidth={2} /></button>
                         </div>
                       ))}
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
                       <button onClick={addItem} disabled={doc.items.length >= MAX_ITEMS} className="db-btn" style={{ fontSize: "13.5px", color: color.accent, background: "none", padding: "4px 2px" }}>
                         <Plus size={15} strokeWidth={2.4} />Adicionar item
+                      </button>
+                      <button onClick={() => setShowCalc(true)} disabled={doc.items.length >= MAX_ITEMS} className="db-btn" style={{ fontSize: "13.5px", color: color.gray600, background: "none", padding: "4px 2px", gap: 6 }}>
+                        <Calculator size={15} strokeWidth={2} />Calcular preço
                       </button>
                       {doc.items.length >= MAX_ITEMS && <span style={{ fontSize: "12.5px", color: color.gray400 }}>Limite de {MAX_ITEMS} itens.</span>}
                     </div>
@@ -1188,7 +1386,7 @@ export default function Dashboard({ go }) {
 
                   <div>
                     <div style={sectionLabel}>Sobre mim</div>
-                    <textarea className="db-input" value={doc.bio} onChange={updDoc("bio")} maxLength={LIMITS.bio} rows={3} placeholder="Uma breve apresentação sua." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
+                    <textarea id="ed-bio" className="db-input" value={doc.bio} onChange={updDoc("bio")} maxLength={LIMITS.bio} rows={3} placeholder="Uma breve apresentação sua." style={{ ...inp(), resize: "vertical", lineHeight: 1.5 }} />
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: "12.5px", color: color.gray400, marginTop: 6 }}>
                       <span>Salvo para a próxima proposta automaticamente.</span>
                       <span>{doc.bio.length}/{LIMITS.bio}</span>
@@ -1200,10 +1398,12 @@ export default function Dashboard({ go }) {
               {/* preview side */}
               {showPreview && (
                 <div className="db-preview" style={{ overflow: "auto", background: color.surface, padding: "32px 36px" }}>
-                  <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} />
+                  <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} onEdit={locked ? undefined : focusField} />
                 </div>
               )}
             </div>
+
+            {showCalc && <PriceCalculator onClose={() => setShowCalc(false)} onApply={applyPrice} scope={user?.email} />}
 
             {/* barra inferior */}
             <div className="db-footbar">
@@ -1356,7 +1556,7 @@ export default function Dashboard({ go }) {
   );
 }
 
-function NotificationsPanel({ notifs, readSet, onRead, onDelete }) {
+function NotificationsPanel({ notifs, readSet, onRead, onDelete, onRefresh }) {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(new Set());
   const [confirmAll, setConfirmAll] = useState(false); // "Excluir todas" em 2 passos
@@ -1390,9 +1590,12 @@ function NotificationsPanel({ notifs, readSet, onRead, onDelete }) {
 
   return (
     <div className="db-pad" style={{ maxWidth: 720 }}>
-      <div style={{ marginBottom: 18 }}>
-        <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Notificações</h1>
-        <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Cada vez que um cliente interage com suas propostas, aparece aqui.</p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+        <div>
+          <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Notificações</h1>
+          <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Cada vez que um cliente interage com suas propostas, aparece aqui.</p>
+        </div>
+        {onRefresh && <RefreshButton onRefresh={onRefresh} label="Buscar novas notificações" />}
       </div>
 
       {notifs.length > 0 && (
@@ -1468,6 +1671,396 @@ function NotificationsPanel({ notifs, readSet, onRead, onDelete }) {
         </div>
       )}
     </div>
+  );
+}
+
+const calcChip = (on) => ({
+  fontSize: "12.5px", fontWeight: 600, padding: "7px 12px", borderRadius: 999, cursor: "pointer",
+  border: `1px solid ${on ? color.ink : color.gray200}`, background: on ? color.ink : "#fff", color: on ? "#fff" : color.gray600,
+});
+const calcLabel = { fontSize: 12, fontWeight: 600, color: color.gray500, display: "block", marginBottom: 6 };
+
+// Sanitiza entrada numérica: só dígitos e UM separador decimal, limita o
+// comprimento e o valor máximo. Impede números absurdos que quebram o layout
+// e o cálculo (ex.: margem de 10^30%).
+function clampNum(s, { max, maxLen = 10, integer = false } = {}) {
+  let v = String(s).replace(integer ? /[^0-9]/g : /[^0-9.,]/g, "");
+  if (!integer) {
+    const idx = v.search(/[.,]/);
+    if (idx >= 0) v = v.slice(0, idx + 1) + v.slice(idx + 1).replace(/[.,]/g, ""); // um separador só
+  }
+  if (v.length > maxLen) v = v.slice(0, maxLen);
+  if (max != null && v !== "" && v !== "." && v !== ",") {
+    const num = parseFloat(v.replace(",", "."));
+    if (!isNaN(num) && num > max) v = String(max);
+  }
+  return v;
+}
+
+// Campo numérico com prefixo/sufixo (R$, km, %...) e limites de segurança.
+function NumField({ label, value, onChange, prefix, suffix, placeholder, width, max, maxLen, integer }) {
+  return (
+    <label style={{ display: "block", width: width || "auto" }}>
+      <span style={calcLabel}>{label}</span>
+      <span style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "0 11px", background: "#fff" }}>
+        {prefix && <span style={{ fontSize: 13, color: color.gray400, flex: "none" }}>{prefix}</span>}
+        <input value={value} onChange={(e) => onChange(clampNum(e.target.value, { max, maxLen, integer }))} inputMode="decimal" placeholder={placeholder || "0"}
+          style={{ width: "100%", minWidth: 0, border: "none", outline: "none", fontFamily: font.body, fontSize: 14, padding: "10px 0", background: "transparent", fontVariantNumeric: "tabular-nums" }} />
+        {suffix && <span style={{ fontSize: 12.5, color: color.gray400, flex: "none" }}>{suffix}</span>}
+      </span>
+    </label>
+  );
+}
+
+function CostBuilder({ onApply, applyLabel, scope }) {
+  const saved = useMemo(() => { try { return JSON.parse(localStorage.getItem(calcProfileKey(scope)) || "{}"); } catch { return {}; } }, [scope]);
+  const [nome, setNome] = useState(saved.nome || "");
+  const [travelOn, setTravelOn] = useState(!!saved.travelOn);
+  const [litro, setLitro] = useState(saved.litro || "");
+  const [consumo, setConsumo] = useState(saved.consumo || String(DEFAULT_CONSUMO));
+  const [distancia, setDistancia] = useState(saved.distancia || "");
+  const [idaVolta, setIdaVolta] = useState(saved.idaVolta != null ? saved.idaVolta : true);
+  const [tools, setTools] = useState(saved.tools || []);
+  const [projetosMes, setProjetosMes] = useState(saved.projetosMes || "4");
+  const [materials, setMaterials] = useState(saved.materials || []);
+  const [horas, setHoras] = useState(saved.horas || "");
+  const [valorHora, setValorHora] = useState(saved.valorHora || "");
+  const [diff, setDiff] = useState(saved.diff || "media");
+  const [margem, setMargem] = useState(saved.margem != null ? saved.margem : "30");
+  const [imposto, setImposto] = useState(saved.imposto != null ? saved.imposto : "0");
+
+  // Salva TUDO no localStorage (não no banco, pra não gastar memória lá).
+  // Recarregar restaura o estado inteiro: campos fixos e os do trabalho atual.
+  // A trava `mounted` impede gravar ANTES de o estado inicial carregar (senão,
+  // enquanto o email do usuário ainda não chegou, gravaria vazio por cima).
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) { mounted.current = true; return; }
+    const p = { nome, travelOn, litro, consumo, distancia, idaVolta, tools, projetosMes, materials, horas, valorHora, diff, margem, imposto };
+    try { localStorage.setItem(calcProfileKey(scope), JSON.stringify(p)); } catch { /* ignore */ }
+  }, [nome, travelOn, litro, consumo, distancia, idaVolta, tools, projetosMes, materials, horas, valorHora, diff, margem, imposto, scope]);
+
+  const clearAll = () => {
+    setNome(""); setTravelOn(false); setLitro(""); setConsumo(String(DEFAULT_CONSUMO));
+    setDistancia(""); setIdaVolta(true); setTools([]); setProjetosMes("4");
+    setMaterials([]); setHoras(""); setValorHora(""); setDiff("media"); setMargem("30"); setImposto("0");
+    try { localStorage.removeItem(calcProfileKey(scope)); } catch { /* ignore */ }
+  };
+  const hasAny = nome || travelOn || litro || distancia || tools.length || materials.length || horas || valorHora || (margem && margem !== "30") || (imposto && imposto !== "0");
+
+  const n = (v) => { const x = parseFloat(String(v).replace(",", ".")); return isNaN(x) ? 0 : x; };
+  const fuel = travelOn ? (n(distancia) * (idaVolta ? 2 : 1) / Math.max(1, n(consumo))) * n(litro) : 0;
+  const toolsMonthly = tools.reduce((a, t) => a + n(t.monthly), 0);
+  const toolsCost = toolsMonthly / Math.max(1, n(projetosMes) || 1);
+  const materialsCost = materials.reduce((a, m) => a + n(m.value), 0);
+  const custos = fuel + toolsCost + materialsCost;
+  const diffMult = (PROJECT_DIFFICULTY.find((d) => d.key === diff) || PROJECT_DIFFICULTY[1]).mult;
+  const mao = n(horas) * n(valorHora) * diffMult;
+  const subtotal = custos + mao;
+  const comMargem = subtotal * (1 + n(margem) / 100);
+  const imp = n(imposto);
+  const final = imp > 0 && imp < 100 ? comMargem / (1 - imp / 100) : comMargem;
+
+  // Monta as linhas da proposta a partir dos componentes somados. A margem e o
+  // imposto (o "markup" = preço final / subtotal) são distribuídos em cada linha,
+  // então o total das linhas bate com o preço sugerido.
+  const buildItems = () => {
+    const parts = [];
+    if (mao > 0) parts.push({ desc: nome.trim() || "Serviço", base: mao });
+    if (fuel > 0) parts.push({ desc: idaVolta ? "Deslocamento (ida e volta)" : "Deslocamento", base: fuel });
+    tools.forEach((t) => { const m = n(t.monthly) / Math.max(1, n(projetosMes) || 1); if (t.name.trim() && m > 0) parts.push({ desc: t.name.trim(), base: m }); });
+    materials.forEach((m2) => { if (m2.name.trim() && n(m2.value) > 0) parts.push({ desc: m2.name.trim(), base: n(m2.value) }); });
+    const target = Math.round(final);
+    const baseSum = parts.reduce((a, p) => a + p.base, 0);
+    if (parts.length === 0 || baseSum <= 0) return [{ desc: nome.trim() || "Serviço", value: String(target) }];
+    const k = target / baseSum;
+    const items = parts.map((p) => ({ desc: p.desc, value: Math.round(p.base * k) }));
+    const diffFix = target - items.reduce((a, x) => a + x.value, 0);
+    items[items.length - 1].value = Math.max(0, items[items.length - 1].value + diffFix); // ajuste de arredondamento
+    return items.slice(0, MAX_ITEMS).map((x) => ({ desc: x.desc, value: String(x.value) }));
+  };
+
+  const addTool = () => setTools((t) => [...t, { name: "", monthly: "" }]);
+  const setTool = (i, k, v) => setTools((t) => t.map((x, j) => (j === i ? { ...x, [k]: k === "monthly" ? clampNum(v, { max: 999999, maxLen: 7 }) : v } : x)));
+  const rmTool = (i) => setTools((t) => t.filter((_, j) => j !== i));
+  const addMat = () => setMaterials((m) => [...m, { name: "", value: "" }]);
+  const setMat = (i, k, v) => setMaterials((m) => m.map((x, j) => (j === i ? { ...x, [k]: k === "value" ? clampNum(v, { max: 999999, maxLen: 7 }) : v } : x)));
+  const rmMat = (i) => setMaterials((m) => m.filter((_, j) => j !== i));
+
+  const card = { border: `1px solid ${color.line2}`, borderRadius: 13, padding: "16px 16px" };
+  const cardHead = { fontSize: 14, fontWeight: 700, marginBottom: 3 };
+  const cardSub = { fontSize: "12.5px", color: color.gray500, margin: "0 0 14px" };
+  const line = (label, value, faded) => (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: faded ? color.gray400 : color.gray600, padding: "3px 0" }}>
+      <span>{label}</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtBRL(value)}</span>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <span style={{ fontSize: 12, color: color.gray400 }}>Preenchido salva sozinho neste navegador.</span>
+        <button onClick={clearAll} disabled={!hasAny} className="db-btn" style={{ fontSize: "12.5px", fontWeight: 600, color: hasAny ? color.gray600 : color.gray300, background: "none", padding: "5px 8px", gap: 5 }}>
+          <RotateCcw size={13} strokeWidth={2.2} />Limpar tudo
+        </button>
+      </div>
+      <label style={{ display: "block" }}>
+        <span style={calcLabel}>O que você vai cobrar?</span>
+        <input value={nome} onChange={(e) => setNome(e.target.value)} maxLength={60} placeholder="ex: Ensaio fotográfico, Landing page…" style={inp()} />
+      </label>
+
+      {/* Deslocamento */}
+      <div style={card}>
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, cursor: "pointer" }}>
+          <span>
+            <span style={cardHead}>Deslocamento</span>
+            <span style={{ ...cardSub, margin: 0, display: "block" }}>Gasolina pra ir até o cliente.</span>
+          </span>
+          <span className="db-sw"><input type="checkbox" checked={travelOn} onChange={() => setTravelOn((v) => !v)} aria-label="Incluir deslocamento" /><i /></span>
+        </label>
+        {travelOn && (
+          <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+            <NumField label="Preço do litro" prefix="R$" value={litro} onChange={setLitro} placeholder="ex: 6,00" max={99} maxLen={5} />
+            <NumField label="Distância" suffix="km" value={distancia} onChange={setDistancia} placeholder="ex: 12" max={9999} maxLen={5} />
+            <NumField label="Consumo" suffix="km/L" value={consumo} onChange={setConsumo} placeholder="ex: 11" max={99} maxLen={4} />
+            <label style={{ display: "block" }}>
+              <span style={calcLabel}>Trajeto</span>
+              <button onClick={() => setIdaVolta((v) => !v)} className="db-btn" style={{ width: "100%", justifyContent: "center", fontSize: 13, fontWeight: 600, padding: "10px 0", borderRadius: 9, border: `1px solid ${color.gray200}`, background: "#fff", color: color.gray700 }}>{idaVolta ? "Ida e volta" : "Só ida"}</button>
+            </label>
+          </div>
+        )}
+      </div>
+
+      {/* Ferramentas e assinaturas */}
+      <div style={card}>
+        <div style={cardHead}>Ferramentas e assinaturas</div>
+        <p style={cardSub}>O que você paga por mês pra trabalhar (Adobe, IA, plugins). É rateado pelos projetos do mês.</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {tools.map((t, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input value={t.name} onChange={(e) => setTool(i, "name", e.target.value)} maxLength={40} placeholder="Ex: Pacote Adobe" style={{ ...inp(), flex: 1 }} />
+              <span style={{ display: "flex", alignItems: "center", gap: 4, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "0 10px", background: "#fff", flex: "none", width: 110 }}>
+                <span style={{ fontSize: 13, color: color.gray400 }}>R$</span>
+                <input value={t.monthly} onChange={(e) => setTool(i, "monthly", e.target.value)} inputMode="decimal" placeholder="ex: 120" style={{ width: "100%", minWidth: 0, border: "none", outline: "none", fontFamily: font.body, fontSize: 14, padding: "10px 0", background: "transparent" }} />
+              </span>
+              <button onClick={() => rmTool(i)} className="db-btn" aria-label="Remover" style={{ flex: "none", width: 34, height: 38, border: "1px solid #EEE", background: "#fff", borderRadius: 9, color: color.gray400 }}><Trash2 size={15} strokeWidth={2} /></button>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
+          <button onClick={addTool} className="db-btn" style={{ fontSize: "13.5px", color: color.accent, background: "none", padding: "4px 2px" }}><Plus size={15} strokeWidth={2.4} />Adicionar ferramenta</button>
+          {tools.length > 0 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: "12.5px", color: color.gray500 }}>
+              Projetos por mês
+              <input value={projetosMes} onChange={(e) => setProjetosMes(clampNum(e.target.value, { max: 999, maxLen: 3, integer: true }))} inputMode="numeric" style={{ width: 48, textAlign: "center", border: `1px solid ${color.gray200}`, borderRadius: 8, padding: "6px 4px", fontFamily: font.body, fontSize: 13 }} />
+            </label>
+          )}
+        </div>
+      </div>
+
+      {/* Custos do projeto */}
+      <div style={card}>
+        <div style={cardHead}>Custos do projeto</div>
+        <p style={cardSub}>Gastos só deste trabalho: impressão, banco de imagens, insumos, terceiros.</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {materials.map((m, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input value={m.name} onChange={(e) => setMat(i, "name", e.target.value)} maxLength={40} placeholder="Ex: Banco de imagens" style={{ ...inp(), flex: 1 }} />
+              <span style={{ display: "flex", alignItems: "center", gap: 4, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "0 10px", background: "#fff", flex: "none", width: 110 }}>
+                <span style={{ fontSize: 13, color: color.gray400 }}>R$</span>
+                <input value={m.value} onChange={(e) => setMat(i, "value", e.target.value)} inputMode="decimal" placeholder="ex: 90" style={{ width: "100%", minWidth: 0, border: "none", outline: "none", fontFamily: font.body, fontSize: 14, padding: "10px 0", background: "transparent" }} />
+              </span>
+              <button onClick={() => rmMat(i)} className="db-btn" aria-label="Remover" style={{ flex: "none", width: 34, height: 38, border: "1px solid #EEE", background: "#fff", borderRadius: 9, color: color.gray400 }}><Trash2 size={15} strokeWidth={2} /></button>
+            </div>
+          ))}
+        </div>
+        <button onClick={addMat} className="db-btn" style={{ fontSize: "13.5px", color: color.accent, background: "none", padding: "8px 2px 0" }}><Plus size={15} strokeWidth={2.4} />Adicionar custo</button>
+      </div>
+
+      {/* Seu trabalho */}
+      <div style={card}>
+        <div style={cardHead}>Seu trabalho</div>
+        <p style={cardSub}>O tempo que você vai investir e quanto vale a sua hora.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+          <NumField label="Horas estimadas" suffix="h" value={horas} onChange={setHoras} placeholder="ex: 8" max={999} maxLen={5} />
+          <NumField label="Valor da sua hora" prefix="R$" value={valorHora} onChange={setValorHora} placeholder="ex: 60" max={99999} maxLen={6} />
+        </div>
+        <span style={calcLabel}>Dificuldade do projeto</span>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {PROJECT_DIFFICULTY.map((d) => <button key={d.key} onClick={() => setDiff(d.key)} title={d.hint} style={calcChip(diff === d.key)}>{d.label}</button>)}
+        </div>
+      </div>
+
+      {/* Margem e impostos */}
+      <div style={{ ...card, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <NumField label="Margem de lucro" suffix="%" value={margem} onChange={setMargem} placeholder="ex: 30" max={300} maxLen={4} />
+        <NumField label="Impostos e taxas" suffix="%" value={imposto} onChange={setImposto} placeholder="ex: 6" max={90} maxLen={4} />
+      </div>
+
+      {/* Resultado */}
+      <div style={{ background: "linear-gradient(180deg, " + color.accentTint + " 0%, #fff 92%)", border: `1px solid ${color.accentLine}`, borderRadius: 14, padding: "18px 20px" }}>
+        <div style={{ marginBottom: 12 }}>
+          {custos > 0 && line("Custos (deslocamento, ferramentas, projeto)", custos)}
+          {mao > 0 && line(`Seu trabalho (${n(horas) || 0}h × ${diffMult}×)`, mao)}
+          {n(margem) > 0 && line(`Margem de lucro (${n(margem)}%)`, comMargem - subtotal, true)}
+          {imp > 0 && line(`Impostos e taxas (${imp}%)`, final - comMargem, true)}
+        </div>
+        <div style={{ borderTop: `1px solid ${color.accentLine}`, paddingTop: 14, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: color.accentInk, display: "flex", alignItems: "center", gap: 6, flex: "none" }}><Sparkles size={13} strokeWidth={2.2} />Preço sugerido</span>
+          <span style={{ fontFamily: font.body, fontWeight: 700, fontSize: 28, letterSpacing: "-0.02em", color: color.ink, fontVariantNumeric: "tabular-nums", minWidth: 0, overflowWrap: "anywhere", textAlign: "right" }}>{fmtBRL(final)}</span>
+        </div>
+      </div>
+
+      <button onClick={() => onApply(nome.trim() || "Serviço", Math.round(final), buildItems())} disabled={final <= 0} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "12px 18px", alignSelf: "flex-start", maxWidth: "100%", opacity: final > 0 ? 1 : 0.5 }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{applyLabel} {fmtBRL(final)}</span>
+      </button>
+    </div>
+  );
+}
+
+function MarketTable({ onApply, applyLabel }) {
+  const [catIdx, setCatIdx] = useState(0);
+  const [svc, setSvc] = useState(null);
+  const [cx, setCx] = useState("media");
+  const [urg, setUrg] = useState("normal");
+  const cat = PRICE_TABLE[catIdx];
+  const cxMult = (COMPLEXITY.find((c) => c.key === cx) || COMPLEXITY[1]).mult;
+  const urgMult = (URGENCY.find((u) => u.key === urg) || URGENCY[0]).mult;
+  const r = svc ? suggest(svc, cxMult, urgMult) : null;
+  return (
+    <>
+      <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 }}>
+        {PRICE_TABLE.map((c, i) => <button key={c.cat} onClick={() => { setCatIdx(i); setSvc(null); }} style={calcChip(i === catIdx)}>{c.cat}</button>)}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 18 }}>
+        {cat.services.map((s) => {
+          const on = svc && svc.name === s.name;
+          return (
+            <button key={s.name} onClick={() => setSvc(s)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, textAlign: "left", padding: "11px 14px", borderRadius: 11, cursor: "pointer", border: `1px solid ${on ? color.accent : color.line2}`, background: on ? color.accentTint : "#fff" }}>
+              <span style={{ fontSize: 14, fontWeight: on ? 600 : 500, color: color.ink }}>{s.name}</span>
+              <span style={{ fontSize: 12, color: color.gray400, flex: "none" }}>por {s.unit}</span>
+            </button>
+          );
+        })}
+      </div>
+      {r ? (
+        <>
+          <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 18 }}>
+            <div>
+              <div style={calcLabel}>Complexidade</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{COMPLEXITY.map((c) => <button key={c.key} onClick={() => setCx(c.key)} title={c.hint} style={calcChip(cx === c.key)}>{c.label}</button>)}</div>
+            </div>
+            <div>
+              <div style={calcLabel}>Prazo</div>
+              <div style={{ display: "flex", gap: 6 }}>{URGENCY.map((u) => <button key={u.key} onClick={() => setUrg(u.key)} style={calcChip(urg === u.key)}>{u.label}</button>)}</div>
+            </div>
+          </div>
+          <div style={{ background: "linear-gradient(180deg, " + color.accentTint + " 0%, #fff 90%)", border: `1px solid ${color.accentLine}`, borderRadius: 14, padding: "18px 20px", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: color.accentInk, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}><Sparkles size={13} strokeWidth={2.2} />Faixa por {r.unit}</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: font.body, fontWeight: 700, fontSize: 30, letterSpacing: "-0.02em", color: color.ink, fontVariantNumeric: "tabular-nums" }}>{fmtBRL(r.typ)}</span>
+              <span style={{ fontSize: "13.5px", color: color.gray500 }}>comum {fmtBRL(r.min)} a {fmtBRL(r.max)}</span>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button onClick={() => onApply(svc.name, r.typ)} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "11px 18px" }}>{applyLabel} {fmtBRL(r.typ)}</button>
+            <button onClick={() => onApply(svc.name, r.min)} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "11px 16px" }}>{applyLabel} mínimo</button>
+            <button onClick={() => onApply(svc.name, r.max)} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "11px 16px" }}>{applyLabel} máximo</button>
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 13, color: color.gray400, textAlign: "center", padding: "8px 0 4px" }}>Selecione um serviço para ver a faixa.</div>
+      )}
+    </>
+  );
+}
+
+// Núcleo reutilizado pelo modal (editor) e pela aba. Alterna entre "montar meu
+// preço" (a partir dos seus custos) e "faixa de mercado" (referência).
+function PriceCalcCore({ onApply, applyLabel = "Usar", scope }) {
+  const [mode, setMode] = useState("build");
+  const tab = (key, label) => (
+    <button onClick={() => setMode(key)} style={{ flex: 1, fontSize: "13.5px", fontWeight: 600, padding: "9px 0", borderRadius: 8, cursor: "pointer", border: "none", background: mode === key ? "#fff" : "transparent", color: mode === key ? color.ink : color.gray500, boxShadow: mode === key ? "0 1px 2px rgba(0,0,0,0.08)" : "none" }}>{label}</button>
+  );
+  return (
+    <>
+      <div style={{ display: "flex", gap: 3, background: color.surface, border: `1px solid ${color.gray200}`, borderRadius: 10, padding: 3, marginBottom: 18 }}>
+        {tab("build", "Montar meu preço")}
+        {tab("market", "Faixa de mercado")}
+      </div>
+      {mode === "build"
+        ? <CostBuilder key={scope || "anon"} onApply={onApply} applyLabel={applyLabel} scope={scope} />
+        : <MarketTable onApply={onApply} applyLabel={applyLabel} />}
+    </>
+  );
+}
+
+// Aba dedicada: mesma calculadora, e "Usar" abre uma proposta nova com o item.
+function CalculatorPanel({ onNewProposal, scope }) {
+  return (
+    <div className="db-pad" style={{ maxWidth: 640 }}>
+      <div style={{ marginBottom: 22 }}>
+        <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Calculadora de preço</h1>
+        <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Monte o preço a partir dos seus custos reais, ou compare com a faixa do mercado. Suas ferramentas e o valor da hora ficam salvos pra próxima.</p>
+      </div>
+      <div style={{ background: "#fff", border: `1px solid ${color.line2}`, borderRadius: 16, padding: "22px 24px" }}>
+        <PriceCalcCore onApply={onNewProposal} applyLabel="Criar proposta com" scope={scope} />
+      </div>
+    </div>
+  );
+}
+
+function PriceCalculator({ onClose, onApply, scope }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 320, background: "rgba(10,10,12,0.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Calculadora de preço" style={{ width: "100%", maxWidth: 560, maxHeight: "86vh", overflow: "auto", background: "#fff", borderRadius: 18, padding: "24px 26px 22px", boxShadow: "0 40px 90px -30px rgba(0,0,0,0.5)", position: "relative" }}>
+        <button onClick={onClose} aria-label="Fechar" className="db-btn" style={{ position: "absolute", top: 14, right: 14, background: "none", color: color.gray400, padding: 4 }}><X size={19} strokeWidth={2} /></button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+          <span style={{ width: 34, height: 34, flex: "none", borderRadius: 9, background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center" }}><Calculator size={17} strokeWidth={2} /></span>
+          <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 19, letterSpacing: "-0.01em" }}>Calculadora de preço</div>
+        </div>
+        <p style={{ fontSize: "13.5px", color: color.gray500, margin: "0 0 18px" }}>Monte o preço pelos seus custos ou veja a faixa de mercado.</p>
+        <PriceCalcCore onApply={onApply} applyLabel="Usar" scope={scope} />
+      </div>
+    </div>
+  );
+}
+
+// Botão de recarregar dados (F5 só do conteúdo). Após 10 cliques seguidos,
+// entra em cooldown de 10s para não martelar o servidor.
+function RefreshButton({ onRefresh, label = "Atualizar" }) {
+  const [busy, setBusy] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const clicks = useRef(0);
+  const last = useRef(0);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
+  const click = async () => {
+    if (busy || cooldown > 0) return;
+    const now = Date.now();
+    if (now - last.current > 5000) clicks.current = 0; // não eram cliques "seguidos"
+    last.current = now;
+    clicks.current += 1;
+    if (clicks.current >= 10) { clicks.current = 0; setCooldown(10); }
+    setBusy(true);
+    try { await onRefresh(); } finally { setTimeout(() => setBusy(false), 350); }
+  };
+  const disabled = busy || cooldown > 0;
+  return (
+    <button onClick={click} disabled={disabled} aria-label={label} title={cooldown > 0 ? `Aguarde ${cooldown}s para atualizar de novo` : label} className="db-btn"
+      style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: color.gray600, background: "#fff", border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "9px 11px", opacity: disabled ? 0.6 : 1, cursor: disabled ? "not-allowed" : "pointer" }}>
+      <RotateCcw size={15} strokeWidth={2.2} className={busy ? "db-rot" : undefined} />
+      {cooldown > 0 ? `${cooldown}s` : ""}
+    </button>
   );
 }
 
@@ -1648,10 +2241,29 @@ const TPL_CATS = [
 ];
 const BASIC_TPL_IDS = ["minimal", "bold"]; // espelha o plano Básico do backend
 
-function DesignGallery({ onUse, plan }) {
+function DesignGallery({ onUse, plan, onUpgrade, scope }) {
   const [cat, setCat] = useState("todos");
   const list = cat === "todos" ? DESIGNS : DESIGNS.filter((d) => d.cat === cat);
   const showPro = plan === "basic" || plan === "free" || !plan;
+  const isLocked = (id) => showPro && !BASIC_TPL_IDS.includes(id);
+  // Selo "Novo" some de vez ao clicar (persistido por usuário no localStorage).
+  // Relê quando o `scope` (email) fica disponível: na 1ª renderização o usuário
+  // ainda não carregou, então sem isso a chave lida seria a errada (vazia) e o
+  // selo voltaria a cada recarregamento.
+  const [seen, setSeen] = useState(new Set());
+  useEffect(() => {
+    try { setSeen(new Set(JSON.parse(localStorage.getItem(tplSeenKey(scope)) || "[]"))); }
+    catch { setSeen(new Set()); }
+  }, [scope]);
+  const markSeen = (id) => {
+    setSeen((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev); next.add(id);
+      try { localStorage.setItem(tplSeenKey(scope), JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+  };
+  const pick = (id) => { markSeen(id); isLocked(id) ? onUpgrade && onUpgrade() : onUse(id); };
   return (
     <div className="db-pad">
       <div style={{ marginBottom: 20 }}>
@@ -1675,14 +2287,14 @@ function DesignGallery({ onUse, plan }) {
           <div key={d.id} className="db-dsn-card" style={{ animation: `dbUp .4s ${i * 0.05}s ease both` }}>
             <div className="db-dsn-thumb">
               <div style={{ position: "absolute", top: 0, left: "50%", width: 460, transform: "translateX(-50%) scale(0.62)", transformOrigin: "top center", pointerEvents: "none" }}>
-                <ProposalDesign id={d.id} doc={SAMPLE_DOC} accent={d.accent} />
+                <ProposalDesign id={d.id} doc={sampleFor(d.id)} accent={d.accent} />
               </div>
               <div className="db-dsn-badges">
-                {d.novo && <span className="db-dsn-badge novo">Novo</span>}
-                {showPro && !BASIC_TPL_IDS.includes(d.id) && <span className="db-dsn-badge pro">Pro</span>}
+                {d.novo && !seen.has(d.id) && <span className="db-dsn-badge novo">Novo</span>}
+                {isLocked(d.id) && <span className="db-dsn-badge pro"><Lock size={11} strokeWidth={2.4} style={{ marginRight: 4, verticalAlign: "-1px" }} />Pro</span>}
               </div>
               <div className="db-dsn-hover">
-                <button onClick={() => onUse(d.id)} className="db-btn db-dsn-cta">Usar este modelo</button>
+                <button onClick={() => pick(d.id)} className="db-btn db-dsn-cta">{isLocked(d.id) ? "Desbloquear no Pro" : "Usar este modelo"}</button>
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px" }}>
@@ -1690,7 +2302,7 @@ function DesignGallery({ onUse, plan }) {
                 <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 15 }}>{d.name}</div>
                 <div style={{ fontSize: 12, color: color.gray400 }}>{d.tag}</div>
               </div>
-              <button onClick={() => onUse(d.id)} className="db-btn db-btn-dark" style={{ fontSize: "13.5px", padding: "9px 16px" }}>Usar</button>
+              <button onClick={() => pick(d.id)} className="db-btn db-btn-dark" style={{ fontSize: "13.5px", padding: "9px 16px", display: "inline-flex", alignItems: "center", gap: 6 }}>{isLocked(d.id) ? <><Lock size={13} strokeWidth={2.2} />Pro</> : "Usar"}</button>
             </div>
           </div>
         ))}
@@ -1699,7 +2311,7 @@ function DesignGallery({ onUse, plan }) {
   );
 }
 
-function ClientsPanel({ rows }) {
+function ClientsPanel({ rows, onRefresh }) {
   const [period, setPeriod] = useState("all");
   const thisYear = new Date().getFullYear();
   const MONTHS_FULL = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -1827,9 +2439,12 @@ function ClientsPanel({ rows }) {
 
   return (
     <div className="db-pad">
-      <div style={{ marginBottom: 18 }}>
-        <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Clientes</h1>
-        <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Acompanhe suas propostas por cliente e a receita do período.</p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+        <div>
+          <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Clientes</h1>
+          <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Acompanhe suas propostas por cliente e a receita do período.</p>
+        </div>
+        {onRefresh && <RefreshButton onRefresh={onRefresh} label="Atualizar clientes" />}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>

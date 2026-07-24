@@ -31,12 +31,29 @@ export default function MarketingLayout() {
           borderBottom: `1px solid ${color.line3}`,
         }}
       >
-        <div style={{ maxWidth: 1120, margin: "0 auto", height: 64, padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Link to="/"><Logo /></Link>
-          <nav style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Link to="/precos" style={{ fontSize: "14.5px", fontWeight: 500, color: color.gray700, padding: "8px 12px", borderRadius: 8 }}>Preços</Link>
+        <style>{`
+          .ml-nav{ display:flex; align-items:center; gap:8px; }
+          .ml-nav a{ white-space:nowrap; }
+          @media (max-width:560px){
+            .ml-head{ padding:0 16px !important; }
+            .ml-nav{ gap:2px; }
+            .ml-nav a{ font-size:13.5px !important; padding:8px 9px !important; }
+            .ml-cta{ padding:8px 12px !important; }
+          }
+          @media (max-width:380px){
+            .ml-nav a.ml-precos{ display:none; }
+          }
+          /* light -> bold no hover, sem "pulo": um clone bold invisível reserva a largura */
+          .ml-flink{ display:inline-flex; flex-direction:column; align-items:flex-start; width:fit-content; font-weight:300; color:${color.gray400}; text-decoration:none; transition:color .14s ease; }
+          .ml-flink::after{ content:attr(data-label); font-weight:700; height:0; overflow:hidden; visibility:hidden; pointer-events:none; }
+          .ml-flink:hover{ font-weight:700; color:#fff; }
+        `}</style>
+        <div className="ml-head" style={{ maxWidth: 1120, margin: "0 auto", height: 64, padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <Link to="/" style={{ flex: "none" }}><Logo /></Link>
+          <nav className="ml-nav">
+            <Link to="/precos" className="ml-precos" style={{ fontSize: "14.5px", fontWeight: 500, color: color.gray700, padding: "8px 12px", borderRadius: 8 }}>Preços</Link>
             <Link to="/entrar" style={{ fontSize: "14.5px", fontWeight: 500, color: color.gray700, padding: "8px 12px", borderRadius: 8 }}>Entrar</Link>
-            <Link to="/criar-conta" style={{ fontSize: "14.5px", fontWeight: 600, color: color.white, background: color.ink, padding: "9px 16px", borderRadius: 9 }}>Começar agora</Link>
+            <Link to="/criar-conta" className="ml-cta" style={{ fontSize: "14.5px", fontWeight: 600, color: color.white, background: color.ink, padding: "9px 16px", borderRadius: 9 }}>Começar agora</Link>
           </nav>
         </div>
       </header>
@@ -55,8 +72,9 @@ export default function MarketingLayout() {
           </div>
           <div style={{ display: "flex", gap: 56, flexWrap: "wrap" }}>
             <FooterCol title="Produto" links={[["Como funciona", "/"], ["Preços", "/precos"], ["Começar agora", "/criar-conta"]]} />
-            <FooterCol title="Conta" links={[["Login", "/entrar"], ["Contato", "#"]]} />
-            <FooterCol title="Social" links={[["Instagram", "#"], ["LinkedIn", "#"]]} />
+            <FooterCol title="Conta" links={[["Login", "/entrar"], ["Criar conta", "/criar-conta"]]} />
+            <FooterCol title="Legal" links={[["Termos de Uso", "/termos"], ["Política de Privacidade", "/privacidade"]]} />
+            <FooterCol title="Contato" links={[["Suporte por e-mail", "mailto:mandaaisuporte@gmail.com"]]} />
           </div>
         </div>
         <div style={{ maxWidth: 1120, margin: "40px auto 0", paddingTop: 24, borderTop: `1px solid ${color.ink800}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
@@ -71,10 +89,12 @@ export default function MarketingLayout() {
 function FooterCol({ title, links }) {
   return (
     <div>
-      <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: color.gray500, marginBottom: 14 }}>{title}</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontFamily: font.heading, fontSize: 12.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: color.white, marginBottom: 14 }}>{title}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
         {links.map(([label, to], i) => (
-          <Link key={i} to={to} style={{ fontSize: 14, color: color.gray300 }}>{label}</Link>
+          to.startsWith("mailto:") || to.startsWith("#")
+            ? <a key={i} href={to} className="ml-flink" data-label={label} style={{ fontSize: 14 }}>{label}</a>
+            : <Link key={i} to={to} className="ml-flink" data-label={label} style={{ fontSize: 14 }}>{label}</Link>
         ))}
       </div>
     </div>

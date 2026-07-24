@@ -27,21 +27,21 @@ export default function Pricing({ go }) {
 
   const plans = [
     {
-      name: "Básico", planKey: "basic", tagline: "Pra começar a mandar propostas com cara profissional.",
+      name: "Básico", planKey: "basic", tagline: "Para começar a mandar propostas com cara profissional.",
       price: annual ? "R$11" : "R$12", period: "/mês", note: annual ? "R$132/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Básico", variant: "ghost",
       popular: false, titleColor: color.ink, subColor: color.gray500, featColor: color.gray700, divider: "#EEE", checkColor: color.ink,
       cardStyle: { position: "relative", background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, padding: "30px 26px" },
       features: ["5 propostas por mês", "Acesso aos templates básicos", "Link compartilhável", "Aceite com um clique"],
     },
     {
-      name: "Pro", planKey: "pro", tagline: "Pra quem vive de proposta e quer fechar mais.",
+      name: "Pro", planKey: "pro", tagline: "Para quem vive de proposta e quer fechar mais.",
       price: annual ? "R$26" : "R$29", period: "/mês", note: annual ? "R$312/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Pro", variant: "accent",
       popular: true, titleColor: color.white, subColor: color.gray400, featColor: color.gray200, divider: color.ink800, checkColor: "#E9967B",
       cardStyle: { position: "relative", background: color.ink, color: color.white, border: `1px solid ${color.ink}`, borderRadius: 16, padding: "30px 26px", boxShadow: "0 22px 50px -20px rgba(217,119,87,0.4)", transform: "scale(1.03)" },
       features: ["25 propostas por mês", "Todos os templates", "Sem marca d’água", "Notificação de visualização", "Aceite com um clique", "Calculadora de preço"],
     },
     {
-      name: "Business", planKey: "business", tagline: "Pra quem quer marca própria e automação.",
+      name: "Business", planKey: "business", tagline: "Para quem quer marca própria e automação.",
       price: annual ? "R$87" : "R$97", period: "/mês", note: annual ? "R$1.044/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Business", variant: "dark",
       popular: false, titleColor: color.ink, subColor: color.gray500, featColor: color.gray700, divider: "#EEE", checkColor: color.ink,
       cardStyle: { position: "relative", background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, padding: "30px 26px" },
@@ -53,8 +53,8 @@ export default function Pricing({ go }) {
     { q: "Posso cancelar quando quiser?", a: "Pode, a qualquer momento, direto pelo painel. Você continua com acesso até o fim do período já pago e não paga nenhuma multa." },
     { q: "Tem contrato ou fidelidade?", a: "Nenhum. É mês a mês, ou ano a ano se você escolher o anual. Sem letra miúda e sem período mínimo." },
     { q: "Aceita PIX?", a: "Sim. Você paga com PIX, cartão de crédito ou boleto. No PIX o acesso libera na hora." },
-    { q: "Como funcionam os limites de cada plano?", a: "Você envia até 5 propostas por mês no Básico e 25 no Pro; no Business são ilimitadas. Rascunhos não contam — só as propostas concluídas. Chegou no limite ou quer todos os templates? É só subir de plano." },
-    { q: "Preciso saber design pra usar?", a: "Não. Os templates já vêm prontos e bonitos por nicho. Você só preenche escopo, preço e prazo. O resto o Manda cuida." },
+    { q: "Como funcionam os limites de cada plano?", a: "Você envia até 5 propostas por mês no Básico e 25 no Pro; no Business são ilimitadas. Rascunhos não contam, só as propostas concluídas. Chegou no limite ou quer todos os templates? É só subir de plano." },
+    { q: "Preciso saber design para usar?", a: "Não. Os templates já vêm prontos e bonitos por nicho. Você só preenche escopo, preço e prazo. O resto o Manda cuida." },
   ];
 
   return (
@@ -104,7 +104,7 @@ export default function Pricing({ go }) {
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
           <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: color.accent, marginBottom: 16 }}>Preços</div>
           <h1 className="pr-h1" style={{ fontFamily: font.heading, fontWeight: 900, lineHeight: 1.02, letterSpacing: "-0.035em", margin: "0 0 16px" }}>Simples. Sem surpresa.</h1>
-          <p style={{ fontSize: "18.5px", lineHeight: 1.55, color: color.gray600, maxWidth: 520, margin: "0 auto 32px" }}>Escolha o plano e comece agora. Muda ou cancela quando quiser, sem multa.</p>
+          <p style={{ fontSize: "18.5px", lineHeight: 1.55, color: color.gray600, maxWidth: 520, margin: "0 auto 32px" }}>Escolha o plano e comece agora. Mude ou cancele quando quiser, sem multa.</p>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: color.surface, borderRadius: 11, padding: 4 }}>
             <button onClick={() => setBilling("monthly")} className="pr-toggle" style={annual ? tIdle : tActive}>Mensal</button>
             <button onClick={() => setBilling("annual")} className="pr-toggle" style={annual ? tActive : tIdle}>
@@ -163,7 +163,7 @@ export default function Pricing({ go }) {
       <section style={{ padding: "20px 24px 88px", background: color.white }}>
         <div style={{ maxWidth: 1080, margin: "0 auto", background: color.darkGradient, borderRadius: 24, padding: "64px 40px", textAlign: "center", position: "relative", overflow: "hidden" }}>
           <h2 className="pr-cta-h2" style={{ fontFamily: font.heading, fontWeight: 900, lineHeight: 1.04, letterSpacing: "-0.03em", color: color.white, margin: "0 0 14px" }}>Escolha seu plano e comece hoje.</h2>
-          <p style={{ fontSize: 18, lineHeight: 1.55, color: color.gray300, maxWidth: 460, margin: "0 auto 32px" }}>Cria a conta em um minuto. Muda ou cancela quando quiser, sem multa.</p>
+          <p style={{ fontSize: 18, lineHeight: 1.55, color: color.gray300, maxWidth: 460, margin: "0 auto 32px" }}>Crie a conta em um minuto. Mude ou cancele quando quiser, sem multa.</p>
           <button onClick={signup} className="pr-btn-white">Criar minha conta</button>
         </div>
       </section>

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { query } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
+import { writeLimiter } from "../middleware/rateLimit.js";
 import { proposalSchema, statusSchema } from "../lib/validate.js";
 import { publicId } from "../lib/ids.js";
 import { PLAN_LIMITS, templateAllowed } from "../lib/plans.js";
@@ -8,20 +9,24 @@ import { PLAN_LIMITS, templateAllowed } from "../lib/plans.js";
 const r = Router();
 r.use(requireAuth); // tudo aqui exige login
 
+// Plano EFETIVO: admin tem acesso total (equivale a business, ilimitado),
+// independente de assinatura no Stripe.
 const getPlan = async (userId) => {
-  const { rows } = await query("select plan from users where id=$1", [userId]);
+  const { rows } = await query("select plan, role from users where id=$1", [userId]);
+  if (rows[0]?.role === "admin") return "business";
   return rows[0]?.plan || "free";
 };
 
 const sumItems = (items = []) =>
-  items.reduce((a, it) => a + (parseInt(String(it.value || "").replace(/\D/g, ""), 10) || 0), 0);
+  items.filter((it) => !it.hidden) // itens ocultos não entram no total
+    .reduce((a, it) => a + (parseInt(String(it.value || "").replace(/\D/g, ""), 10) || 0), 0);
 
 const toProposal = (p) => ({
   id: p.id, publicId: p.public_id, client: p.client, company: p.company, clientEmail: p.client_email,
   title: p.title, scope: p.scope, items: p.items, start: p.start_date, end: p.end_date,
   payment: p.payment, revisions: p.revisions, validity: p.validity, bio: p.bio,
-  accent: p.accent, accent2: p.accent2, gradient: p.gradient, template: p.template,
-  status: p.status, value: Number(p.value),
+  accent: p.accent, accent2: p.accent2, gradient: p.gradient, theme: p.theme, watermark: p.watermark, logo: p.logo, cover: p.cover,
+  template: p.template, status: p.status, value: Number(p.value),
   createdAt: p.created_at, updatedAt: p.updated_at,
 });
 
@@ -58,6 +63,19 @@ r.get("/stats", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Uso do mês x limite do plano (para "propostas restantes"). Conta o append-only.
+r.get("/usage", async (req, res, next) => {
+  try {
+    const plan = await getPlan(req.user.id);
+    const limit = (PLAN_LIMITS[plan] || PLAN_LIMITS.free).proposalsPerMonth;
+    const { rows } = await query(
+      "select count(*)::int as n from proposal_usage where user_id=$1 and created_at >= date_trunc('month', now())",
+      [req.user.id]
+    );
+    res.json({ used: rows[0]?.n || 0, limit: limit === Infinity ? null : limit, plan });
+  } catch (e) { next(e); }
+});
+
 // Notificações: interações reais do cliente (visualizou/aceitou/recusou).
 // Definido antes de /:id para não conflitar na rota.
 r.get("/notifications", async (req, res, next) => {
@@ -87,7 +105,7 @@ r.get("/:id", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-r.post("/", async (req, res, next) => {
+r.post("/", writeLimiter, async (req, res, next) => {
   try {
     const d = proposalSchema.parse(req.body);
     // Regras de acesso do plano
@@ -96,39 +114,50 @@ r.post("/", async (req, res, next) => {
     if (!templateAllowed(plan, d.template)) {
       return res.status(402).json({ error: "Seu plano não inclui este template." });
     }
+    // Cota mensal: conta o USO append-only (proposal_usage), que NÃO diminui ao
+    // apagar uma proposta. Assim não dá pra burlar apagando e recriando.
     if (limits.proposalsPerMonth !== Infinity) {
       const { rows: c } = await query(
-        "select count(*)::int as n from proposals where user_id=$1 and created_at >= date_trunc('month', now())",
+        "select count(*)::int as n from proposal_usage where user_id=$1 and created_at >= date_trunc('month', now())",
         [req.user.id]
       );
       if ((c[0]?.n || 0) >= limits.proposalsPerMonth) {
         return res.status(402).json({
           error: plan === "free"
             ? "Assine um plano para criar propostas."
-            : `Seu plano permite ${limits.proposalsPerMonth} propostas por mês.`,
+            : `Você atingiu o limite de ${limits.proposalsPerMonth} propostas neste mês.`,
         });
       }
     }
     const { rows } = await query(
-      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning *`,
-      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items)]
+      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value, logo, cover, theme, watermark)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning *`,
+      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark]
     );
+    // Registra o uso (append-only). Nunca é apagado ao excluir a proposta.
+    await query("insert into proposal_usage (user_id) values ($1)", [req.user.id]).catch(() => {});
     res.status(201).json({ proposal: toProposal(rows[0]) });
   } catch (e) { next(e); }
 });
 
-r.put("/:id", async (req, res, next) => {
+r.put("/:id", writeLimiter, async (req, res, next) => {
   try {
     const d = proposalSchema.parse(req.body);
     const plan = await getPlan(req.user.id);
     if (!templateAllowed(plan, d.template)) {
       return res.status(402).json({ error: "Seu plano não inclui este template." });
     }
+    // Proposta concluída é imutável: só rascunho pode ser editado. Impede reusar
+    // a mesma proposta/link para vários clientes ou alterar o que o cliente já viu.
+    const cur = await query("select status from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: "Proposta não encontrada." });
+    if (cur.rows[0].status !== "draft") {
+      return res.status(409).json({ error: "Esta proposta já foi enviada e não pode ser editada. Crie uma nova." });
+    }
     const { rows } = await query(
-      `update proposals set client=$3, company=$4, client_email=$5, title=$6, scope=$7, items=$8, start_date=$9, end_date=$10, payment=$11, revisions=$12, validity=$13, bio=$14, accent=$15, accent2=$16, gradient=$17, template=$18, value=$19, updated_at=now()
+      `update proposals set client=$3, company=$4, client_email=$5, title=$6, scope=$7, items=$8, start_date=$9, end_date=$10, payment=$11, revisions=$12, validity=$13, bio=$14, accent=$15, accent2=$16, gradient=$17, template=$18, value=$19, logo=$20, cover=$21, theme=$22, watermark=$23, updated_at=now()
        where id=$1 and user_id=$2 returning *`,
-      [req.params.id, req.user.id, d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items)]
+      [req.params.id, req.user.id, d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark]
     );
     if (!rows[0]) return res.status(404).json({ error: "Proposta não encontrada." });
     res.json({ proposal: toProposal(rows[0]) });

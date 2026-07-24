@@ -3,9 +3,17 @@ export function notFound(req, res) {
 }
 
 export function errorHandler(err, req, res, _next) {
-  if (err?.type === "entity.too.large") return res.status(413).json({ error: "Payload muito grande." });
-  if (err?.name === "ZodError") return res.status(400).json({ error: "Dados inválidos.", details: err.issues });
-  // Não vaza detalhes internos ao cliente.
-  console.error(err);
-  res.status(err.status || 500).json({ error: err.public || "Erro interno." });
+  if (err?.type === "entity.parse.failed" || err instanceof SyntaxError) {
+    return res.status(400).json({ error: "JSON inválido no corpo da requisição." });
+  }
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({ error: "Arquivo ou dados grandes demais." });
+  }
+  if (err?.name === "ZodError") {
+    return res.status(400).json({ error: "Dados inválidos.", details: err.issues });
+  }
+  const status = err?.status || 500;
+  // 5xx: registra o stack pra debug, mas nunca vaza detalhes internos ao cliente.
+  if (status >= 500) console.error("[erro]", req.method, req.originalUrl, "-", err?.stack || err?.message || err);
+  res.status(status).json({ error: status >= 500 ? "Erro interno do servidor." : (err?.public || "Requisição inválida.") });
 }

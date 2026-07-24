@@ -25,9 +25,9 @@ export const BASIC_TEMPLATES = ["minimal", "bold"];
 // Limites por plano (fonte da verdade das regras de negócio).
 export const PLAN_LIMITS = {
   free: { proposalsPerMonth: 0, templates: [] },
-  basic: { proposalsPerMonth: 2, templates: BASIC_TEMPLATES },
-  pro: { proposalsPerMonth: Infinity, templates: null }, // null = todos
-  business: { proposalsPerMonth: Infinity, templates: null },
+  basic: { proposalsPerMonth: 5, templates: BASIC_TEMPLATES },
+  pro: { proposalsPerMonth: 25, templates: null }, // null = todos os templates
+  business: { proposalsPerMonth: Infinity, templates: null }, // ilimitado
 };
 
 export const hasPlan = (userPlan, needed) => (PLAN_RANK[userPlan] || 0) >= (PLAN_RANK[needed] || 0);

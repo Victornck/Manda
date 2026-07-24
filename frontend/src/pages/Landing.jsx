@@ -112,8 +112,8 @@ export default function Landing({ go }) {
     { title: "Você sabe quando abriu", body: "Um aviso chega no instante em que o cliente abre a proposta. Chega de perguntar se ele viu.", soon: false, Icon: Eye },
     { title: "Aceite com um clique", body: "O cliente aprova ali mesmo, com data e hora registradas. Sem imprimir, assinar e escanear.", soon: false, Icon: BadgeCheck },
     { title: "Calculadora de preço", body: "Sugestão de valor por tipo de serviço pra você parar de chutar o orçamento.", soon: false, Icon: Calculator },
-    { title: "Follow-up automático", body: "Um lembrete sai sozinho quando o cliente some. Você fecha mais sem parecer insistente.", soon: true, Icon: History },
     { title: "Painel de conversão", body: "Quantas propostas você enviou, quantas fecharam e qual o seu ticket médio, tudo num lugar só.", soon: false, Icon: LineChart },
+    { title: "Follow-up automático", body: "Um lembrete sai sozinho quando o cliente some. Você fecha mais sem parecer insistente.", soon: true, Icon: History },
   ];
 
   const outcomes = [
@@ -254,8 +254,25 @@ export default function Landing({ go }) {
         .lp-col-body{ font-size:14.5px; line-height:1.55; color:${color.gray600}; margin:0; }
         .lp-col-soon{ font-size:10px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:${color.gray500}; background:${color.surface}; border:1px solid ${color.gray200}; padding:2px 7px; border-radius:999px; }
         @media (max-width:900px){ .lp-cols{ grid-template-columns:repeat(2,1fr); } }
-        @media (max-width:820px){ .lp-note{ display:none; } }
-        @media (max-width:600px){ .lp-cols{ grid-template-columns:1fr; gap:30px; } .lp-stage{ padding:18px; } }
+        /* iPad/tablet: notificações visíveis, encostadas nas bordas do card */
+        @media (max-width:820px){
+          .lp-note{ width:194px; padding:11px 13px; }
+          .lp-note-1, .lp-note-3{ left:2px; }
+          .lp-note-2, .lp-note-4{ right:2px; }
+        }
+        @media (max-width:600px){ .lp-cols{ grid-template-columns:1fr; gap:30px; } }
+        /* celular: notificações flutuam nas faixas escuras acima e abaixo do card,
+           sem cobrir o conteúdo da proposta. */
+        @media (max-width:560px){
+          .lp-stage{ padding:64px 16px; }
+          .lp-note{ width:172px; padding:10px 12px; gap:10px; box-shadow:0 16px 34px -14px rgba(0,0,0,0.5); }
+          .lp-note-ic{ width:30px; height:30px; }
+          .lp-note-t{ font-size:12px; }
+          .lp-note-s{ font-size:10.5px; }
+          .lp-note-3, .lp-note-4{ display:none; }
+          .lp-note-1{ left:6px; top:12px; }
+          .lp-note-2{ right:6px; top:auto; bottom:12px; }
+        }
         @media (prefers-reduced-motion: reduce){ .lp-note{ animation:none; } }
         @media (max-width:900px){ .lp-showcase{ grid-template-columns:1fr; gap:40px; } .lp-feed{ right:4px; } }
         @media (max-width:820px){ .lp-feat-more{ grid-template-columns:1fr; } }

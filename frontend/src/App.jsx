@@ -24,6 +24,7 @@ const TITLES = {
   "/criar-conta": "Criar conta · Manda",
   "/app": "Suas propostas · Manda",
   "/app/templates": "Templates · Manda",
+  "/app/calculadora": "Calculadora de preço · Manda",
   "/app/clientes": "Clientes · Manda",
   "/app/notificacoes": "Notificações · Manda",
   "/app/configuracoes": "Configurações · Manda",
@@ -37,6 +38,8 @@ export default function App() {
 
   useEffect(() => {
     document.title = TITLES[location.pathname] || "Manda";
+    // Toda troca de página começa do topo (vale para links do menu, rodapé e navegação por código).
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [location.pathname]);
 
   const go = (dest) => {

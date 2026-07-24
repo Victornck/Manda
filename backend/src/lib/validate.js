@@ -15,6 +15,7 @@ export const loginSchema = z.object({
 const itemSchema = z.object({
   desc: z.string().max(300).optional().default(""),
   value: z.string().max(20).optional().default(""),
+  hidden: z.boolean().optional().default(false), // item que o dono optou por não cobrar/mostrar
 });
 
 export const proposalSchema = z.object({
@@ -33,7 +34,11 @@ export const proposalSchema = z.object({
   accent: z.string().max(20).optional().default("#D97757"),
   accent2: z.string().max(20).optional().default("#6C48B0"),
   gradient: z.boolean().optional().default(false),
-  template: z.enum(["minimal", "bold", "editorial", "colorido"]).optional().default("minimal"),
+  theme: z.enum(["claro", "creme", "escuro"]).optional().default("claro"),
+  watermark: z.string().max(4).optional().default(""), // "" auto · "off" nenhuma · uma letra
+  logo: z.string().max(900000).optional().default(""),   // data URL comprimida (logo)
+  cover: z.string().max(900000).optional().default(""),  // data URL comprimida (capa)
+  template: z.enum(["minimal", "bold", "editorial", "colorido", "capa", "dossie", "carta", "aurora", "studio", "recibo", "grande", "poster"]).optional().default("minimal"),
 });
 
 export const statusSchema = z.object({
