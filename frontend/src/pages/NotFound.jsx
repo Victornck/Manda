@@ -3,12 +3,10 @@ import { font, color } from "../theme.js";
 export default function NotFound({ go }) {
   const home = () => (go ? go("landing") : (window.location.href = "/"));
   const pricing = () => (go ? go("pricing") : (window.location.href = "/precos"));
-  const mark = { width: 34, height: 34, borderRadius: 9, background: color.ink, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 900, fontSize: 18 };
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 24, fontFamily: font.body, color: color.ink, background: color.surface2 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 30 }}>
-        <span style={mark}>M</span>
-        <span style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.02em" }}>Manda</span>
+      <div style={{ marginBottom: 30 }}>
+        <img src="/logo-horizontal.svg" alt="Manda" style={{ height: 30, width: "auto" }} />
       </div>
       <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: "clamp(72px,16vw,120px)", letterSpacing: "-0.04em", lineHeight: 1 }}>
         4<span style={{ color: color.accent }}>0</span>4

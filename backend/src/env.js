@@ -17,11 +17,24 @@ export const env = {
 
   // Login com Google (opcional: se vazio, a rota /auth/google responde 501).
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || "",
+  // Envio de proposta pelo Gmail do usuário (Gmail API). Precisa do CLIENT_SECRET
+  // e do redirect autorizado no Google Cloud Console. Sem eles, as rotas de
+  // integração respondem 501 e o resto do app segue normal.
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || "",
+  GOOGLE_OAUTH_REDIRECT: process.env.GOOGLE_OAUTH_REDIRECT || "http://localhost:4000/api/integrations/google/callback",
+  // Chave para cifrar os refresh_tokens do Gmail em repouso. Se vazia, deriva do
+  // JWT_SECRET (funciona, mas em produção defina uma própria).
+  GOOGLE_TOKEN_KEY: process.env.GOOGLE_TOKEN_KEY || "",
 
-  // Email transacional (Resend). Sem a chave, os códigos vão para o console (modo dev).
-  // EMAIL_FROM precisa ser de um domínio verificado no Resend (ex.: "Manda <nao-responda@seudominio.com>").
-  RESEND_API_KEY: process.env.RESEND_API_KEY || "",
-  EMAIL_FROM: process.env.EMAIL_FROM || "Manda <onboarding@resend.dev>",
+  // Email transacional (códigos de senha) via SMTP do Gmail. Sem SMTP_USER/PASS,
+  // cai no modo dev (imprime no console). O "De" (EMAIL_FROM) deve ser a própria
+  // conta autenticada (SMTP_USER), ex.: mandaaisuporte@gmail.com.
+  SMTP_HOST: process.env.SMTP_HOST || "smtp.gmail.com",
+  SMTP_PORT: parseInt(process.env.SMTP_PORT || "465", 10),
+  SMTP_USER: process.env.SMTP_USER || "",
+  // Senha de App do Google: vem em 4 blocos com espaços; removemos os espaços.
+  SMTP_PASS: (process.env.SMTP_PASS || "").replace(/\s+/g, ""),
+  EMAIL_FROM: process.env.EMAIL_FROM || "Manda <mandaaisuporte@gmail.com>",
 
   // Proteção do CPF em repouso (AES + índice cego HMAC). Se vazias, derivam do
   // JWT_SECRET. Em produção, gere chaves próprias:
@@ -29,14 +42,16 @@ export const env = {
   CPF_ENC_KEY: process.env.CPF_ENC_KEY || "",
   CPF_INDEX_KEY: process.env.CPF_INDEX_KEY || "",
 
-  // Stripe (opcional: se vazio, as rotas de cobrança respondem 501 sem quebrar o resto).
+  // Mercado Pago (pagamentos: Pix, cartão, boleto). Sem o access token, as rotas
+  // de cobrança respondem 501 e o resto do app segue normal.
+  //   MP_ACCESS_TOKEN: "Access Token" das credenciais (TEST-... ou APP_USR-...).
+  //   MP_WEBHOOK_SECRET: a "Chave secreta" da notificação (Webhooks) p/ validar a assinatura.
+  MP_ACCESS_TOKEN: process.env.MP_ACCESS_TOKEN || "",
+  MP_WEBHOOK_SECRET: process.env.MP_WEBHOOK_SECRET || "",
+  // URL pública do BACKEND (onde o Mercado Pago manda a notificação). Em dev com
+  // localhost, use um túnel (ngrok/cloudflared) porque o MP precisa alcançar a URL.
+  BACKEND_URL: process.env.BACKEND_URL || "http://localhost:4000",
+
+  // URL pública do FRONT (usada nos redirects do checkout). Em produção, o domínio real.
   APP_URL: process.env.APP_URL || "http://localhost:5173",
-  STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || "",
-  STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || "",
-  STRIPE_PRICE_BASIC_MONTH: process.env.STRIPE_PRICE_BASIC_MONTH || "",
-  STRIPE_PRICE_BASIC_YEAR: process.env.STRIPE_PRICE_BASIC_YEAR || "",
-  STRIPE_PRICE_PRO_MONTH: process.env.STRIPE_PRICE_PRO_MONTH || "",
-  STRIPE_PRICE_PRO_YEAR: process.env.STRIPE_PRICE_PRO_YEAR || "",
-  STRIPE_PRICE_BUSINESS_MONTH: process.env.STRIPE_PRICE_BUSINESS_MONTH || "",
-  STRIPE_PRICE_BUSINESS_YEAR: process.env.STRIPE_PRICE_BUSINESS_YEAR || "",
 };

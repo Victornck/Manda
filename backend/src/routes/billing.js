@@ -2,8 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth.js";
 import { query } from "../db.js";
-import { stripe } from "../lib/stripe.js";
-import { PLAN_PRICES } from "../lib/plans.js";
+import { mpConfigured, createPreference } from "../lib/mercadopago.js";
+import { PLAN_PRICES_BRL, PLAN_LABELS } from "../lib/plans.js";
 import { env } from "../env.js";
 
 const r = Router();
@@ -14,49 +14,42 @@ const schema = z.object({
   interval: z.enum(["month", "year"]).optional().default("month"),
 });
 
-// Cria a sessão de checkout. O preço vem do servidor (PLAN_PRICES), não do cliente.
+// Cria o checkout no Mercado Pago. O VALOR vem do servidor (PLAN_PRICES_BRL),
+// nunca do cliente. O usuário escolhe Pix, cartão ou boleto na tela do MP.
+// Cada pagamento aprovado libera um período (o webhook cuida da liberação).
 r.post("/checkout", async (req, res, next) => {
   try {
-    if (!stripe) return res.status(501).json({ error: "Pagamentos não configurados." });
+    if (!mpConfigured()) return res.status(501).json({ error: "Pagamentos não configurados." });
     const { plan, interval } = schema.parse(req.body);
-    const price = PLAN_PRICES[plan]?.[interval];
-    if (!price) return res.status(400).json({ error: "Plano ou intervalo indisponível." });
+    const amount = PLAN_PRICES_BRL[plan]?.[interval];
+    if (!amount) return res.status(400).json({ error: "Plano ou intervalo indisponível." });
 
-    const { rows } = await query("select id, email, stripe_customer_id from users where id=$1", [req.user.id]);
+    const { rows } = await query("select id, email from users where id=$1", [req.user.id]);
     const u = rows[0];
+    const periodo = interval === "year" ? "anual" : "mensal";
 
-    let session;
+    let pref;
     try {
-      session = await stripe.checkout.sessions.create({
-        mode: "subscription",
-        line_items: [{ price, quantity: 1 }],
-        customer: u.stripe_customer_id || undefined,
-        customer_email: u.stripe_customer_id ? undefined : u.email,
-        client_reference_id: u.id,
-        metadata: { userId: u.id, plan },
-        subscription_data: { metadata: { userId: u.id, plan } },
-        success_url: `${env.APP_URL}/app?assinatura=ok`,
-        cancel_url: `${env.APP_URL}/precos?assinatura=cancelada`,
+      pref = await createPreference({
+        title: `Manda ${PLAN_LABELS[plan]} (${periodo})`,
+        amount,
+        externalReference: `${u.id}:${plan}:${interval}`,
+        metadata: { user_id: u.id, plan, interval },
+        payerEmail: u.email,
+        // A notificação do Checkout Pro chega por aqui (notification_url). A
+        // confirmação real do pagamento é feita rebuscando na API do MP.
+        notificationUrl: `${env.BACKEND_URL}/api/webhooks/mercadopago`,
+        successUrl: `${env.APP_URL}/app?assinatura=ok`,
+        pendingUrl: `${env.APP_URL}/app?assinatura=pendente`,
+        failureUrl: `${env.APP_URL}/precos?assinatura=erro`,
       });
     } catch (e) {
-      // Erro do Stripe (price inexistente, chave errada, modo teste x produção).
-      // Devolve a mensagem real pra facilitar o diagnóstico — não é dado sensível.
-      console.error("[stripe checkout]", e?.message);
-      return res.status(400).json({ error: `Stripe: ${e?.message || "falha ao criar o checkout."}` });
+      console.error("[mp checkout]", e?.message);
+      return res.status(400).json({ error: `Mercado Pago: ${e?.message || "falha ao criar o checkout."}` });
     }
-    res.json({ url: session.url });
-  } catch (e) { next(e); }
-});
-
-// Portal do Stripe para o usuário gerenciar/cancelar a própria assinatura.
-r.post("/portal", async (req, res, next) => {
-  try {
-    if (!stripe) return res.status(501).json({ error: "Pagamentos não configurados." });
-    const { rows } = await query("select stripe_customer_id from users where id=$1", [req.user.id]);
-    const cid = rows[0]?.stripe_customer_id;
-    if (!cid) return res.status(400).json({ error: "Sem assinatura ativa." });
-    const session = await stripe.billingPortal.sessions.create({ customer: cid, return_url: `${env.APP_URL}/app` });
-    res.json({ url: session.url });
+    // init_point é a URL do Checkout Pro (funciona com credenciais de produção e
+    // de teste, desde que o comprador seja um usuário de teste).
+    res.json({ url: pref.init_point });
   } catch (e) { next(e); }
 });
 

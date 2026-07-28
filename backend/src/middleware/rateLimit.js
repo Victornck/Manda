@@ -45,11 +45,18 @@ export const publicLimiter = rateLimit({
   message: { error: "Muitas requisições. Aguarde um instante." },
 });
 
-// Stripe (checkout/portal): cada chamada cria sessão no Stripe. Sem motivo
-// legítimo para dezenas por minuto.
+// Cobrança (Mercado Pago): cada chamada cria uma preferência de checkout. Sem
+// motivo legítimo para dezenas por minuto.
 export const billingLimiter = rateLimit({
   windowMs: 15 * 60_000, max: 10, standardHeaders: true, legacyHeaders: false,
   message: { error: "Muitas tentativas. Aguarde um instante e tente de novo." },
+});
+
+// Envio de proposta por e-mail (Gmail API): cada chamada dispara um e-mail real.
+// Uso normal é baixo (algumas por dia); trava flood sem atrapalhar.
+export const emailSendLimiter = rateLimit({
+  windowMs: 60_000, max: 12, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Muitos envios seguidos. Aguarde um instante." },
 });
 
 // Escrita de propostas (criar/editar): corpo de até 3MB (imagens base64);

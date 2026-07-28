@@ -111,7 +111,7 @@ export default function Auth({ go, tab = "signup" }) {
   const upd = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const updCpf = (e) => setForm((f) => ({ ...f, cpf: maskCPF(e.target.value) }));
 
-  // Animação de entrada. Se veio de um plano (checkout), leva ao Stripe; senão, ao app.
+  // Animação de entrada. Se veio de um plano (checkout), leva ao Mercado Pago; senão, ao app.
   useEffect(() => {
     if (!entering) return;
     const rm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -119,7 +119,7 @@ export default function Auth({ go, tab = "signup" }) {
       if (pendingPlan) {
         try {
           const { url } = await api.checkout(pendingPlan, pendingInterval);
-          window.location.href = url; // vai pro gateway do Stripe
+          window.location.href = url; // vai pro gateway do Mercado Pago
           return;
         } catch { /* se o checkout falhar, segue pro app */ }
       }
@@ -146,13 +146,16 @@ export default function Auth({ go, tab = "signup" }) {
         : await api.register({ name: form.name, email: form.email, cpf: onlyDigits(form.cpf), password: form.password });
       setToken(res.token);
 
-      // Veio de um plano? Vai DIRETO pro checkout do Stripe.
-      // Se falhar, mostra o erro na tela — nunca joga no app em silêncio.
+      // Veio de um plano? Tenta abrir o checkout do Mercado Pago. Se falhar, a
+      // conta já existe e a pessoa já está logada: em vez de travar no cadastro,
+      // entra no app (estado "sem plano"), onde dá pra assinar de novo em Preços.
       if (pendingPlan) {
-        const { url } = await api.checkout(pendingPlan, pendingInterval);
-        if (!url) throw new Error("O Stripe não retornou o link de pagamento. Confira a STRIPE_SECRET_KEY e os price IDs no .env do backend (e reinicie o backend).");
-        window.location.href = url;
-        return;
+        try {
+          const { url } = await api.checkout(pendingPlan, pendingInterval);
+          if (url) { window.location.href = url; return; }
+        } catch (e) {
+          console.error("[checkout]", e.message);
+        }
       }
 
       setEntering(true);
@@ -245,10 +248,7 @@ export default function Auth({ go, tab = "signup" }) {
   const labelStyle = { fontSize: "13.5px", fontWeight: 600, color: color.gray700 };
 
   const Logo = ({ onDark }) => (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
-      <span style={{ width: 30, height: 30, borderRadius: 8, background: onDark ? color.white : color.ink, color: onDark ? color.ink : color.white, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 900, fontSize: 18 }}>M</span>
-      <span style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, color: onDark ? color.white : color.ink }}>Manda</span>
-    </span>
+    <img src={onDark ? "/logo-horizontal-white.svg" : "/logo-horizontal.svg"} alt="Manda" style={{ height: 30, width: "auto", display: "block" }} />
   );
 
   const cpfValid = isValidCPF(form.cpf);
@@ -472,7 +472,7 @@ export default function Auth({ go, tab = "signup" }) {
       {/* Animação de entrada */}
       {entering && (
         <div className="au-enter">
-          <div className="au-enter-mark">M</div>
+          <div className="au-enter-mark"><img src="/logo-mark.svg" alt="Manda" style={{ width: "58%", height: "58%", display: "block" }} /></div>
           <div className="au-enter-title">{isLogin ? "Bora fechar mais um" : `Boas-vindas${firstName ? ", " + firstName : ""}`}</div>
           <div className="au-enter-sub">Preparando seu espaço…</div>
           <div className="au-enter-bar"><span /></div>

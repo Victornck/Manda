@@ -28,6 +28,7 @@ const TITLES = {
   "/app/clientes": "Clientes · Manda",
   "/app/notificacoes": "Notificações · Manda",
   "/app/configuracoes": "Configurações · Manda",
+  "/app/suporte": "Suporte · Manda",
   "/termos": "Termos de Uso · Manda",
   "/privacidade": "Política de Privacidade · Manda",
 };

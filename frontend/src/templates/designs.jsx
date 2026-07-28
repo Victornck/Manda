@@ -166,9 +166,22 @@ function Ed({ onEdit, field, children }) {
   return <span className="pd-edit" role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); onEdit(field); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(field); } }}>{children}</span>;
 }
 
+// Marca do Manda (vetor), herda a cor via `fill`. Usada como logo padrão quando
+// o usuário ainda não subiu a própria.
+function Mark({ size, fill = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="24 287 506 506" fill={fill} style={{ display: "block", flex: "none" }} aria-hidden="true">
+      <path fillRule="evenodd" d="M57.62,472.454v285.2h147.1V613.55Z" />
+      <path fillRule="evenodd" d="M351.82,613.55v144.1h144.1v-142.6Z" />
+      <path fillRule="evenodd" d="M56.12,472.454l148.6,142.6h141.09l-142.59-144.1Z" />
+      <path fillRule="evenodd" d="M275.27,546l222.15-223.653v148.6l-144.1,144.1h-9.01Z" />
+    </svg>
+  );
+}
+
 function Mono({ doc, size = 42, radius = 10, bg = color.ink, fg = "#fff" }) {
   if (doc.logo) return <img src={doc.logo} alt="" style={{ width: size, height: size, borderRadius: radius, objectFit: "cover", display: "block", flex: "none" }} />;
-  return <span style={{ width: size, height: size, borderRadius: radius, background: bg, color: fg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 900, fontSize: size * 0.42, flex: "none" }}>M</span>;
+  return <span style={{ width: size, height: size, borderRadius: radius, background: bg, display: "flex", alignItems: "center", justifyContent: "center", flex: "none" }}><Mark size={size * 0.58} fill={fg} /></span>;
 }
 
 /* ---------- 1. MINIMAL ---------- */
@@ -420,7 +433,7 @@ function Capa({ doc, accent, onAccept, onEdit }) {
           <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
             {doc.logo
               ? <img src={doc.logo} alt="" style={{ width: 30, height: 30, borderRadius: 8, objectFit: "cover", display: "block" }} />
-              : <span style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.22)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 900, fontSize: 14 }}>M</span>}
+              : <span style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.22)", display: "flex", alignItems: "center", justifyContent: "center" }}><Mark size={17} fill="#fff" /></span>}
             <span style={{ fontSize: "12.5px", fontWeight: 500, opacity: 0.92 }}>Proposta para <Ed onEdit={onEdit} field="client">{doc.client || "cliente"}</Ed>{has(doc.company) ? ` · ${doc.company}` : ""}</span>
           </div>
           <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 25, lineHeight: 1.05, letterSpacing: "-0.02em", textShadow: "0 2px 12px rgba(0,0,0,0.35)" }}><Ed onEdit={onEdit} field="title">{doc.title || "Título da proposta"}</Ed></div>

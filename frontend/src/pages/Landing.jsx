@@ -403,7 +403,7 @@ export default function Landing({ go }) {
                     <div className="lp-tpl-accent" style={{ background: t.ink }} />
                     <div className="lp-tpl-paper-in">
                       <div className="lp-tpl-head">
-                        <span className="lp-tpl-mono">M</span>
+                        <span className="lp-tpl-mono"><img src="/logo-mark-white.svg" alt="" style={{ width: "62%", height: "62%", display: "block" }} /></span>
                         <span className="lp-tpl-chip" style={{ background: t.bg, color: t.ink }}><t.Icon size={14} strokeWidth={2} /></span>
                       </div>
                       <div className="lp-tpl-l t" />

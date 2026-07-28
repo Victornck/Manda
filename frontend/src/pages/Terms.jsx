@@ -2,8 +2,8 @@ import LegalDoc from "../components/LegalDoc.jsx";
 
 const SECTIONS = [
   { h: "1. Quem somos", p: [
-    "O Manda é uma plataforma online para criar, enviar e acompanhar propostas comerciais, operada por [NOME/RAZÃO SOCIAL], inscrita no CNPJ [CNPJ], com sede em [ENDEREÇO] (“Manda”, “nós”).",
-    "Fale com a gente pelo email [EMAIL DE CONTATO].",
+    "O Manda é uma plataforma online para criar, enviar e acompanhar propostas comerciais, operada por Victor Gabriel Rodrigues Berlinck (“Manda”, “nós”).",
+    "Fale com a gente pelo email mandaaisuporte@gmail.com.",
   ] },
   { h: "2. Aceite destes Termos", p: [
     "Ao criar uma conta ou usar o Manda, você concorda com estes Termos de Uso e com a nossa Política de Privacidade. Se não concordar, não utilize o serviço.",
@@ -13,9 +13,9 @@ const SECTIONS = [
     "Você é responsável por manter a confidencialidade da sua senha e por toda atividade realizada na sua conta.",
   ] },
   { h: "4. Planos, cobrança e cancelamento", p: [
-    "O Manda é um serviço por assinatura, com planos pagos (Básico, Pro e Business). Os pagamentos são processados pela Stripe. A assinatura é renovada automaticamente ao fim de cada período (mensal ou anual) até que você cancele.",
-    "Você pode cancelar a qualquer momento pelo painel. O acesso permanece até o fim do período já pago e não há cobrança de novos períodos após o cancelamento.",
-    "Política de reembolso: [DESCREVA SUA POLÍTICA — por exemplo, direito de arrependimento em até 7 dias da primeira contratação, conforme o Código de Defesa do Consumidor].",
+    "O Manda tem planos pagos (Básico, Pro e Business), cobrados por período (mensal ou anual). Os pagamentos são processados pelo Mercado Pago, e você escolhe pagar por Pix, cartão ou boleto.",
+    "Não há cobrança automática nem renovação automática: o acesso vale pelo período que você pagou. Para continuar depois do vencimento, é só renovar. Você não precisa cancelar nada, e não geramos cobranças novas por conta própria.",
+    "Reembolso e direito de arrependimento: conforme o art. 49 do Código de Defesa do Consumidor, em qualquer contratação feita pelo site (tanto a primeira quanto as renovações) você pode desistir em até 7 dias corridos, contados do pagamento, e receber a devolução integral do valor daquele período, sem precisar justificar. Passado esse prazo, não há reembolso do período em andamento. Como não existe cobrança automática, você nunca é cobrado por um período que não contratou de propósito.",
     "Os preços podem mudar. Alterações não afetam o período já pago e serão avisadas com antecedência razoável.",
   ] },
   { h: "5. Uso aceitável", p: [
@@ -33,10 +33,10 @@ const SECTIONS = [
     "Podemos atualizar estes Termos. Mudanças relevantes serão comunicadas, e o uso continuado após a atualização significa concordância com a nova versão.",
   ] },
   { h: "9. Legislação e foro", p: [
-    "Estes Termos são regidos pelas leis brasileiras. Fica eleito o foro da comarca de [CIDADE/UF] para dirimir eventuais controvérsias, salvo disposição legal em contrário.",
+    "Estes Termos são regidos pelas leis brasileiras. Para eventuais controvérsias, fica eleito o foro do domicílio do consumidor, conforme o Código de Defesa do Consumidor.",
   ] },
 ];
 
 export default function Terms() {
-  return <LegalDoc title="Termos de Uso" updated="20 de julho de 2026" sections={SECTIONS} />;
+  return <LegalDoc title="Termos de Uso" updated="28 de julho de 2026" sections={SECTIONS} />;
 }

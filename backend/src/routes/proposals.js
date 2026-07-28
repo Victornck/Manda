@@ -1,16 +1,27 @@
 import { Router } from "express";
+import { z } from "zod";
 import { query } from "../db.js";
+import { env } from "../env.js";
 import { requireAuth } from "../middleware/auth.js";
-import { writeLimiter } from "../middleware/rateLimit.js";
+import { writeLimiter, emailSendLimiter } from "../middleware/rateLimit.js";
 import { proposalSchema, statusSchema } from "../lib/validate.js";
 import { publicId } from "../lib/ids.js";
 import { PLAN_LIMITS, templateAllowed } from "../lib/plans.js";
+import { getFreshAccess } from "../lib/googleAccount.js";
+import { buildRawEmail, sendGmail } from "../lib/googleMail.js";
+import { proposalEmailHtml, proposalEmailText } from "../lib/mailer.js";
+
+const emailProposalSchema = z.object({
+  to: z.string().email().optional(),
+  subject: z.string().trim().max(160).optional(),
+  message: z.string().trim().max(2000).optional(),
+});
 
 const r = Router();
 r.use(requireAuth); // tudo aqui exige login
 
 // Plano EFETIVO: admin tem acesso total (equivale a business, ilimitado),
-// independente de assinatura no Stripe.
+// independente de pagamento no Mercado Pago.
 const getPlan = async (userId) => {
   const { rows } = await query("select plan, role from users where id=$1", [userId]);
   if (rows[0]?.role === "admin") return "business";
@@ -170,6 +181,82 @@ r.patch("/:id/status", async (req, res, next) => {
     const { rows } = await query("update proposals set status=$3, updated_at=now() where id=$1 and user_id=$2 returning *", [req.params.id, req.user.id, status]);
     if (!rows[0]) return res.status(404).json({ error: "Proposta não encontrada." });
     res.json({ proposal: toProposal(rows[0]) });
+  } catch (e) { next(e); }
+});
+
+// Envia a proposta por e-mail PELO GMAIL do próprio usuário (Gmail API). O "De"
+// que chega ao cliente é o e-mail real dele. Exige conta Google conectada.
+r.post("/:id/send-email", emailSendLimiter, async (req, res, next) => {
+  try {
+    const { to, subject, message } = emailProposalSchema.parse(req.body || {});
+    const { rows } = await query("select * from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);
+    const p = rows[0];
+    if (!p) return res.status(404).json({ error: "Proposta não encontrada." });
+    if (p.status === "draft") return res.status(409).json({ error: "Conclua a proposta antes de enviar por e-mail." });
+
+    const dest = String(to || p.client_email || "").trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(dest)) {
+      return res.status(400).json({ error: "Informe um e-mail de destino válido." });
+    }
+
+    // Apenas 1 e-mail por proposta. Checagem rápida (mensagem amigável); a
+    // garantia REAL contra cliques simultâneos é o índice único, abaixo.
+    const already = await query("select 1 from proposal_events where proposal_id=$1 and type='emailed' limit 1", [p.id]);
+    if (already.rows[0]) {
+      return res.status(409).json({ error: "Esta proposta já foi enviada por e-mail ao cliente.", alreadySent: true });
+    }
+
+    const { rows: urows } = await query("select name from users where id=$1", [req.user.id]);
+    const senderName = urows[0]?.name || "";
+
+    let access;
+    try {
+      access = await getFreshAccess(req.user.id);
+    } catch (err) {
+      if (err.needsConnect) return res.status(409).json({ error: err.message, needsConnect: true });
+      throw err;
+    }
+
+    // RESERVA o envio ANTES de mandar: o índice único (uniq_emailed_per_proposal)
+    // faz o 2º clique simultâneo falhar aqui, então nunca sai um segundo e-mail.
+    let claimId;
+    try {
+      const ins = await query(
+        "insert into proposal_events(proposal_id,type,meta) values($1,'emailed',$2) returning id",
+        [p.id, JSON.stringify({ to: dest })]
+      );
+      claimId = ins.rows[0].id;
+    } catch (err) {
+      if (err.code === "23505") {
+        return res.status(409).json({ error: "Esta proposta já foi enviada por e-mail ao cliente.", alreadySent: true });
+      }
+      throw err;
+    }
+
+    const link = `${env.APP_URL}/p/${p.public_id}`;
+    const subj = (subject && subject.trim()) || `Proposta: ${p.title || "para você"}`;
+    const common = { senderName, clientName: p.client, title: p.title, link, message };
+    const raw = buildRawEmail({
+      fromName: senderName, fromEmail: access.email, to: dest, subject: subj,
+      html: proposalEmailHtml(common), text: proposalEmailText(common),
+    });
+
+    try {
+      await sendGmail(access.accessToken, raw);
+    } catch (err) {
+      // Falhou o envio: desfaz a reserva para o usuário poder tentar de novo.
+      await query("delete from proposal_events where id=$1", [claimId]).catch(() => {});
+      if (err.status === 401 || err.status === 403) {
+        return res.status(409).json({ error: "O Google recusou o envio. Reconecte sua conta Gmail.", needsConnect: true });
+      }
+      console.error("[send-email]", err.message);
+      return res.status(502).json({ error: "Não foi possível enviar agora. Tente de novo em instantes." });
+    }
+
+    if (!p.client_email && dest) {
+      query("update proposals set client_email=$2 where id=$1", [p.id, dest]).catch(() => {});
+    }
+    res.json({ ok: true, to: dest, from: access.email });
   } catch (e) { next(e); }
 });
 

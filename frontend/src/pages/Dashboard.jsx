@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
-  Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles,
+  Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, brl, initials } from "../theme.js";
 import { api, setToken } from "../lib/api.js";
@@ -11,7 +11,11 @@ import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/dra
 import { loadNotifs, mergeNotifs, getSeen, getReadSet, markRead, removeNotifs } from "../lib/notifs.js";
 import { DESIGNS, ProposalDesign, sampleFor } from "../templates/designs.jsx";
 import CodeInput from "../components/CodeInput.jsx";
+import SupportChat, { SupportPage } from "../components/SupportChat.jsx";
 import { PRICE_TABLE, COMPLEXITY, URGENCY, suggest, fmtBRL, DEFAULT_CONSUMO, PROJECT_DIFFICULTY } from "../lib/pricing.js";
+
+// Versão do app (injetada pelo Vite a partir do package.json).
+const APP_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "";
 
 const FILTERS = {
   Todas: null,
@@ -126,8 +130,8 @@ const STEPS = [
 export default function Dashboard({ go }) {
   // Aba ↔ URL: recarregar a página mantém a aba, e voltar/avançar do navegador
   // navega entre abas. O editor fica fora da URL (estado de trabalho, não página).
-  const TAB_TO_VIEW = { templates: "templates", calculadora: "calc", clientes: "clients", notificacoes: "notifications", configuracoes: "settings" };
-  const VIEW_TO_TAB = { templates: "templates", calc: "calculadora", clients: "clientes", notifications: "notificacoes", settings: "configuracoes" };
+  const TAB_TO_VIEW = { templates: "templates", calculadora: "calc", clientes: "clients", notificacoes: "notifications", configuracoes: "settings", suporte: "support" };
+  const VIEW_TO_TAB = { templates: "templates", calc: "calculadora", clients: "clientes", notifications: "notificacoes", settings: "configuracoes", support: "suporte" };
   const { tab: urlTab } = useParams();
   const navigate = useNavigate();
   const [view, setView] = useState(() => TAB_TO_VIEW[urlTab || ""] || "list");
@@ -181,6 +185,8 @@ export default function Dashboard({ go }) {
   const [draftPublicId, setDraftPublicId] = useState(null); // link público da proposta em edição
   const [sending, setSending] = useState(false);            // concluindo (salvando no servidor)
   const [flowError, setFlowError] = useState("");           // erro ao concluir (ex: limite do plano)
+  const [emailState, setEmailState] = useState("idle");     // idle | sending | sent | connect | error (envio da proposta por e-mail)
+  const [emailNote, setEmailNote] = useState("");           // mensagem sob o campo de e-mail
   const [toasts, setToasts] = useState([]);                 // pop-ups que somem após 4s
   const [notifs, setNotifs] = useState([]);                 // notificações (localStorage, por usuário)
   const [notifRead, setNotifRead] = useState(new Set());    // ids lidos (por usuário)
@@ -343,17 +349,42 @@ export default function Dashboard({ go }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onbActive, onbLoaded, onbDone, onb.hidden]);
 
-  // Retorno do checkout do Stripe (?assinatura=ok|cancelada).
+  // Retorno do checkout do Mercado Pago (?assinatura=ok|pendente|cancelada|erro).
+  // O plano é liberado pelo WEBHOOK, que costuma chegar 1-2s depois do redirect.
+  // Por isso, em vez de checar uma vez só, fazemos um polling curto: a conta
+  // atualiza sozinha assim que o pagamento é confirmado, sem recarregar a página.
   useEffect(() => {
     const p = new URLSearchParams(window.location.search).get("assinatura");
-    if (p === "ok") {
-      setBillingMsg({ ok: true, text: "Pagamento recebido! Seu plano é ativado assim que o Stripe confirmar." });
-      api.me().then((r) => setUser(r.user)).catch(() => {});
-      window.history.replaceState({}, "", "/app");
-    } else if (p === "cancelada") {
-      setBillingMsg({ ok: false, text: "Assinatura cancelada. Pode tentar de novo quando quiser." });
-      window.history.replaceState({}, "", "/app");
+    if (!p) return;
+    window.history.replaceState({}, "", "/app");
+
+    if (p === "cancelada" || p === "erro") {
+      setBillingMsg({ ok: false, text: "Pagamento não concluído. Pode tentar de novo quando quiser." });
+      return;
     }
+
+    setBillingMsg({ ok: true, text: p === "pendente"
+      ? "Recebemos seu pedido. Assim que o pagamento for confirmado (o Pix pode levar alguns instantes), seu plano é liberado."
+      : "Pagamento recebido! Estamos liberando seu plano…" });
+
+    let tries = 0;
+    let stop = false;
+    const poll = async () => {
+      if (stop) return;
+      tries++;
+      try {
+        const r = await api.me();
+        setUser(r.user);
+        if (r.user?.plan && r.user.plan !== "free") {
+          setBillingMsg({ ok: true, text: "Plano ativado! Tudo pronto pra mandar propostas." });
+          refreshUsage();
+          return; // liberou: encerra o polling
+        }
+      } catch { /* ignora e tenta de novo */ }
+      if (tries < 8) setTimeout(poll, 2000); // ~16s de tentativas
+    };
+    poll();
+    return () => { stop = true; };
   }, []);
 
   // Fecha modais com a tecla ESC.
@@ -468,11 +499,34 @@ export default function Dashboard({ go }) {
       setPdfBusy(false);
     }
   };
-  const sendByEmail = () => {
-    const url = shareUrl();
-    const subject = encodeURIComponent(`Proposta: ${doc.title || "sua proposta"}`);
-    const body = encodeURIComponent(`Olá${doc.client ? ", " + doc.client : ""}!\n\nSegue a proposta: ${url}\n\nQualquer dúvida, é só responder.`);
-    window.location.href = `mailto:${doc.clientEmail || ""}?subject=${subject}&body=${body}`;
+  // Envia a proposta pelo GMAIL do usuário (via backend). Requer proposta já
+  // concluída (tem id no servidor) e conta Google conectada em Configurações.
+  const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  const sendByEmail = async () => {
+    // Guard anti-spam: ignora cliques enquanto envia ou depois de já enviado.
+    if (emailState === "sending" || emailState === "sent") return;
+    const to = String(doc.clientEmail || "").trim();
+    if (!emailRe.test(to)) { setEmailState("error"); setEmailNote("Digite um e-mail válido para o cliente."); return; }
+    if (!draftId || isLocalId(draftId)) { setEmailState("error"); setEmailNote("Conclua a proposta antes de enviar."); return; }
+    setEmailState("sending"); setEmailNote("");
+    try {
+      const res = await api.sendProposalEmail(draftId, { to });
+      setEmailState("sent");
+      setEmailNote(`Enviado de ${res.from || "seu e-mail"} para ${res.to}.`);
+      pushToast("Proposta enviada por e-mail.", "success");
+    } catch (err) {
+      if (err.data?.alreadySent) {
+        // Já foi enviada antes: trava como "enviado", sem reenviar.
+        setEmailState("sent");
+        setEmailNote("Esta proposta já foi enviada ao cliente.");
+      } else if (err.needsConnect || /conect|gmail|google/i.test(err.message || "")) {
+        setEmailState("connect");
+        setEmailNote("Conecte seu Gmail em Configurações para enviar pelo seu e-mail.");
+      } else {
+        setEmailState("error");
+        setEmailNote(err.message || "Não foi possível enviar agora.");
+      }
+    }
   };
 
   const total = doc.items.reduce((a, it) => a + (it.hidden ? 0 : parseInt(it.value, 10) || 0), 0);
@@ -641,6 +695,8 @@ export default function Dashboard({ go }) {
       const sent = (await api.setStatus(saved.id, "sent")).proposal;
       setDraftId(sent.id);
       setDraftPublicId(sent.publicId);
+      setEmailState("idle");
+      setEmailNote("");
       await refreshRows();
       refreshUsage();
       setFlow("finishing");
@@ -717,6 +773,7 @@ export default function Dashboard({ go }) {
     { key: "clients", label: "Clientes", Icon: Users },
     { key: "notifications", label: "Notificações", Icon: Bell, badge: unread },
     { key: "settings", label: "Configurações", Icon: Settings },
+    { key: "support", label: "Suporte", Icon: LifeBuoy },
   ];
 
   const profileName = user?.name || "Sua conta";
@@ -967,6 +1024,7 @@ export default function Dashboard({ go }) {
         @media (max-width:980px){
           .db-side{ width:70px; }
           .db-collapsed{ display:none !important; }
+          .db-mark-only{ display:block !important; }
           .db-new{ padding:11px 0; }
           .db-nav a{ justify-content:center; padding:11px 0; }
           .db-profile{ justify-content:center; }
@@ -994,8 +1052,8 @@ export default function Dashboard({ go }) {
       <aside className="db-side">
         <div style={{ padding: "20px 16px 12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 6px", marginBottom: 18, height: 28 }}>
-            <span style={{ width: 28, height: 28, flex: "none", borderRadius: 8, background: color.ink, color: color.white, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 900, fontSize: 16 }}>M</span>
-            <span className="db-collapsed" style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 18, letterSpacing: "-0.02em" }}>Manda</span>
+            <img src="/logo-horizontal.svg" alt="Manda" className="db-collapsed" style={{ height: 24, width: "auto", display: "block" }} />
+            <img src="/logo-mark.svg" alt="Manda" className="db-mark-only" style={{ width: 28, height: 28, flex: "none", display: "none" }} />
           </div>
           <button onClick={newProposal} className="db-btn db-btn-accent db-new">
             <Plus size={17} strokeWidth={2.4} /><span className="db-collapsed">Nova proposta</span>
@@ -1028,6 +1086,7 @@ export default function Dashboard({ go }) {
             </div>
             <button onClick={() => { setToken(null); go && go("landing"); }} className="db-collapsed db-logout" aria-label="Sair" title="Sair"><LogOut size={17} strokeWidth={1.9} /></button>
           </div>
+          {APP_VERSION && <div className="db-collapsed" style={{ padding: "0 16px 12px", fontSize: 11, color: color.gray400, letterSpacing: "0.02em" }}>Manda v{APP_VERSION}</div>}
         </div>
       </aside>
 
@@ -1145,6 +1204,8 @@ export default function Dashboard({ go }) {
           <ClientsPanel rows={rows} onRefresh={async () => { await refreshRows(); }} />
         ) : view === "notifications" ? (
           <NotificationsPanel notifs={notifs} readSet={notifRead} onRead={notifSetRead} onDelete={notifDelete} onRefresh={refreshNotifs} />
+        ) : view === "support" ? (
+          <SupportPage />
         ) : view === "settings" ? (
           <SettingsPanel user={user} setUser={setUser} go={go} pushToast={pushToast} usage={usage} />
         ) : (
@@ -1489,9 +1550,19 @@ export default function Dashboard({ go }) {
                   </div>
 
                   <div style={{ display: "flex", gap: 8 }}>
-                    <input className="db-input" type="email" value={doc.clientEmail} onChange={updDoc("clientEmail")} placeholder="cliente@email.com" autoComplete="email" style={{ ...inp(), flex: 1, height: 42 }} />
-                    <button onClick={sendByEmail} className="db-btn db-btn-dark" style={{ flex: "none", fontSize: 14, padding: "0 16px", height: 42, borderRadius: 10 }}><Mail size={16} strokeWidth={2.2} />Enviar</button>
+                    <input className="db-input" type="email" value={doc.clientEmail} onChange={(e) => { updDoc("clientEmail")(e); if (emailState !== "idle") { setEmailState("idle"); setEmailNote(""); } }} placeholder="cliente@email.com" autoComplete="email" disabled={emailState === "sending" || emailState === "sent"} style={{ ...inp(), flex: 1, height: 42 }} />
+                    <button onClick={sendByEmail} disabled={emailState === "sending" || emailState === "sent"} className="db-btn db-btn-dark" style={{ flex: "none", fontSize: 14, padding: "0 16px", height: 42, borderRadius: 10, background: emailState === "sent" ? "#22C55E" : undefined, borderColor: emailState === "sent" ? "#22C55E" : undefined }}>
+                      {emailState === "sent" ? <><Check size={16} strokeWidth={2.6} />Enviado</> : <><Mail size={16} strokeWidth={2.2} />{emailState === "sending" ? "Enviando…" : "Enviar"}</>}
+                    </button>
                   </div>
+                  {emailNote && (
+                    <div style={{ fontSize: "12.5px", marginTop: -2, color: emailState === "sent" ? "#2E7D51" : emailState === "connect" ? color.gray600 : "#B4443C", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span>{emailNote}</span>
+                      {emailState === "connect" && (
+                        <button onClick={() => { setView("settings"); setFlow("editing"); }} className="db-btn" style={{ background: "none", color: color.accentInk, fontWeight: 600, fontSize: "12.5px", padding: "2px 4px", textDecoration: "underline" }}>Conectar agora</button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <button onClick={downloadPdf} disabled={pdfBusy} className="db-in-3 db-btn db-btn-ghost" style={{ width: "100%", marginTop: 14, fontSize: 14, padding: "11px 0" }}>
@@ -1535,7 +1606,7 @@ export default function Dashboard({ go }) {
 
       {intro && (
         <div className="db-intro" aria-hidden="true">
-          <div className="db-intro-mark">M</div>
+          <div className="db-intro-mark"><img src="/logo-mark.svg" alt="Manda" style={{ width: "58%", height: "58%", display: "block" }} /></div>
         </div>
       )}
 
@@ -1552,6 +1623,8 @@ export default function Dashboard({ go }) {
           ))}
         </div>
       )}
+
+      {view !== "support" && <SupportChat raised={view === "editor"} onOpenPage={() => setView("support")} />}
     </div>
   );
 }
@@ -2095,8 +2168,8 @@ function PlansModal({ onClose }) {
     setBusyKey(planKey);
     try {
       const { url } = await api.checkout(planKey, annual ? "year" : "month");
-      if (!url) throw new Error("Não foi possível iniciar o checkout. Confira a configuração do Stripe.");
-      window.location.href = url; // gateway do Stripe
+      if (!url) throw new Error("Não foi possível iniciar o checkout. Tente de novo em instantes.");
+      window.location.href = url; // gateway do Mercado Pago
     } catch (e) { setErr(e.message || "Falha ao iniciar o checkout."); setBusyKey(""); }
   };
 
@@ -2180,30 +2253,70 @@ function OnboardingCard({ steps, done, onNew, goSettings, onSkip, onFinish }) {
     );
   }
 
+  const firstPending = items.findIndex((it) => !steps[it.key]);
+
   return (
     <div className="db-onb">
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-        <div>
-          <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em" }}>Primeiros passos no Manda</div>
-          <div style={{ fontSize: "13.5px", color: color.gray500 }}>{doneCount} de {items.length} concluídos</div>
-        </div>
-        <button onClick={onSkip} className="db-btn" style={{ background: "none", color: color.gray400, fontSize: "12.5px", padding: "4px 6px", flex: "none" }}>Pular tutorial</button>
+      {/* Cabeçalho: título + selo de porcentagem */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 4 }}>
+        <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em" }}>Comece a usar o Manda</div>
+        <span style={{ flex: "none", fontSize: "12.5px", fontWeight: 700, color: color.accentInk, background: color.accentTint, padding: "4px 11px", borderRadius: 999, fontVariantNumeric: "tabular-nums" }}>{pct}%</span>
       </div>
+      <div style={{ fontSize: "13px", color: color.gray500, marginBottom: 13 }}>{doneCount} de {items.length} passos concluídos</div>
       <div className="db-onb-bar"><span style={{ width: `${pct}%` }} /></div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-        {items.map((it) => {
+
+      {/* Passos: concluído (check), atual (destacado + botão), próximos (esmaecidos + seta) */}
+      <div style={{ marginTop: 16, border: `1px solid ${color.line2}`, borderRadius: 12, overflow: "hidden" }}>
+        {items.map((it, idx) => {
           const ok = steps[it.key];
+          const active = idx === firstPending;
+          const clickable = !ok;
           return (
-            <div key={it.key} className={ok ? "db-onb-step done" : "db-onb-step"}>
-              <span className={ok ? "db-onb-check on" : "db-onb-check"}>{ok && <Check size={13} strokeWidth={3.2} />}</span>
+            <div
+              key={it.key}
+              onClick={clickable ? it.action : undefined}
+              role={clickable ? "button" : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); it.action(); } } : undefined}
+              style={{
+                display: "flex", alignItems: "center", gap: 13, padding: "15px 16px",
+                borderTop: idx === 0 ? "none" : `1px solid ${color.line2}`,
+                background: active ? color.surface3 : "#fff",
+                cursor: clickable ? "pointer" : "default",
+                opacity: (!ok && !active) ? 0.6 : 1,
+                transition: "background .15s ease",
+              }}
+            >
+              <span style={{
+                flex: "none", width: 26, height: 26, borderRadius: "50%",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: font.body, fontSize: 13, fontWeight: 700,
+                background: ok ? "#22C55E" : active ? color.accent : "transparent",
+                border: (ok || active) ? "none" : `1.5px solid ${color.gray200}`,
+                color: (ok || active) ? "#fff" : color.gray500,
+              }}>
+                {ok ? <Check size={15} strokeWidth={3} /> : idx + 1}
+              </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: ok ? color.gray400 : color.ink, textDecoration: ok ? "line-through" : "none" }}>{it.title}</div>
-                {!ok && <div style={{ fontSize: "12.5px", color: color.gray500 }}>{it.desc}</div>}
+                <div style={{ fontSize: "14.5px", fontWeight: 600, color: ok ? color.gray400 : color.ink, textDecoration: ok ? "line-through" : "none" }}>{it.title}</div>
+                {active && <div style={{ fontSize: "12.5px", color: color.gray500, marginTop: 2 }}>{it.desc}</div>}
               </div>
-              {!ok && <button onClick={it.action} className="db-btn db-btn-ghost" style={{ fontSize: 13, padding: "7px 12px", flex: "none" }}>{it.cta}</button>}
+              {ok ? (
+                <span style={{ flex: "none", fontSize: "12.5px", fontWeight: 600, color: "#2E7D51" }}>Feito</span>
+              ) : active ? (
+                <button onClick={(e) => { e.stopPropagation(); it.action(); }} className="db-btn db-btn-dark" style={{ flex: "none", fontSize: 13.5, padding: "8px 14px", gap: 4 }}>
+                  {it.cta}<ChevronRight size={15} strokeWidth={2.4} />
+                </button>
+              ) : (
+                <ChevronRight size={18} strokeWidth={2} color={color.gray400} style={{ flex: "none" }} />
+              )}
             </div>
           );
         })}
+      </div>
+
+      <div style={{ marginTop: 12, textAlign: "right" }}>
+        <button onClick={onSkip} className="db-btn" style={{ background: "none", color: color.gray400, fontSize: "12.5px", padding: "4px 6px" }}>Pular tutorial</button>
       </div>
     </div>
   );
@@ -2460,17 +2573,18 @@ function ClientsPanel({ rows, onRefresh }) {
           })}
         </div>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 2, background: monthKey ? "#fff" : color.surface, border: `1px solid ${monthKey ? color.accent : color.gray200}`, borderRadius: 10, padding: "3px 10px 3px 12px", transition: "border-color .15s ease, background .15s ease" }}>
-            <Calendar size={15} strokeWidth={2} color={monthKey ? color.accent : color.gray400} style={{ marginRight: 6 }} />
-            <select value={selM} onChange={(e) => setSelM(e.target.value)} aria-label="Mês" style={{ fontFamily: font.body, fontSize: 13, fontWeight: 600, color: selM ? color.ink : color.gray500, background: "transparent", border: "none", outline: "none", padding: "7px 2px", cursor: "pointer" }}>
+          <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 2, background: monthKey ? "#fff" : color.surface, border: `1px solid ${monthKey ? color.accent : color.gray200}`, borderRadius: 10, padding: "3px 30px 3px 12px", transition: "border-color .15s ease, background .15s ease" }}>
+            <Calendar size={15} strokeWidth={2} color={monthKey ? color.accent : color.gray400} style={{ marginRight: 6, flex: "none" }} />
+            <select value={selM} onChange={(e) => setSelM(e.target.value)} aria-label="Mês" style={{ fontFamily: font.body, fontSize: 13, fontWeight: 600, color: selM ? color.ink : color.gray500, background: "transparent", border: "none", outline: "none", padding: "7px 2px", cursor: "pointer", appearance: "none", WebkitAppearance: "none", MozAppearance: "none" }}>
               <option value="">Escolher mês</option>
               {MONTHS_FULL.map((m, i) => <option key={i} value={String(i + 1).padStart(2, "0")}>{m}</option>)}
             </select>
             {selM && (
-              <select value={selY} onChange={(e) => setSelY(e.target.value)} aria-label="Ano" style={{ fontFamily: font.body, fontSize: 13, fontWeight: 600, color: color.ink, background: "transparent", border: "none", outline: "none", padding: "7px 2px", cursor: "pointer" }}>
+              <select value={selY} onChange={(e) => setSelY(e.target.value)} aria-label="Ano" style={{ fontFamily: font.body, fontSize: 13, fontWeight: 600, color: color.ink, background: "transparent", border: "none", outline: "none", padding: "7px 2px", cursor: "pointer", appearance: "none", WebkitAppearance: "none", MozAppearance: "none" }}>
                 {YEARS.map((y) => <option key={y} value={String(y)}>{y}</option>)}
               </select>
             )}
+            <ChevronDown size={15} strokeWidth={2.2} color={monthKey ? color.accent : color.gray400} style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
           </div>
           {monthKey && (
             <button onClick={() => setSelM("")} className="db-btn" aria-label="Limpar mês" style={{ fontSize: 12.5, fontWeight: 600, color: color.gray500, background: "none", padding: "6px 8px", gap: 5 }}>
@@ -2592,6 +2706,8 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
   const [bio, setBio] = useState(() => { try { return localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { return ""; } });
   const [stats, setStats] = useState(null);
   const [toastsOn, setToastsOn] = useState(() => toastsEnabled(user?.email));
+  const [gmail, setGmail] = useState(null); // { configured, connected, email }
+  const [gmailBusy, setGmailBusy] = useState(false);
 
   useEffect(() => {
     setName(user?.name || "");
@@ -2599,6 +2715,45 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
     try { setBio(localStorage.getItem(bioKeyFor(user?.email)) || ""); } catch { /* ignore */ }
   }, [user]);
   useEffect(() => { api.stats().then(setStats).catch(() => {}); }, []);
+
+  // Status da conexão de Gmail + resultado do fluxo OAuth (?gmail=...).
+  useEffect(() => {
+    api.gmailStatus().then(setGmail).catch(() => {});
+    try {
+      const g = new URLSearchParams(window.location.search).get("gmail");
+      if (g) {
+        const map = {
+          conectado: ["Gmail conectado. Agora você envia propostas pelo seu e-mail.", "success"],
+          erro: ["Não foi possível conectar o Gmail. Tente de novo.", "info"],
+          cancelado: ["Conexão com o Gmail cancelada.", "info"],
+          sem_refresh: ["O Google não liberou o envio. Remova o acesso do Manda na sua Conta Google e conecte de novo.", "info"],
+        };
+        const m = map[g];
+        if (m && pushToast) pushToast(m[0], m[1]);
+        window.history.replaceState({}, "", "/app/configuracoes");
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const connectGmail = async () => {
+    setGmailBusy(true);
+    try {
+      const { url } = await api.gmailConnectUrl();
+      window.location.href = url; // vai ao Google e volta para /app/configuracoes?gmail=...
+    } catch (e) {
+      setGmailBusy(false);
+      if (pushToast) pushToast(e.message || "Não foi possível iniciar a conexão.", "info");
+    }
+  };
+  const disconnectGmail = async () => {
+    setGmailBusy(true);
+    try {
+      await api.gmailDisconnect();
+      setGmail((g) => ({ ...(g || {}), connected: false, email: null }));
+      if (pushToast) pushToast("Gmail desconectado.", "success");
+    } catch (e) { if (pushToast) pushToast(e.message || "Não foi possível desconectar.", "info"); }
+    finally { setGmailBusy(false); }
+  };
 
   const saveName = async () => {
     const v = name.trim();
@@ -2648,10 +2803,6 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
   const saveDefaults = () => {
     try { localStorage.setItem(bioKeyFor(user?.email), bio); } catch { /* ignore */ }
     if (pushToast) pushToast("Padrão da proposta salvo.", "success");
-  };
-  const manageBilling = async () => {
-    try { const { url } = await api.billingPortal(); window.location.href = url; }
-    catch { if (go) go("pricing"); }
   };
   const logout = () => { setToken(null); if (go) go("landing"); };
 
@@ -2737,7 +2888,7 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
             {pwStage === "code" && (
               <div style={{ borderTop: `1px solid ${color.line2}`, paddingTop: 14, marginTop: 2 }}>
                 <label style={fieldLabel}>Código enviado para {user?.email}</label>
-                <CodeInput value={pw.code} onChange={(v) => { setPw((p) => ({ ...p, code: v })); if (pwErr) setPwErr(""); }} onComplete={savePassword} status={pwCodeStatus} disabled={savingPw || pwCodeStatus === "success"} autoFocus />
+                <CodeInput value={pw.code} onChange={(v) => { setPw((p) => ({ ...p, code: v })); if (pwErr) setPwErr(""); }} status={pwCodeStatus} disabled={savingPw || pwCodeStatus === "success"} autoFocus />
                 <button type="button" onClick={requestPwCode} disabled={sendingCode} className="db-btn" style={{ background: "none", color: color.gray500, fontSize: 12.5, padding: "6px 2px 0", gap: 6 }}>
                   <RotateCcw size={13} strokeWidth={2} />{sendingCode ? "Reenviando…" : "Reenviar código"}
                 </button>
@@ -2752,11 +2903,31 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
               </button>
             ) : (
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button onClick={savePassword} disabled={savingPw || !pw.code.trim()} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px" }}><Lock size={14} strokeWidth={2.2} />{savingPw ? "Trocando…" : "Confirmar troca"}</button>
+                <button onClick={savePassword} disabled={savingPw || pw.code.trim().length < 6} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px" }}><Lock size={14} strokeWidth={2.2} />{savingPw ? "Trocando…" : "Confirmar troca"}</button>
                 <button onClick={() => { setPwStage("form"); setPw((p) => ({ ...p, code: "" })); setPwErr(""); }} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 16px" }}>Cancelar</button>
               </div>
             )}
           </div>
+        </div>
+
+        <div style={card}>
+          <div style={hTitle}>Enviar por e-mail</div>
+          <p style={subTxt}>Conecte seu Gmail para mandar as propostas pelo seu próprio e-mail. O cliente recebe direto de você, e as respostas dele voltam pra sua caixa.</p>
+          {gmail && gmail.connected ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: "13.5px", fontWeight: 600, color: "#2E7D51", background: "#EAF6EF", border: "1px solid #CDE9D8", padding: "8px 12px", borderRadius: 9 }}>
+                <Check size={15} strokeWidth={2.6} />Conectado: {gmail.email}
+              </span>
+              <button onClick={disconnectGmail} disabled={gmailBusy} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "9px 16px" }}>{gmailBusy ? "…" : "Desconectar"}</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <button onClick={connectGmail} disabled={gmailBusy || (gmail && !gmail.configured)} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px" }}>
+                <Mail size={15} strokeWidth={2.2} />{gmailBusy ? "Abrindo…" : "Conectar Gmail"}
+              </button>
+              {gmail && !gmail.configured && <span style={{ fontSize: "12.5px", color: color.gray400 }}>Envio por e-mail ainda não ativado no servidor.</span>}
+            </div>
+          )}
         </div>
 
         <div style={card}>
@@ -2786,8 +2957,8 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
               <button onClick={() => go && go("pricing")} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 18px" }}>Ver planos</button>
             ) : (
               <>
-                <button onClick={manageBilling} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 18px" }}>Gerenciar assinatura</button>
-                <button onClick={() => go && go("pricing")} className="db-btn" style={{ fontSize: 14, padding: "10px 14px", background: "none", color: color.gray500, fontWeight: 600 }}>Mudar de plano</button>
+                <button onClick={() => go && go("pricing")} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 18px" }}>Renovar acesso</button>
+                <button onClick={() => go && go("pricing")} className="db-btn" style={{ fontSize: 14, padding: "10px 14px", background: "none", color: color.gray500, fontWeight: 600 }}>Trocar de plano</button>
               </>
             )}
           </div>

@@ -3,22 +3,33 @@ import { useNavigate } from "react-router-dom";
 import { Check, Plus } from "lucide-react";
 import { font, color } from "../theme.js";
 import { api, getToken } from "../lib/api.js";
+import CountUp from "../components/CountUp.jsx";
 
 export default function Pricing({ go }) {
   const [billing, setBilling] = useState("monthly");
   const annual = billing === "annual";
   const navigate = useNavigate();
   const signup = () => go && go("signup");
+  const [busyPlan, setBusyPlan] = useState(null); // plano cujo checkout está abrindo
+  const [subErr, setSubErr] = useState("");
   const subscribe = async (planKey) => {
     const interval = annual ? "year" : "month";
-    if (getToken()) {
-      try {
-        const { url } = await api.checkout(planKey, interval);
-        window.location.href = url; // gateway do Stripe
-        return;
-      } catch { /* não logado / erro: manda pro cadastro com o plano pendente */ }
+    // Deslogado: cria a conta primeiro (com o plano pendente); o checkout abre depois.
+    if (!getToken()) {
+      navigate(`/criar-conta?plan=${planKey}&interval=${interval}`);
+      return;
     }
-    navigate(`/criar-conta?plan=${planKey}&interval=${interval}`);
+    // Logado: vai DIRETO pro Mercado Pago. Se falhar, mostra o erro aqui mesmo,
+    // nunca joga na tela de cadastro (a pessoa já tem conta).
+    setSubErr(""); setBusyPlan(planKey);
+    try {
+      const { url } = await api.checkout(planKey, interval);
+      if (!url) throw new Error("Não recebemos o link de pagamento. Tente de novo.");
+      window.location.href = url; // gateway do Mercado Pago
+    } catch (e) {
+      setSubErr(e.message || "Não foi possível abrir o pagamento agora. Tente de novo em instantes.");
+      setBusyPlan(null);
+    }
   };
 
   const toggleBase = { fontFamily: font.body, fontSize: "14.5px", fontWeight: 600, padding: "9px 18px", borderRadius: 8, border: "none", cursor: "pointer", display: "flex", alignItems: "center", transition: "background .15s,color .15s" };
@@ -28,21 +39,21 @@ export default function Pricing({ go }) {
   const plans = [
     {
       name: "Básico", planKey: "basic", tagline: "Para começar a mandar propostas com cara profissional.",
-      price: annual ? "R$11" : "R$12", period: "/mês", note: annual ? "R$132/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Básico", variant: "ghost",
+      priceNum: annual ? 11 : 12, period: "/mês", note: annual ? "R$132/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Básico", variant: "ghost",
       popular: false, titleColor: color.ink, subColor: color.gray500, featColor: color.gray700, divider: "#EEE", checkColor: color.ink,
       cardStyle: { position: "relative", background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, padding: "30px 26px" },
       features: ["5 propostas por mês", "Acesso aos templates básicos", "Link compartilhável", "Aceite com um clique"],
     },
     {
       name: "Pro", planKey: "pro", tagline: "Para quem vive de proposta e quer fechar mais.",
-      price: annual ? "R$26" : "R$29", period: "/mês", note: annual ? "R$312/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Pro", variant: "accent",
+      priceNum: annual ? 26 : 29, period: "/mês", note: annual ? "R$312/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Pro", variant: "accent",
       popular: true, titleColor: color.white, subColor: color.gray400, featColor: color.gray200, divider: color.ink800, checkColor: "#E9967B",
       cardStyle: { position: "relative", background: color.ink, color: color.white, border: `1px solid ${color.ink}`, borderRadius: 16, padding: "30px 26px", boxShadow: "0 22px 50px -20px rgba(217,119,87,0.4)", transform: "scale(1.03)" },
       features: ["25 propostas por mês", "Todos os templates", "Sem marca d’água", "Notificação de visualização", "Aceite com um clique", "Calculadora de preço"],
     },
     {
       name: "Business", planKey: "business", tagline: "Para quem quer marca própria e automação.",
-      price: annual ? "R$87" : "R$97", period: "/mês", note: annual ? "R$1.044/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Business", variant: "dark",
+      priceNum: annual ? 87 : 97, period: "/mês", note: annual ? "R$1.044/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Business", variant: "dark",
       popular: false, titleColor: color.ink, subColor: color.gray500, featColor: color.gray700, divider: "#EEE", checkColor: color.ink,
       cardStyle: { position: "relative", background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, padding: "30px 26px" },
       features: ["Propostas ilimitadas", "Todos os templates", "Domínio personalizado no link", "Dashboard de conversão", "Suporte prioritário"],
@@ -116,6 +127,9 @@ export default function Pricing({ go }) {
 
       {/* PLANOS */}
       <section style={{ padding: "20px 24px 84px" }}>
+        {subErr && (
+          <div role="alert" style={{ maxWidth: 620, margin: "0 auto 20px", fontSize: 14, color: "#B4443C", background: "#FDECEA", border: "1px solid #F5D2CD", padding: "11px 14px", borderRadius: 10, textAlign: "center" }}>{subErr}</div>
+        )}
         <div className="pr-plans" style={{ maxWidth: 1080, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 22, alignItems: "start" }}>
           {plans.map((p, i) => (
             <div key={i} className={p.popular ? "pr-pro" : "pr-card-light"} style={p.cardStyle}>
@@ -123,11 +137,11 @@ export default function Pricing({ go }) {
               <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 6, color: p.titleColor }}>{p.name}</div>
               <p style={{ fontSize: 14, lineHeight: 1.5, color: p.subColor, margin: "0 0 22px", minHeight: 42 }}>{p.tagline}</p>
               <div style={{ display: "flex", alignItems: "flex-end", gap: 6, marginBottom: 4 }}>
-                <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 46, lineHeight: 1, letterSpacing: "-0.03em", color: p.titleColor }}>{p.price}</span>
+                <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 46, lineHeight: 1, letterSpacing: "-0.03em", color: p.titleColor, fontVariantNumeric: "tabular-nums" }}><CountUp value={p.priceNum} duration={420} format={(n) => `R$${Math.round(n)}`} /></span>
                 <span style={{ fontSize: 15, color: p.subColor, marginBottom: 8 }}>{p.period}</span>
               </div>
               <div style={{ fontSize: 13, color: p.subColor, minHeight: 20, marginBottom: 22 }}>{p.note}</div>
-              <button onClick={() => subscribe(p.planKey)} className={`pr-btn pr-btn-${p.variant}`}>{p.cta}</button>
+              <button onClick={() => subscribe(p.planKey)} disabled={busyPlan === p.planKey} className={`pr-btn pr-btn-${p.variant}`}>{busyPlan === p.planKey ? "Abrindo…" : p.cta}</button>
               <div style={{ height: 1, background: p.divider, margin: "24px 0" }} />
               <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
                 {p.features.map((f, j) => (

@@ -78,7 +78,13 @@ async function request(path, options = {}) {
   }
   if (res.status === 204) return {};
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Falha na requisição.");
+  if (!res.ok) {
+    const err = new Error(data.error || "Falha na requisição.");
+    err.status = res.status;
+    err.data = data;
+    if (data.needsConnect) err.needsConnect = true; // ex.: enviar sem Gmail conectado
+    throw err;
+  }
   return data;
 }
 
@@ -107,6 +113,14 @@ export const api = {
   deleteProposal: (id) => request(`/proposals/${id}`, { method: "DELETE" }),
   stats: () => request("/proposals/stats"),
   usage: () => request("/proposals/usage"),
+  // Envia a proposta pelo Gmail do usuário. body: { to?, subject?, message? }.
+  // 409 com { needsConnect:true } quando falta conectar a conta Google.
+  sendProposalEmail: (id, body) => request(`/proposals/${id}/send-email`, { method: "POST", body: JSON.stringify(body || {}) }),
+
+  // Integração Gmail (enviar propostas pelo próprio e-mail)
+  gmailStatus: () => request("/integrations/google/status"),
+  gmailConnectUrl: () => request("/integrations/google/connect"), // { url } — abrir no navegador
+  gmailDisconnect: () => request("/integrations/google", { method: "DELETE" }),
 
   // público (sem token)
   publicProposal: (publicId) => request(`/public/${publicId}`),
@@ -114,7 +128,6 @@ export const api = {
   acceptPublic: (publicId) => request(`/public/${publicId}/accept`, { method: "POST" }),
   declinePublic: (publicId) => request(`/public/${publicId}/decline`, { method: "POST" }),
 
-  // cobrança (Stripe). checkout/portal devolvem { url } — redirecione com window.location = url
+  // cobrança (Mercado Pago). checkout devolve { url } — redirecione com window.location = url.
   checkout: (plan, interval = "month") => request("/billing/checkout", { method: "POST", body: JSON.stringify({ plan, interval }) }),
-  billingPortal: () => request("/billing/portal", { method: "POST" }),
 };

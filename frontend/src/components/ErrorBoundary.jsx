@@ -16,11 +16,11 @@ export default class ErrorBoundary extends Component {
   }
   render() {
     if (!this.state.hasError) return this.props.children;
-    const mark = { width: 34, height: 34, borderRadius: 9, background: color.ink, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 900, fontSize: 18 };
+    const mark = { width: 34, height: 34, borderRadius: 9, background: color.ink, display: "flex", alignItems: "center", justifyContent: "center" };
     return (
       <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 24, fontFamily: font.body, color: color.ink, background: color.surface2 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 30 }}>
-          <span style={mark}>M</span>
+          <span style={mark}><img src="/logo-mark-white.svg" alt="" style={{ width: "60%", height: "60%", display: "block" }} /></span>
           <span style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.02em" }}>Manda</span>
         </div>
         <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: color.accent, marginBottom: 12 }}>Ops</div>

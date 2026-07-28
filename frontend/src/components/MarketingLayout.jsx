@@ -5,18 +5,11 @@ import { font, color } from "../theme.js";
 // Equivale ao shell de marketing do Manda.dc.html.
 function Logo({ dark }) {
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
-      <span
-        style={{
-          width: 28, height: 28, borderRadius: 8,
-          background: dark ? color.white : color.ink,
-          color: dark ? color.ink : color.white,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontFamily: font.heading, fontWeight: 900, fontSize: 17, lineHeight: 1,
-        }}
-      >M</span>
-      <span style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 19, letterSpacing: "-0.02em" }}>Manda</span>
-    </span>
+    <img
+      src={dark ? "/logo-horizontal-white.svg" : "/logo-horizontal.svg"}
+      alt="Manda"
+      style={{ height: 28, width: "auto", display: "block" }}
+    />
   );
 }
 
