@@ -54,4 +54,8 @@ export const env = {
 
   // URL pública do FRONT (usada nos redirects do checkout). Em produção, o domínio real.
   APP_URL: process.env.APP_URL || "http://localhost:5173",
+
+  // Monitoramento de erro (Sentry). Se vazio, fica DESLIGADO (dev e testes não
+  // são afetados). Em produção, cole o DSN do projeto backend para ligar.
+  SENTRY_DSN: process.env.SENTRY_DSN || "",
 };
