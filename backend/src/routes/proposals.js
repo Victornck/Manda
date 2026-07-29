@@ -9,7 +9,9 @@ import { publicId } from "../lib/ids.js";
 import { PLAN_LIMITS, templateAllowed } from "../lib/plans.js";
 import { getFreshAccess } from "../lib/googleAccount.js";
 import { buildRawEmail, sendGmail } from "../lib/googleMail.js";
-import { proposalEmailHtml, proposalEmailText } from "../lib/mailer.js";
+import { proposalEmailHtml, proposalEmailText, followUpEmailHtml, followUpEmailText } from "../lib/mailer.js";
+
+const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const emailProposalSchema = z.object({
   to: z.string().email().optional(),
@@ -103,6 +105,34 @@ r.get("/notifications", async (req, res, next) => {
     res.json({
       notifications: rows.map((n) => ({
         id: n.id, type: n.type, client: n.client, title: n.title, publicId: n.public_id, createdAt: n.created_at,
+      })),
+    });
+  } catch (e) { next(e); }
+});
+
+// Follow-up assistido: propostas que foram ENVIADAS por e-mail pelo app, já têm
+// alguns dias, seguem em aberto (enviada/vista, não aceita/recusada) e ainda não
+// foram lembradas recentemente. Definido antes de /:id para não conflitar.
+r.get("/follow-ups", async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `select p.id, p.public_id, p.client, p.title, p.client_email, p.status, e.created_at as sent_at
+         from proposals p
+         join proposal_events e on e.proposal_id = p.id and e.type = 'emailed'
+        where p.user_id = $1
+          and p.status in ('sent','viewed')
+          and e.created_at <= now() - interval '3 days'
+          and (p.reminded_at is null or p.reminded_at <= now() - interval '3 days')
+        order by e.created_at asc
+        limit 20`,
+      [req.user.id]
+    );
+    const day = 86400000;
+    res.json({
+      followUps: rows.map((f) => ({
+        id: f.id, publicId: f.public_id, client: f.client, title: f.title,
+        clientEmail: f.client_email, sentAt: f.sent_at, viewed: f.status === "viewed",
+        daysSince: Math.max(1, Math.floor((Date.now() - new Date(f.sent_at).getTime()) / day)),
       })),
     });
   } catch (e) { next(e); }
@@ -256,6 +286,59 @@ r.post("/:id/send-email", emailSendLimiter, async (req, res, next) => {
     if (!p.client_email && dest) {
       query("update proposals set client_email=$2 where id=$1", [p.id, dest]).catch(() => {});
     }
+    res.json({ ok: true, to: dest, from: access.email });
+  } catch (e) { next(e); }
+});
+
+// Follow-up assistido: envia um LEMBRETE pelo Gmail do usuário (clique dele).
+// Diferente do primeiro envio: não usa o evento 'emailed' (que é único por
+// proposta), apenas marca reminded_at para dar cooldown e sumir da lista.
+r.post("/:id/remind", emailSendLimiter, async (req, res, next) => {
+  try {
+    const { rows } = await query("select * from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);
+    const p = rows[0];
+    if (!p) return res.status(404).json({ error: "Proposta não encontrada." });
+    if (!["sent", "viewed"].includes(p.status)) {
+      return res.status(409).json({ error: "Só dá para lembrar propostas enviadas e ainda em aberto." });
+    }
+    const dest = String(p.client_email || "").trim().toLowerCase();
+    if (!emailRe.test(dest)) {
+      return res.status(400).json({ error: "Não há e-mail do cliente para enviar o lembrete." });
+    }
+    // Cooldown de 2 dias: evita enviar lembrete atrás de lembrete.
+    if (p.reminded_at && (Date.now() - new Date(p.reminded_at).getTime()) < 2 * 86400000) {
+      return res.status(429).json({ error: "Você já enviou um lembrete recentemente. Aguarde um pouco." });
+    }
+
+    let access;
+    try {
+      access = await getFreshAccess(req.user.id);
+    } catch (err) {
+      if (err.needsConnect) return res.status(409).json({ error: err.message, needsConnect: true });
+      throw err;
+    }
+
+    const { rows: urows } = await query("select name from users where id=$1", [req.user.id]);
+    const senderName = urows[0]?.name || "";
+    const link = `${env.APP_URL}/p/${p.public_id}`;
+    const common = { senderName, clientName: p.client, title: p.title, link };
+    const raw = buildRawEmail({
+      fromName: senderName, fromEmail: access.email, to: dest,
+      subject: `Lembrete: ${p.title || "sua proposta"}`,
+      html: followUpEmailHtml(common), text: followUpEmailText(common),
+    });
+
+    try {
+      await sendGmail(access.accessToken, raw);
+    } catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        return res.status(409).json({ error: "O Google recusou o envio. Reconecte sua conta Gmail.", needsConnect: true });
+      }
+      console.error("[remind]", err.message);
+      return res.status(502).json({ error: "Não foi possível enviar agora. Tente de novo em instantes." });
+    }
+
+    await query("update proposals set reminded_at=now() where id=$1", [p.id]);
     res.json({ ok: true, to: dest, from: access.email });
   } catch (e) { next(e); }
 });

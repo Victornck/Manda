@@ -26,14 +26,15 @@ function getTransport() {
   return transporter;
 }
 
-export async function sendMail({ to, subject, html, text }) {
+export async function sendMail({ to, subject, html, text, replyTo, attachments }) {
   const t = getTransport();
   if (t) {
     // No Gmail o "De" precisa ser a própria conta autenticada (SMTP_USER).
-    await t.sendMail({ from: env.EMAIL_FROM, to, subject, html, text });
+    await t.sendMail({ from: env.EMAIL_FROM, to, subject, html, text, replyTo, attachments });
     return { smtp: true };
   }
-  console.log(`\n[mailer:dev] → ${to}\n[assunto] ${subject}\n${text || html}\n`);
+  const extra = attachments?.length ? `\n[anexos] ${attachments.map((a) => a.filename).join(", ")}` : "";
+  console.log(`\n[mailer:dev] → ${to}${replyTo ? ` (responder a ${replyTo})` : ""}\n[assunto] ${subject}\n${text || html}${extra}\n`);
   return { dev: true };
 }
 
@@ -129,6 +130,34 @@ export function proposalEmailText({ senderName, clientName, title, link, message
   ].filter(Boolean).join("\n\n");
 }
 
+// Lembrete de proposta parada (follow-up). Enviado pelo Gmail do usuário, com o
+// clique dele; um empurrãozinho gentil para o cliente que ainda não respondeu.
+export function followUpEmailHtml({ senderName, clientName, title, link }) {
+  return `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#F5F1EC;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A">
+    <div style="max-width:480px;margin:0 auto;padding:40px 24px">
+      <div style="background:#fff;border:1px solid #E7DFD5;border-radius:16px;padding:32px">
+        <p style="margin:0 0 16px;font-size:16px">Olá, ${escapeHtml(clientName || "")}.</p>
+        <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#333">Só passando para lembrar da proposta${title ? ` <strong>${escapeHtml(title)}</strong>` : ""} que te enviei. Se tiver qualquer dúvida, é só responder este e-mail. Se preferir, dá para ver e aceitar por aqui:</p>
+        <div style="text-align:center;margin:26px 0 8px">
+          <a href="${escapeHtml(link)}" style="display:inline-block;background:#1A1A1A;color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:12px">Ver a proposta</a>
+        </div>
+        <p style="margin:18px 0 0;font-size:12.5px;color:#8A8A8A;word-break:break-all">Ou copie este link: ${escapeHtml(link)}</p>
+      </div>
+      <p style="margin:20px 0 0;font-size:12px;color:#A79C8E;text-align:center">Enviado por ${escapeHtml(senderName || "")} · via Manda</p>
+    </div>
+  </body></html>`;
+}
+
+export function followUpEmailText({ senderName, clientName, title, link }) {
+  return [
+    `Olá, ${clientName || ""}.`,
+    `Só passando para lembrar da proposta${title ? ` "${title}"` : ""} que te enviei. Qualquer dúvida, é só responder este e-mail.`,
+    `Ver e aceitar por aqui: ${link}`,
+    "",
+    `Enviado por ${senderName || ""} via Manda.`,
+  ].filter(Boolean).join("\n\n");
+}
+
 // Lembrete de renovação (enviado faltando poucos dias para o acesso vencer).
 export function renewalEmailHtml({ name, planLabel, dateStr, daysLeft, url }) {
   const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
@@ -175,6 +204,58 @@ export function renewalEmailText({ name, planLabel, dateStr, daysLeft, url }) {
     "",
     "Manda · propostas que fecham negócio",
   ].join("\n\n");
+}
+
+// Rótulo amigável de cada categoria de relato.
+export const FEEDBACK_LABELS = { bug: "Bug", sugestao: "Sugestão", duvida: "Dúvida", cobranca: "Cobrança", outro: "Outro" };
+
+// E-mail que chega PRA VOCÊ (dono) quando um usuário usa o "Relatar problema".
+// O reply-to é o e-mail do usuário, então você responde direto pra ele.
+export function feedbackEmailHtml({ category, message, fromEmail, fromName, pageUrl, hasShot, dateStr }) {
+  const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  const cat = escapeHtml(FEEDBACK_LABELS[category] || "Relato");
+  const msg = escapeHtml(message || "").replace(/\n/g, "<br>");
+  const who = escapeHtml(fromName ? `${fromName} (${fromEmail || "sem e-mail"})` : (fromEmail || "sem e-mail"));
+  const pg = pageUrl ? escapeHtml(pageUrl) : "";
+  const dt = escapeHtml(dateStr || "");
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Novo relato no Manda</title></head>
+  <body style="margin:0;padding:0;background:#EEE7DD;font-family:${font};color:#1F1B17">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EEE7DD"><tr><td align="center" style="padding:36px 16px 44px">
+      <table role="presentation" width="460" cellpadding="0" cellspacing="0" style="width:460px;max-width:460px">
+        <tr><td style="padding:0 4px 22px">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td width="36" height="36" align="center" valign="middle" style="width:36px;height:36px;background:#1F1B17;border-radius:10px;color:#fff;font-family:${font};font-size:20px;font-weight:800;line-height:36px">${EMAIL_MARK}</td>
+            <td valign="middle" style="padding-left:11px;font-family:${font};font-size:20px;font-weight:700;letter-spacing:-0.02em;color:#1F1B17">Manda</td>
+          </tr></table>
+        </td></tr>
+        <tr><td style="background:#ffffff;border:1px solid #E6DCCF;border-radius:18px;padding:30px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:#C4573B">Novo relato · ${cat}</div>
+          <p style="margin:16px 0 0;font-size:15px;line-height:1.6;color:#1F1B17">${msg || "<em>(sem mensagem)</em>"}</p>
+          <div style="height:1px;background:#EFE7DB;font-size:0;line-height:0;margin:22px 0 16px">&nbsp;</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;color:#6B635A">
+            <tr><td style="padding:3px 0"><strong style="color:#1F1B17">De:</strong> ${who}</td></tr>
+            ${pg ? `<tr><td style="padding:3px 0;word-break:break-all"><strong style="color:#1F1B17">Página:</strong> ${pg}</td></tr>` : ""}
+            ${hasShot ? `<tr><td style="padding:3px 0"><strong style="color:#1F1B17">Print:</strong> em anexo</td></tr>` : ""}
+            ${dt ? `<tr><td style="padding:3px 0"><strong style="color:#1F1B17">Quando:</strong> ${dt}</td></tr>` : ""}
+          </table>
+          <p style="margin:18px 0 0;font-size:12.5px;line-height:1.55;color:#9A9084">Responda este e-mail para falar direto com a pessoa.</p>
+        </td></tr>
+      </table>
+    </td></tr></table>
+  </body></html>`;
+}
+
+export function feedbackEmailText({ category, message, fromEmail, fromName, pageUrl, hasShot, dateStr }) {
+  return [
+    `Novo relato (${FEEDBACK_LABELS[category] || "Relato"})`,
+    message || "(sem mensagem)",
+    `De: ${fromName ? `${fromName} (${fromEmail || "sem e-mail"})` : (fromEmail || "sem e-mail")}`,
+    pageUrl ? `Página: ${pageUrl}` : "",
+    hasShot ? "Print: em anexo" : "",
+    dateStr ? `Quando: ${dateStr}` : "",
+    "",
+    "Responda este e-mail para falar direto com a pessoa.",
+  ].filter(Boolean).join("\n");
 }
 
 function escapeHtml(s) {

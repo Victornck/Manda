@@ -13,6 +13,7 @@ import integrationRoutes from "./routes/integrations.js";
 import publicRoutes from "./routes/public.js";
 import billingRoutes from "./routes/billing.js";
 import webhookRoutes from "./routes/webhook.js";
+import feedbackRoutes from "./routes/feedback.js";
 
 // Cria e configura o app Express, SEM abrir porta nem subir jobs. Assim os
 // testes (supertest) importam o app direto, e o server.js cuida do listen.
@@ -36,6 +37,7 @@ app.use("/api/proposals", proposalRoutes);
 app.use("/api/integrations", integrationRoutes);
 app.use("/api/public", publicLimiter, publicRoutes);
 app.use("/api/billing", billingLimiter, billingRoutes);
+app.use("/api/feedback", feedbackRoutes);
 
 // Serve o FRONT (build do Vite) pelo próprio backend, se o dist existir. Assim,
 // em produção, um serviço só entrega o app e a API no mesmo domínio (e a URL do

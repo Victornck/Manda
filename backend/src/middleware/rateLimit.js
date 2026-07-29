@@ -59,6 +59,13 @@ export const emailSendLimiter = rateLimit({
   message: { error: "Muitos envios seguidos. Aguarde um instante." },
 });
 
+// Relatar problema: cada envio grava no banco e dispara um e-mail pro suporte.
+// Uso legítimo é raro (uma pessoa relatando algo), então trava spam sem incomodar.
+export const feedbackLimiter = rateLimit({
+  windowMs: 15 * 60_000, max: 6, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
+  message: { error: "Muitos relatos seguidos. Aguarde alguns minutos." },
+});
+
 // Escrita de propostas (criar/editar): corpo de até 3MB (imagens base64);
 // flood disso pesa banco e banda. Uso normal fica muito abaixo.
 export const writeLimiter = rateLimit({

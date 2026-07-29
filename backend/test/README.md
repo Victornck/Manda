@@ -30,12 +30,15 @@ Unitários (sem banco), em `test/unit/`:
 - `mercadopago` — validação da assinatura do webhook (aceita a legítima, rejeita a forjada).
 - `googleMail` — montagem do MIME do e-mail (From/To/Subject codificado, multipart).
 - `plans` — regras de plano (templates permitidos, hierarquia, limites de cota, preços).
+- `sentry` — monitoramento fica desligado (no-op) sem DSN, sem quebrar nem exigir o pacote.
 
 Integração (com banco), em `test/integration/`:
 - `auth` — registro, login (senha certa/errada), 1 conta por CPF, `/me` exige token.
 - `quota` — free não cria; Básico cria até 5; a cota é APPEND-ONLY (apagar não reabre vaga).
 - `plan-gating` — template de plano superior é bloqueado; proposta concluída é imutável (409); um usuário não acessa proposta de outro (404).
 - `idempotency` — o mesmo pagamento do Mercado Pago nunca libera plano duas vezes (PK em `mp_payments`).
+- `feedback` — "Relatar problema": exige login, valida categoria/mensagem, responde 201.
+- `follow-up` — lista propostas paradas (enviadas há dias, em aberto) e as guardas do lembrete: rascunho (409), sem e-mail do cliente (400), cooldown (429), sem Gmail conectado (409 needsConnect).
 
 ## Estrutura
 
