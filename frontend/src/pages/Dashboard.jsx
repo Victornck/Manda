@@ -4,6 +4,7 @@ import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
   Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
+  Copy, Send,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, brl, initials } from "../theme.js";
 import { api, setToken } from "../lib/api.js";
@@ -160,6 +161,7 @@ export default function Dashboard({ go }) {
   const [draftId, setDraftId] = useState(null);
   const pristineRef = useRef("");  // snapshot do doc ao abrir; só salva rascunho se mudar
   const [editorFrom, setEditorFrom] = useState("list"); // aba de onde o editor foi aberto
+  const [isCopy, setIsCopy] = useState(false); // editor aberto a partir de uma duplicação
   const [flow, setFlow] = useState("editing"); // editing | finishing | done
   const [step, setStep] = useState(0);
   const [sealing, setSealing] = useState(false);
@@ -208,6 +210,11 @@ export default function Dashboard({ go }) {
   // Uso do mês (append-only no servidor): NÃO diminui ao apagar propostas.
   const refreshUsage = () => { api.usage().then(setUsage).catch(() => {}); };
 
+  // Follow-up assistido: propostas paradas que valem um lembrete (do servidor).
+  const [followUps, setFollowUps] = useState([]);
+  const [remindingId, setRemindingId] = useState(null);
+  const refreshFollowUps = () => { api.followUps().then((d) => setFollowUps(d.followUps || [])).catch(() => {}); };
+
   // Recarrega a lista: propostas do servidor + rascunhos locais (localStorage).
   const refreshRows = async () => {
     const local = loadProposals();
@@ -215,6 +222,7 @@ export default function Dashboard({ go }) {
       const { proposals } = await api.listProposals();
       setRows([...local, ...proposals.map(fromApi)]);
       setServerDown(false);
+      refreshFollowUps();
     } catch (e) {
       setRows(local); // backend fora do ar: mostra ao menos os rascunhos locais
       if (e?.network) setServerDown(true);
@@ -247,6 +255,7 @@ export default function Dashboard({ go }) {
         setServerDown(false);
         setBooting(false);
         refreshUsage();
+        refreshFollowUps();
       } catch (e) {
         if (!alive) return;
         if (n < 3) { setTimeout(() => attempt(n + 1), [700, 1500, 3000][n]); return; }
@@ -571,6 +580,7 @@ export default function Dashboard({ go }) {
     setEditorFrom("list");
     setFlowError("");
     setFlow("editing");
+    setIsCopy(false);
     setView("editor");
   };
   // Abre uma proposta nova já com os itens vindos da Calculadora.
@@ -585,6 +595,7 @@ export default function Dashboard({ go }) {
     setEditorFrom("calc");
     setFlowError("");
     setFlow("editing");
+    setIsCopy(false);
     setView("editor");
   };
   const openRow = (r) => {
@@ -601,6 +612,7 @@ export default function Dashboard({ go }) {
     pristineRef.current = JSON.stringify(d); // abriu uma existente: só re-salva se editar
     setDraftId(r.id || newId());
     setDraftPublicId(r.publicId || null);
+    setIsCopy(false);
     setEditorFrom("list");
     setFlowError("");
     setFlow("editing");
@@ -656,6 +668,7 @@ export default function Dashboard({ go }) {
     setEditorFrom("templates");
     setFlowError("");
     setFlow("editing");
+    setIsCopy(false);
     setView("editor");
   };
 
@@ -717,6 +730,50 @@ export default function Dashboard({ go }) {
       pt === "Aceita" ? "Proposta marcada como aceita." : pt === "Recusada" ? "Proposta marcada como recusada." : "Proposta reaberta.",
       pt === "Aceita" ? "success" : "info"
     );
+  };
+
+  // Duplicar: abre uma CÓPIA como rascunho local editável (novo id local, sem
+  // link público). Nada vai pro servidor nem conta cota até você concluir. Assim
+  // a cópia não nasce travada como as propostas já enviadas.
+  const duplicateRow = (r) => (e) => {
+    e.stopPropagation();
+    const baseTitle = r.title && r.title !== "Proposta sem título" ? r.title : "Proposta";
+    const d = {
+      ...BLANK_DOC,
+      client: r.client || "", company: r.company || "", title: `${baseTitle} (cópia)`,
+      clientEmail: r.clientEmail || "", scope: r.scope || "",
+      items: Array.isArray(r.items) && r.items.length ? r.items.map((it) => ({ ...it })) : BLANK_DOC.items,
+      start: r.start || "", end: r.end || "", payment: r.payment || "",
+      revisions: r.revisions || "", validity: r.validity || "", bio: r.bio || "",
+      accent: r.accent || "#0A0A0A", accent2: r.accent2 || "#6C48B0", gradient: !!r.gradient,
+      theme: r.theme || "claro", watermark: r.watermark || "", logo: r.logo || null, cover: r.cover || null,
+      template: r.template || "minimal",
+    };
+    setDoc(d);
+    pristineRef.current = ""; // cópia já tem conteúdo: conta como rascunho
+    setDraftId(newId());
+    setDraftPublicId(null);
+    setEditorFrom("list");
+    setFlowError("");
+    setFlow("editing");
+    setIsCopy(true);
+    setView("editor");
+    pushToast("Cópia aberta como rascunho. Ajuste e conclua.", "success");
+  };
+
+  // Follow-up assistido: envia o lembrete pelo Gmail do usuário (clique dele).
+  const remind = async (f) => {
+    if (remindingId) return;
+    setRemindingId(f.id);
+    try {
+      await api.remindProposal(f.id);
+      pushToast(`Lembrete enviado para ${f.client || "o cliente"}.`, "success");
+      refreshFollowUps();
+    } catch (err) {
+      if (err.needsConnect) pushToast("Conecte seu Gmail em Configurações para enviar lembretes.", "info");
+      else pushToast(err.message || "Não foi possível enviar o lembrete.", "info");
+    }
+    setRemindingId(null);
   };
 
   const confirmDelete = async () => {
@@ -891,6 +948,20 @@ export default function Dashboard({ go }) {
         .db-onb-check.on{ border-color:#2E7D51; background:#2E7D51; }
         .db-planbar{ display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; background:${color.accentTint}; border:1px solid ${color.accentLine}; border-radius:14px; padding:14px 18px; margin-bottom:18px; }
         .db-planbar-icon{ width:36px; height:36px; flex:none; border-radius:10px; background:#fff; color:${color.accentInk}; display:flex; align-items:center; justify-content:center; }
+        .db-follow{ background:${color.surface2}; border:1px solid ${color.line}; border-radius:14px; padding:16px 18px; margin-bottom:18px; }
+        .db-follow-head{ display:flex; align-items:flex-start; gap:12px; margin-bottom:12px; }
+        .db-follow-ic{ width:34px; height:34px; flex:none; border-radius:9px; background:${color.accentTint}; color:${color.accentInk}; display:flex; align-items:center; justify-content:center; }
+        .db-follow-t{ font-family:${font.heading}; font-weight:700; font-size:14.5px; letter-spacing:-0.01em; color:${color.ink}; }
+        .db-follow-s{ font-size:12.5px; line-height:1.45; color:${color.gray500}; margin-top:1px; }
+        .db-follow-list{ display:flex; flex-direction:column; gap:8px; }
+        .db-follow-item{ display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff; border:1px solid ${color.line2}; border-radius:11px; padding:10px 12px; }
+        .db-follow-info{ display:flex; flex-direction:column; min-width:0; }
+        .db-follow-name{ font-size:13.5px; font-weight:600; color:${color.ink}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .db-follow-meta{ font-size:12px; color:${color.gray500}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .db-follow-btn{ display:inline-flex; align-items:center; gap:7px; flex:none; font-family:${font.body}; font-size:13px; font-weight:600; color:#fff; background:${color.ink}; border:none; border-radius:10px; padding:9px 14px; cursor:pointer; transition:background .15s ease, opacity .15s ease, transform .12s ease; }
+        .db-follow-btn:hover:not(:disabled){ background:#262626; }
+        .db-follow-btn:active:not(:disabled){ transform:scale(.97); }
+        .db-follow-btn:disabled{ opacity:.55; cursor:default; }
         .db-plans-card{ position:relative; width:100%; max-width:820px; background:#fff; border:1px solid ${color.line}; border-radius:18px; box-shadow:0 30px 70px -22px rgba(20,20,30,0.35); padding:28px 28px 30px; max-height:92vh; overflow:auto; animation:dbPop .38s cubic-bezier(.2,.8,.2,1) both; }
         .db-plans-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
         .db-plan{ border-radius:14px; padding:22px 18px 20px; background:#fff; }
@@ -1137,6 +1208,31 @@ export default function Dashboard({ go }) {
               <OnboardingCard steps={onbSteps} done={onbDone} onNew={newProposal} goSettings={() => navTo("settings")} onSkip={dismissOnb} onFinish={() => setOnbCelebrate(false)} />
             )}
 
+            {followUps.length > 0 && (
+              <div className="db-follow">
+                <div className="db-follow-head">
+                  <span className="db-follow-ic"><Clock size={16} strokeWidth={2.2} /></span>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="db-follow-t">{followUps.length} proposta{followUps.length > 1 ? "s" : ""} parada{followUps.length > 1 ? "s" : ""}</div>
+                    <div className="db-follow-s">Enviadas há alguns dias e ainda sem resposta. Um lembrete gentil costuma destravar.</div>
+                  </div>
+                </div>
+                <div className="db-follow-list">
+                  {followUps.slice(0, 4).map((f) => (
+                    <div key={f.id} className="db-follow-item">
+                      <div className="db-follow-info">
+                        <span className="db-follow-name">{f.client || "Sem cliente"}</span>
+                        <span className="db-follow-meta">{f.title || "Proposta"} · {f.viewed ? "viu, sem resposta" : "não abriu"} · há {f.daysSince} dias</span>
+                      </div>
+                      <button className="db-follow-btn" onClick={() => remind(f)} disabled={remindingId === f.id}>
+                        {remindingId === f.id ? "Enviando…" : (<><Send size={14} strokeWidth={2.3} />Enviar lembrete</>)}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="db-tabs" style={{ marginBottom: 18 }}>
               {Object.keys(FILTERS).map((f) => {
                 const on = filter === f;
@@ -1182,6 +1278,9 @@ export default function Dashboard({ go }) {
                         {(r.status === "Aceita" || r.status === "Recusada") && (
                           <button className="db-act db-act-un" onClick={setDecision(r, "Enviada")} aria-label="Reabrir proposta" title="Reabrir (volta para Enviada)"><RotateCcw size={15} strokeWidth={2.2} /></button>
                         )}
+                        {!isLocalId(r.id) && (
+                          <button className="db-act db-act-un" onClick={duplicateRow(r)} aria-label={`Duplicar proposta de ${r.client || "cliente"}`} title="Duplicar"><Copy size={15} strokeWidth={2.2} /></button>
+                        )}
                         <button className="db-del" onClick={(e) => { e.stopPropagation(); setToDelete(r); }} aria-label={`Excluir proposta de ${r.client || "cliente"}`} title="Excluir">
                           <Trash2 size={16} strokeWidth={2} />
                         </button>
@@ -1205,7 +1304,7 @@ export default function Dashboard({ go }) {
         ) : view === "notifications" ? (
           <NotificationsPanel notifs={notifs} readSet={notifRead} onRead={notifSetRead} onDelete={notifDelete} onRefresh={refreshNotifs} />
         ) : view === "support" ? (
-          <SupportPage />
+          <SupportPage userEmail={user?.email} />
         ) : view === "settings" ? (
           <SettingsPanel user={user} setUser={setUser} go={go} pushToast={pushToast} usage={usage} />
         ) : (
@@ -1228,6 +1327,12 @@ export default function Dashboard({ go }) {
                 {locked && (
                   <div style={{ maxWidth: 440, margin: "0 auto 20px", display: "flex", alignItems: "center", gap: 10, background: "#FEF3E2", border: "1px solid #F5D9A8", color: "#8A5A1A", borderRadius: 12, padding: "12px 14px", fontSize: "13.5px", fontWeight: 500 }}>
                     <Lock size={15} strokeWidth={2} style={{ flex: "none" }} />Esta proposta já foi enviada e não pode ser editada. Para outro cliente, crie uma nova.
+                  </div>
+                )}
+                {isCopy && !locked && (
+                  <div style={{ maxWidth: 440, margin: "0 auto 20px", display: "flex", alignItems: "flex-start", gap: 9, background: color.surface2, border: `1px solid ${color.line}`, color: color.gray600, borderRadius: 12, padding: "11px 13px", fontSize: "12.5px", lineHeight: 1.5 }}>
+                    <Copy size={14} strokeWidth={2} style={{ flex: "none", marginTop: 1, color: color.gray400 }} />
+                    <span>Esta é uma cópia. Ela fica salva só neste navegador até você clicar em <strong style={{ fontWeight: 600, color: color.gray700 }}>Concluir proposta</strong>.</span>
                   </div>
                 )}
                 <div style={{ maxWidth: 440, margin: "0 auto", display: "flex", flexDirection: "column", gap: 26, pointerEvents: locked ? "none" : "auto", opacity: locked ? 0.6 : 1 }}>

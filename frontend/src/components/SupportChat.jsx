@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { X, Send, ArrowRight, MessageCircle } from "lucide-react";
 import { font, color } from "../theme.js";
 import { searchSupport, topicById, SUPPORT_STARTERS } from "../lib/support.js";
+import ReportProblem from "./ReportProblem.jsx";
 
 const startersList = () => SUPPORT_STARTERS.map(topicById).filter(Boolean);
 
@@ -131,7 +132,7 @@ export function SupportChatBody({ variant = "panel" }) {
 
 // Página cheia (usada no mobile e como aba de Suporte). Fundo branco, cabeçalho
 // e conversa na mesma coluna centralizada.
-export function SupportPage() {
+export function SupportPage({ userEmail = "" }) {
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#fff" }}>
       <div style={{ flex: 1, minHeight: 0, width: "100%", maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column" }}>
@@ -141,6 +142,7 @@ export function SupportPage() {
             <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.02em" }}>Ajuda do Manda</div>
             <div style={{ fontSize: "13px", color: color.gray500 }}>Tire dúvidas sobre qualquer campo ou recurso.</div>
           </div>
+          <div style={{ marginLeft: "auto" }}><ReportProblem email={userEmail} /></div>
         </div>
         <div style={{ flex: 1, minHeight: 0 }}>
           <SupportChatBody variant="page" />

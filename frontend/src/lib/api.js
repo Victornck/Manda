@@ -113,6 +113,9 @@ export const api = {
   deleteProposal: (id) => request(`/proposals/${id}`, { method: "DELETE" }),
   stats: () => request("/proposals/stats"),
   usage: () => request("/proposals/usage"),
+  // Follow-up assistido: lista propostas paradas e envia lembrete pelo Gmail.
+  followUps: () => request("/proposals/follow-ups"),
+  remindProposal: (id) => request(`/proposals/${id}/remind`, { method: "POST" }),
   // Envia a proposta pelo Gmail do usuário. body: { to?, subject?, message? }.
   // 409 com { needsConnect:true } quando falta conectar a conta Google.
   sendProposalEmail: (id, body) => request(`/proposals/${id}/send-email`, { method: "POST", body: JSON.stringify(body || {}) }),
@@ -130,4 +133,7 @@ export const api = {
 
   // cobrança (Mercado Pago). checkout devolve { url } — redirecione com window.location = url.
   checkout: (plan, interval = "month") => request("/billing/checkout", { method: "POST", body: JSON.stringify({ plan, interval }) }),
+
+  // Relatar problema. body: { category, message, email?, pageUrl?, screenshot? (data URL) }.
+  reportProblem: (body) => request("/feedback", { method: "POST", body: JSON.stringify(body) }),
 };

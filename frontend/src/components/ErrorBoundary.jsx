@@ -1,4 +1,5 @@
 import { Component } from "react";
+import * as Sentry from "@sentry/react";
 import { font, color } from "../theme.js";
 
 // Captura erros de renderização e mostra uma tela amigável em vez de tela branca.
@@ -13,6 +14,8 @@ export default class ErrorBoundary extends Component {
   componentDidCatch(error, info) {
     // eslint-disable-next-line no-console
     console.error("Erro na aplicação:", error, info);
+    // Manda pro Sentry (no-op se o Sentry não foi iniciado).
+    Sentry.captureException(error, { extra: { componentStack: info?.componentStack } });
   }
   render() {
     if (!this.state.hasError) return this.props.children;
