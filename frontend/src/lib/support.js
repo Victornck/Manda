@@ -7,7 +7,7 @@ export const SUPPORT_TOPICS = [
   { id: "criar", cat: "Propostas", q: "Como criar uma proposta?", kw: ["criar", "nova", "novo", "montar", "fazer", "comecar", "iniciar", "primeira", "do zero", "proposta", "orcamento"],
     a: "Clique em \"Nova proposta\" na aba Propostas, ou escolha um modelo pronto na aba Templates. Depois preencha o cliente, o título, o escopo e os itens com valores. A prévia à direita já mostra como o cliente vai ver." },
   { id: "concluir", cat: "Propostas", q: "Como concluir e enviar ao cliente?", kw: ["concluir", "finalizar", "terminar", "pronta", "gerar", "link", "enviar", "mandar", "rapido", "publicar", "compartilhar", "disparar"],
-    a: "Preencha ao menos o cliente e o título e clique em \"Concluir proposta\" no rodapé do editor. O Manda gera um link curto (manda.app/p/...) que você envia ao cliente por WhatsApp, e-mail ou onde preferir." },
+    a: "Preencha ao menos o cliente e o título e clique em \"Concluir proposta\" no rodapé do editor. O Manda gera um link curto (mandaproposta.com/p/...) que você envia ao cliente por WhatsApp, e-mail ou onde preferir." },
   { id: "copiar", cat: "Propostas", q: "Como copiar o link da proposta?", kw: ["copiar", "colar", "link", "url", "endereco", "pegar", "compartilhar", "mandar", "enviar", "whatsapp", "zap"],
     a: "Assim que você conclui, aparece o botão \"Copiar link\". Se precisar dele de novo depois, vá na aba Clientes, abra o cliente e clique em \"Copiar link\" na proposta." },
   { id: "pdf", cat: "Propostas", q: "Como baixar a proposta em PDF?", kw: ["pdf", "baixar", "download", "exportar", "imprimir", "salvar", "arquivo", "documento"],

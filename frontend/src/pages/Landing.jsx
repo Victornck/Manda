@@ -320,7 +320,7 @@ export default function Landing({ go }) {
             <div style={{ background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, boxShadow: "0 24px 60px -20px rgba(20,20,30,0.22),0 8px 20px -12px rgba(20,20,30,0.12)", overflow: "hidden", animation: "mandaFloat 6s ease-in-out infinite" }}>
               <div style={{ height: 40, background: color.surface3, borderBottom: "1px solid #EEE", display: "flex", alignItems: "center", padding: "0 14px", gap: 7 }}>
                 <Dot c="#F4B4A5" /><Dot c="#F6D9A8" /><Dot c="#C8E6C0" />
-                <span style={{ marginLeft: 12, fontSize: 12, color: color.gray400, fontWeight: 500 }}>manda.app/p/proposta-viana</span>
+                <span style={{ marginLeft: 12, fontSize: 12, color: color.gray400, fontWeight: 500 }}>mandaproposta.com/p/proposta-viana</span>
               </div>
               <div style={{ padding: "26px 28px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
@@ -467,7 +467,7 @@ export default function Landing({ go }) {
             <div className="lp-browser">
               <div className="lp-browser-bar">
                 <span className="lp-dot" /><span className="lp-dot" /><span className="lp-dot" />
-                <span className="lp-url"><LinkIcon size={12} strokeWidth={2} />manda.app/p/Ab3k9x</span>
+                <span className="lp-url"><LinkIcon size={12} strokeWidth={2} />mandaproposta.com/p/Ab3k9x</span>
               </div>
               <div className="lp-browser-body">
                 <ProposalDesign id="minimal" doc={SAMPLE_DOC} accent="#0A0A0A" onAccept={() => {}} />

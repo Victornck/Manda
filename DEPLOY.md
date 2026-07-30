@@ -4,9 +4,9 @@ Arquitetura: o **Express serve o build do front e a API no mesmo processo** (por
 4000). O **Caddy** fica na frente cuidando do HTTPS e mandando tudo pro Express.
 O banco continua no **Supabase**. Resultado:
 
-- App: `https://seudominio.com`
-- API: `https://seudominio.com/api/...`
-- Webhook do Mercado Pago: `https://seudominio.com/api/webhooks/mercadopago`
+- App: `https://mandaproposta.com`
+- API: `https://mandaproposta.com/api/...`
+- Webhook do Mercado Pago: `https://mandaproposta.com/api/webhooks/mercadopago`
 
 Sem túnel, sem URL que muda.
 
@@ -17,7 +17,7 @@ Sem túnel, sem URL que muda.
 1. Hostinger: contrate uma **VPS KVM** com **datacenter em São Paulo**, sistema
    **Ubuntu 22.04 (ou 24.04)**. Anote o **IP** e a senha de root.
 2. Domínio: registre em Registro.br (`.com.br`) ou Cloudflare/Namecheap (`.com`).
-3. DNS: crie um registro **A** apontando `seudominio.com` (e `www`) para o **IP da VPS**.
+3. DNS: crie um registro **A** apontando `mandaproposta.com` (e `www`) para o **IP da VPS**.
 
 ## 2. Acessar a VPS e preparar o sistema
 
@@ -77,14 +77,14 @@ CPF_INDEX_KEY=...
 GOOGLE_TOKEN_KEY=...
 
 # URLs de PRODUÇÃO (tudo no mesmo domínio)
-APP_URL=https://seudominio.com
-BACKEND_URL=https://seudominio.com
-CORS_ORIGIN=https://seudominio.com
+APP_URL=https://mandaproposta.com
+BACKEND_URL=https://mandaproposta.com
+CORS_ORIGIN=https://mandaproposta.com
 
 # Google (login + envio de e-mail). Adicione o redirect novo no Google Cloud (passo 8)
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
-GOOGLE_OAUTH_REDIRECT=https://seudominio.com/api/integrations/google/callback
+GOOGLE_OAUTH_REDIRECT=https://mandaproposta.com/api/integrations/google/callback
 
 # E-mail de suporte (SMTP do Gmail) — igual ao de dev
 SMTP_HOST=smtp.gmail.com
@@ -118,31 +118,31 @@ apt update && apt install -y caddy
 ```
 Edite `/etc/caddy/Caddyfile` e deixe só isto:
 ```
-seudominio.com, www.seudominio.com {
+mandaproposta.com, www.mandaproposta.com {
     reverse_proxy localhost:4000
 }
 ```
 ```
 systemctl reload caddy
 ```
-O Caddy pega o certificado HTTPS sozinho (Let's Encrypt). Em ~1 min, `https://seudominio.com` está no ar. Se der erro de certificado, confirme que o DNS (passo 1) já propagou apontando pro IP certo.
+O Caddy pega o certificado HTTPS sozinho (Let's Encrypt). Em ~1 min, `https://mandaproposta.com` está no ar. Se der erro de certificado, confirme que o DNS (passo 1) já propagou apontando pro IP certo.
 
 ## 7. Mercado Pago em produção
 
 1. Troque no `.env` o `MP_ACCESS_TOKEN` pelas credenciais de **produção** (`APP_USR-...` da aba de produção) e reinicie: `pm2 restart manda`.
 2. Configure o webhook de **produção** apontando para:
-   `https://seudominio.com/api/webhooks/mercadopago`, tópico **Pagamentos**, e copie a **chave secreta de produção** para `MP_WEBHOOK_SECRET`.
+   `https://mandaproposta.com/api/webhooks/mercadopago`, tópico **Pagamentos**, e copie a **chave secreta de produção** para `MP_WEBHOOK_SECRET`.
 3. Cadastre uma **chave Pix** na conta do Manda (senão o Pix não aparece no checkout).
 
 ## 8. Google (login + envio de e-mail)
 
 No Google Cloud Console, no cliente OAuth "Manda Web":
-- **Origens JavaScript autorizadas:** adicione `https://seudominio.com`
-- **URIs de redirecionamento autorizados:** adicione `https://seudominio.com/api/integrations/google/callback`
+- **Origens JavaScript autorizadas:** adicione `https://mandaproposta.com`
+- **URIs de redirecionamento autorizados:** adicione `https://mandaproposta.com/api/integrations/google/callback`
 
 ## 9. Testar
 
-- Abra `https://seudominio.com` (o app carrega servido pelo Express).
+- Abra `https://mandaproposta.com` (o app carrega servido pelo Express).
 - Faça login, crie e conclua uma proposta.
 - Assine um plano: agora com HTTPS, o Mercado Pago **redireciona de volta sozinho**
   após aprovar, e o webhook libera o plano.

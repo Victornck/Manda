@@ -41,7 +41,7 @@ app.use("/api/feedback", feedbackRoutes);
 
 // Serve o FRONT (build do Vite) pelo próprio backend, se o dist existir. Assim,
 // em produção, um serviço só entrega o app e a API no mesmo domínio (e a URL do
-// webhook vira https://seudominio.com/api/webhooks/mercadopago). Em dev não há
+// webhook vira https://mandaproposta.com/api/webhooks/mercadopago). Em dev não há
 // dist, então isso fica inativo e o front continua no Vite (porta 5173).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "../../frontend/dist");
