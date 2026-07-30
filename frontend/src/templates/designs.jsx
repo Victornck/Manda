@@ -156,14 +156,40 @@ const hairFor = (accent, T) => (T.dark ? darken(accent, 0.5) : wash(accent, 0.6)
 // Itens ocultos (o dono optou por não cobrar) não aparecem na proposta nem no total.
 const filledItems = (doc) => doc.items.filter((it) => !it.hidden && (has(it.desc) || has(it.value)));
 const sum = (arr) => arr.reduce((a, it) => a + (parseInt(it.value, 10) || 0), 0);
-const money = (v) => brl(parseInt(v, 10) || 0);
+// Valor vazio não vira "R$ 0": fica em branco, para dar itens só de entrega
+// (lista de deliverables) com o preço só onde o usuário preencher.
+const money = (v) => (has(v) ? brl(parseInt(v, 10) || 0) : "");
 const kicker = (c) => ({ fontSize: "11px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: c, marginBottom: 8 });
+
+// Markdown mínimo e SEGURO (retorna nós React, sem HTML cru, sem risco de XSS):
+// **negrito**, *itálico* ou _itálico_, "* " ou "- " no começo da linha vira
+// marcador, e quebras de linha viram <br>. Aplicado a todo texto editável via <Ed>.
+function rich(text) {
+  if (typeof text !== "string" || text === "") return text;
+  const out = [];
+  const lines = text.split("\n");
+  lines.forEach((raw, li) => {
+    const line = raw.replace(/^(\s*)[*-]\s+/, "$1• "); // marcador de lista
+    const parts = line.split(/(\*\*[^*]+\*\*|\*[^*\n]+\*|_[^_\n]+_)/g);
+    parts.forEach((p, pi) => {
+      if (!p) return;
+      const key = `${li}-${pi}`;
+      if (/^\*\*[^*]+\*\*$/.test(p)) out.push(<strong key={key}>{p.slice(2, -2)}</strong>);
+      else if (/^\*[^*\n]+\*$/.test(p) || /^_[^_\n]+_$/.test(p)) out.push(<em key={key}>{p.slice(1, -1)}</em>);
+      else out.push(p);
+    });
+    if (li < lines.length - 1) out.push(<br key={`br-${li}`} />);
+  });
+  return out;
+}
 
 // Torna o texto da prévia clicável para focar o campo no editor. Só age quando
 // `onEdit` é passado (modo edição); na proposta do cliente/PDF, é texto normal.
 function Ed({ onEdit, field, children }) {
-  if (!onEdit) return children;
-  return <span className="pd-edit" role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); onEdit(field); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(field); } }}>{children}</span>;
+  // Texto puro passa pelo markdown mínimo (negrito/itálico/lista); nós já prontos passam direto.
+  const content = typeof children === "string" ? rich(children) : children;
+  if (!onEdit) return content;
+  return <span className="pd-edit" role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); onEdit(field); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(field); } }}>{content}</span>;
 }
 
 // Marca do Manda (vetor), herda a cor via `fill`. Usada como logo padrão quando
