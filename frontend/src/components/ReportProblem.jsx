@@ -174,7 +174,7 @@ export default function ReportProblem({ email = "" }) {
             .rp-lb{ display:block; font-family:${font.heading}; font-size:11px; font-weight:700; letter-spacing:0.09em; text-transform:uppercase; color:${color.gray400}; margin:14px 0 8px; }
             .rp-body .rp-lb:first-child{ margin-top:2px; }
             .rp-cats{ display:flex; flex-wrap:wrap; gap:7px; }
-            .rp-cat{ font-family:${font.body}; font-size:13px; font-weight:600; color:${color.ink}; background:#fff; border:1px solid ${color.gray200}; border-radius:999px; padding:7px 14px; cursor:pointer; transition:all .14s ease; }
+            .rp-cat{ font-family:${font.body}; font-size:13px; font-weight:600; color:${color.ink}; background:#fff; border:1px solid ${color.gray200}; border-radius:999px; padding:7px 14px; cursor:pointer; transition:border-color .14s ease, color .14s ease, background .14s ease; }
             .rp-cat:hover{ border-color:${color.accent}; }
             .rp-cat.on{ background:${color.ink}; color:#fff; border-color:${color.ink}; }
             .rp-ta,.rp-in{ width:100%; box-sizing:border-box; font-family:${font.body}; font-size:14px; color:${color.ink}; background:${color.surface3}; border:1px solid ${color.gray200}; border-radius:12px; padding:12px 13px; outline:none; resize:vertical; transition:border-color .14s ease, box-shadow .14s ease, background .14s ease; }

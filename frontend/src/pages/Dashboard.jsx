@@ -4,7 +4,7 @@ import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
   Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
-  Copy, Send,
+  Copy, Send, GripVertical,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, brl, initials } from "../theme.js";
 import { api, setToken } from "../lib/api.js";
@@ -162,6 +162,8 @@ export default function Dashboard({ go }) {
   const pristineRef = useRef("");  // snapshot do doc ao abrir; só salva rascunho se mudar
   const [editorFrom, setEditorFrom] = useState("list"); // aba de onde o editor foi aberto
   const [isCopy, setIsCopy] = useState(false); // editor aberto a partir de uma duplicação
+  const [dragItem, setDragItem] = useState(null); // índice do item sendo arrastado
+  const [overItem, setOverItem] = useState(null); // índice sob o cursor durante o arraste
   const [flow, setFlow] = useState("editing"); // editing | finishing | done
   const [step, setStep] = useState(0);
   const [sealing, setSealing] = useState(false);
@@ -451,6 +453,14 @@ export default function Dashboard({ go }) {
   };
   const addItem = () => setDoc((d) => (d.items.length >= MAX_ITEMS ? d : { ...d, items: [...d.items, { desc: "", value: "" }] }));
   const toggleItemHidden = (i) => setDoc((d) => ({ ...d, items: d.items.map((it, idx) => (idx === i ? { ...it, hidden: !it.hidden } : it)) }));
+  // Reordena os itens: a ordem do array é a ordem que aparece na proposta e no PDF.
+  const moveItem = (from, to) => setDoc((d) => {
+    if (from == null || to < 0 || to >= d.items.length || from === to) return d;
+    const items = d.items.slice();
+    const [m] = items.splice(from, 1);
+    items.splice(to, 0, m);
+    return { ...d, items };
+  });
 
   // Calculadora de preço. Insere um item novo (ou preenche o último vazio) com a
   // descrição do serviço e o valor sugerido escolhido.
@@ -860,6 +870,10 @@ export default function Dashboard({ go }) {
         .db-btn:active{ transform:translateY(1px); }
         .db-btn:disabled{ opacity:.45; cursor:not-allowed; }
         .db-btn:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
+        .db-grip{ display:flex; align-items:center; justify-content:center; color:${color.gray300}; cursor:grab; border-radius:7px; transition:color .14s ease, background .14s ease; }
+        .db-grip:hover{ color:${color.gray500}; background:${color.surface}; }
+        .db-grip:active{ cursor:grabbing; }
+        .db-grip:focus-visible{ outline:2px solid ${color.accent}; outline-offset:1px; color:${color.gray500}; }
         .db-btn-accent{ color:#fff; background:${color.accent}; }
         .db-btn-accent:not(:disabled):hover{ background:${color.accentHover}; }
         .db-btn-dark{ color:#fff; background:${color.ink}; }
@@ -1509,8 +1523,28 @@ export default function Dashboard({ go }) {
                   <div>
                     <div style={sectionLabel}>Investimento</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {doc.items.map((it, i) => (
-                        <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", opacity: it.hidden ? 0.55 : 1 }}>
+                      {doc.items.map((it, i) => {
+                        const isDragging = dragItem === i;
+                        const isOver = overItem === i && dragItem !== null && dragItem !== i;
+                        return (
+                        <div
+                          key={i}
+                          onDragOver={(e) => { if (dragItem === null || locked) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overItem !== i) setOverItem(i); }}
+                          onDrop={(e) => { e.preventDefault(); if (dragItem !== null) moveItem(dragItem, i); setDragItem(null); setOverItem(null); }}
+                          style={{ display: "flex", gap: 8, alignItems: "center", opacity: isDragging ? 0.4 : (it.hidden ? 0.55 : 1), borderRadius: 10, boxShadow: isOver ? `0 -2px 0 ${color.accent}` : "none", transition: "opacity .12s ease" }}
+                        >
+                          {doc.items.length > 1 && !locked && (
+                            <button
+                              draggable
+                              onDragStart={(e) => { setDragItem(i); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", String(i)); } catch { /* ignore */ } }}
+                              onDragEnd={() => { setDragItem(null); setOverItem(null); }}
+                              onKeyDown={(e) => { if (e.key === "ArrowUp") { e.preventDefault(); moveItem(i, i - 1); } else if (e.key === "ArrowDown") { e.preventDefault(); moveItem(i, i + 1); } }}
+                              className="db-grip"
+                              aria-label={`Reordenar item ${i + 1}. Arraste, ou use as setas para cima e para baixo`}
+                              title="Arraste para reordenar (ou use as setas ↑ ↓)"
+                              style={{ flex: "none", width: 20, height: 38, border: "none", background: "none", padding: 0, touchAction: "none" }}
+                            ><GripVertical size={16} strokeWidth={2} /></button>
+                          )}
                           <input id={i === 0 ? "ed-item0" : undefined} className="db-input" value={it.desc} onChange={updItem(i, "desc")} maxLength={LIMITS.itemDesc} placeholder="Item" style={{ ...inp(), flex: 1, textDecoration: it.hidden ? "line-through" : "none", color: it.hidden ? color.gray400 : color.ink }} />
                           <div className="db-input" style={{ display: "flex", alignItems: "center", gap: 4, flex: "none", width: 118, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "0 10px", background: it.hidden ? color.surface : color.white }}>
                             <span style={{ fontSize: 13, color: color.gray400 }}>R$</span>
@@ -1521,7 +1555,8 @@ export default function Dashboard({ go }) {
                           </span>
                           <button onClick={removeItem(i)} className="db-btn" aria-label="Remover item" style={{ flex: "none", width: 34, height: 38, border: "1px solid #EEE", background: color.white, borderRadius: 9, color: color.gray400 }}><Trash2 size={15} strokeWidth={2} /></button>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
                       <button onClick={addItem} disabled={doc.items.length >= MAX_ITEMS} className="db-btn" style={{ fontSize: "13.5px", color: color.accent, background: "none", padding: "4px 2px" }}>
