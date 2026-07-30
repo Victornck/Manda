@@ -282,7 +282,16 @@ export default function Auth({ go, tab = "signup" }) {
         .au-step-t{ font-family:${font.heading}; font-weight:700; font-size:15.5px; letter-spacing:-0.01em; color:#fff; margin-bottom:3px; }
         .au-step-d{ font-size:13.5px; line-height:1.5; color:${color.gray400}; }
         .au-form-wrap{ display:flex; align-items:center; justify-content:center; padding:48px 40px; background:#fff; }
-        .au-mobilelogo{ display:none; margin-bottom:28px; }
+        .au-mobilelogo{ display:none; margin-bottom:22px; }
+
+        /* Banner-hero do mobile: fundo escuro no topo; o card de login sobe por cima. */
+        .au-mobanner{ display:none; position:relative; overflow:hidden; background:radial-gradient(120% 130% at 12% 0%,#2A1712 0%,#0A0A0A 72%); color:#fff; padding:34px 24px 52px; }
+        .au-mobanner-h{ font-family:${font.heading}; font-weight:900; font-size:24px; line-height:1.1; letter-spacing:-0.02em; margin-bottom:6px; }
+        .au-mobanner-h span{ color:${color.accent}; }
+        .au-mobanner-p{ font-size:13.5px; line-height:1.5; color:${color.gray300}; margin:0 0 14px; }
+        .au-mobanner-chips{ display:flex; gap:8px; flex-wrap:wrap; }
+        .au-mobanner-chips span{ display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:rgba(255,255,255,0.9); background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:999px; padding:6px 12px; }
+        .au-mobanner-chips span::before{ content:""; width:5px; height:5px; border-radius:50%; background:${color.accent}; flex:none; }
 
         .au-input{ font-family:${font.body}; font-size:15px; padding:12px 14px; border:1px solid ${color.gray200}; border-radius:10px; outline:none; background:#fff; width:100%; transition:border-color .15s ease, box-shadow .15s ease; }
         .au-input:focus{ border-color:${color.accent}; box-shadow:0 0 0 3px rgba(217,119,87,0.15); }
@@ -321,15 +330,31 @@ export default function Auth({ go, tab = "signup" }) {
         @keyframes auBar{ from{ transform:translateX(-120%); } to{ transform:translateX(320%); } }
 
         @media (max-width:860px){
-          .au-grid{ grid-template-columns:1fr; }
+          .au-grid{ display:flex; flex-direction:column; min-height:100vh; }
           .au-aside{ display:none; }
-          .au-mobilelogo{ display:flex; }
-          .au-form-wrap{ padding:44px 24px; align-items:flex-start; min-height:100vh; }
+          .au-mobilelogo{ display:none; }
+          .au-mobanner{ display:block; }
+          /* Card branco sobe por cima do banner com o topo arredondado. */
+          .au-form-wrap{ flex:1; padding:30px 24px 40px; align-items:flex-start; border-radius:24px 24px 0 0; margin-top:-24px; position:relative; z-index:1; }
         }
         @media (prefers-reduced-motion: reduce){
           .au-grid *, .au-grid *::before, .au-grid *::after, .au-enter *{ animation-duration:.001ms !important; transition-duration:.001ms !important; }
         }
       `}</style>
+
+      {/* Banner-hero do mobile (fundo). No desktop some; o card de login sobe por cima com bordas arredondadas. */}
+      <div className="au-mobanner">
+        <button onClick={() => goTo("landing")} className="au-btn" style={{ background: "none", padding: 0, borderRadius: 6, marginBottom: 18 }} aria-label="Voltar para a página inicial">
+          <Logo onDark />
+        </button>
+        <div className="au-mobanner-h">
+          {isLogin ? <>Bora fechar <span>mais um?</span></> : <>Proposta com cara de <span>agência.</span></>}
+        </div>
+        <div className="au-mobanner-p">
+          {isLogin ? "Monte sua próxima proposta em minutos e envie por link." : "Do primeiro rascunho ao sim do cliente, num lugar só."}
+        </div>
+        <div className="au-mobanner-chips"><span>Crie em minutos</span><span>Envie por link</span><span>Feche com 1 clique</span></div>
+      </div>
 
       {/* Painel esquerdo (marketing) */}
       <aside className="au-aside">
