@@ -19,7 +19,24 @@ import feedbackRoutes from "./routes/feedback.js";
 // testes (supertest) importam o app direto, e o server.js cuida do listen.
 const app = express();
 app.set("trust proxy", 1);
-app.use(helmet());
+// helmet com CSP ajustado pro que o app REALMENTE usa em produção. O padrão do
+// helmet é script-src 'self', que bloqueia: o login do Google (accounts.google.com),
+// o script "vigia de montagem" inline do index.html, e o envio de erros pro Sentry.
+// Aqui liberamos só essas origens conhecidas, mantendo o resto fechado.
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      "script-src": ["'self'", "'unsafe-inline'", "https://accounts.google.com"],
+      "script-src-attr": ["'unsafe-inline'"],
+      "connect-src": ["'self'", "https://accounts.google.com", "https://*.ingest.us.sentry.io"],
+      "frame-src": ["'self'", "https://accounts.google.com"],
+      "img-src": ["'self'", "data:", "https:"],
+    },
+  },
+  // Login do Google abre popup/iframe; permite a comunicação com a janela do app.
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+}));
 app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()) }));
 
 app.use(express.json({ limit: "3mb" })); // headroom p/ imagens comprimidas (logo/capa) em base64
