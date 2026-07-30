@@ -180,6 +180,8 @@ export default function SupportChat({ raised = false, onOpenPage }) {
         .sc-panel.sc-raised{ bottom:92px; }
         @keyframes scUp{ from{ opacity:0; transform:translateY(14px) scale(.985); } to{ opacity:1; transform:none; } }
         .sc-head{ flex:none; display:flex; align-items:center; gap:12px; padding:15px 16px; background:#fff; border-bottom:1px solid #ECE6DF; }
+        /* No mobile o botão flutuante some; a ajuda fica só pela aba Suporte. */
+        @media (max-width:640px){ .sc-fab{ display:none !important; } }
         @media (prefers-reduced-motion: reduce){ .sc-panel{ animation:none; } }
       `}</style>
 

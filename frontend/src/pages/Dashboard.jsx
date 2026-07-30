@@ -956,6 +956,11 @@ export default function Dashboard({ go }) {
         .db-onb-trophy{ width:44px; height:44px; flex:none; border-radius:50%; background:#EAF5EE; color:#2E7D51; display:flex; align-items:center; justify-content:center; }
         .db-onb-bar{ height:7px; border-radius:999px; background:${color.surface}; overflow:hidden; }
         .db-onb-bar span{ display:block; height:100%; background:${color.accent}; border-radius:999px; transition:width .45s cubic-bezier(.2,.8,.2,1); }
+        /* Mobile: no passo ativo do onboarding, o botão desce pra baixo do texto em vez de espremer a coluna. */
+        @media (max-width:560px){
+          .db-onb-row{ flex-wrap:wrap; row-gap:12px; }
+          .db-onb-cta{ width:100%; margin-left:39px; justify-content:center; }
+        }
         .db-onb-step{ display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:11px; border:1px solid ${color.line2}; transition:background .15s ease, border-color .15s ease; }
         .db-onb-step.done{ border-color:transparent; background:${color.surface2}; }
         .db-onb-check{ width:22px; height:22px; flex:none; border-radius:50%; border:2px solid ${color.gray300}; display:flex; align-items:center; justify-content:center; color:#fff; transition:background .2s ease, border-color .2s ease; }
@@ -2363,7 +2368,7 @@ function PlansModal({ onClose }) {
         </div>
 
         {err && <div style={{ marginTop: 14, fontSize: 13, color: "#B4443C", textAlign: "center" }}>{err}</div>}
-        <div style={{ marginTop: 14, textAlign: "center", fontSize: 12, color: color.gray400 }}>Pagamento seguro via Stripe · cancele quando quiser</div>
+        <div style={{ marginTop: 14, textAlign: "center", fontSize: 12, color: color.gray400 }}>Pagamento seguro via Mercado Pago · Pix, cartão ou boleto</div>
       </div>
     </div>
   );
@@ -2414,6 +2419,7 @@ function OnboardingCard({ steps, done, onNew, goSettings, onSkip, onFinish }) {
           return (
             <div
               key={it.key}
+              className="db-onb-row"
               onClick={clickable ? it.action : undefined}
               role={clickable ? "button" : undefined}
               tabIndex={clickable ? 0 : undefined}
@@ -2444,7 +2450,7 @@ function OnboardingCard({ steps, done, onNew, goSettings, onSkip, onFinish }) {
               {ok ? (
                 <span style={{ flex: "none", fontSize: "12.5px", fontWeight: 600, color: "#2E7D51" }}>Feito</span>
               ) : active ? (
-                <button onClick={(e) => { e.stopPropagation(); it.action(); }} className="db-btn db-btn-dark" style={{ flex: "none", fontSize: 13.5, padding: "8px 14px", gap: 4 }}>
+                <button onClick={(e) => { e.stopPropagation(); it.action(); }} className="db-btn db-btn-dark db-onb-cta" style={{ flex: "none", fontSize: 13.5, padding: "8px 14px", gap: 4 }}>
                   {it.cta}<ChevronRight size={15} strokeWidth={2.4} />
                 </button>
               ) : (

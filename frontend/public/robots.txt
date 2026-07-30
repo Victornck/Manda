@@ -3,4 +3,4 @@ Allow: /
 Disallow: /app
 Disallow: /p/
 
-Sitemap: https://manda-tan.vercel.app/sitemap.xml
+Sitemap: https://mandaproposta.com/sitemap.xml
