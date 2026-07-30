@@ -10,4 +10,12 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(version),
   },
+  // Em dev, o front (5173) e o back (4000) são origens diferentes. Este proxy faz
+  // as imagens em /uploads virem do backend, mantendo tudo na mesma origem (o
+  // "Baixar PDF" não quebra). Em produção o Express serve tudo no mesmo domínio.
+  server: {
+    proxy: {
+      "/uploads": "http://localhost:4000",
+    },
+  },
 });

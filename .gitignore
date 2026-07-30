@@ -6,6 +6,8 @@ build/
 .env.local
 coverage/
 *.log
+# Imagens enviadas (logo/capa) ficam no disco do servidor, não no git.
+uploads/
 AUDITORIA_SEGURANCA_MANDA.md
 # Dados do Postgres embutido usado nos testes
 backend/test/.pgdata/

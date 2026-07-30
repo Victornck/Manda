@@ -692,8 +692,12 @@ export default function Dashboard({ go }) {
     if (file.size > MAX_IMG) { pushToast("A imagem passa de 2 MB. Escolha um arquivo menor.", "info"); return; }
     try {
       const dataUrl = await compressImage(file, key);
-      setDoc((d) => ({ ...d, [key]: dataUrl }));
-    } catch { pushToast("Não foi possível processar a imagem.", "info"); }
+      // Sobe pro disco do servidor e guarda só a URL (não o base64 no banco).
+      const { url } = await api.uploadImage(dataUrl);
+      setDoc((d) => ({ ...d, [key]: url }));
+    } catch (err) {
+      pushToast(err?.message || "Não foi possível enviar a imagem.", "info");
+    }
   };
 
   // Concluir: salva no servidor, marca como enviada (sent) e obtém o link público.

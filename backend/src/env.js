@@ -58,4 +58,8 @@ export const env = {
   // Monitoramento de erro (Sentry). Se vazio, fica DESLIGADO (dev e testes não
   // são afetados). Em produção, cole o DSN do projeto backend para ligar.
   SENTRY_DSN: process.env.SENTRY_DSN || "",
+
+  // Pasta no disco onde ficam as imagens enviadas (logo/capa das propostas).
+  // Vazio = padrão (<raiz do projeto>/uploads), que sobrevive a git pull/rebuild.
+  UPLOADS_DIR: process.env.UPLOADS_DIR || "",
 };

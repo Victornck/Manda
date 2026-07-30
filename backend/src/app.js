@@ -14,6 +14,8 @@ import publicRoutes from "./routes/public.js";
 import billingRoutes from "./routes/billing.js";
 import webhookRoutes from "./routes/webhook.js";
 import feedbackRoutes from "./routes/feedback.js";
+import uploadRoutes from "./routes/uploads.js";
+import { uploadsDir } from "./lib/uploads.js";
 
 // Cria e configura o app Express, SEM abrir porta nem subir jobs. Assim os
 // testes (supertest) importam o app direto, e o server.js cuida do listen.
@@ -55,6 +57,11 @@ app.use("/api/integrations", integrationRoutes);
 app.use("/api/public", publicLimiter, publicRoutes);
 app.use("/api/billing", billingLimiter, billingRoutes);
 app.use("/api/feedback", feedbackRoutes);
+app.use("/api/uploads", uploadRoutes);
+
+// Imagens enviadas (logo/capa), servidas do disco no MESMO domínio do app, então
+// o "Baixar PDF" (html2canvas) não quebra por CORS. Nomes são únicos, cache longo.
+app.use("/uploads", express.static(uploadsDir, { maxAge: "30d", immutable: true }));
 
 // Serve o FRONT (build do Vite) pelo próprio backend, se o dist existir. Assim,
 // em produção, um serviço só entrega o app e a API no mesmo domínio (e a URL do

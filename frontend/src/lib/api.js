@@ -136,4 +136,8 @@ export const api = {
 
   // Relatar problema. body: { category, message, email?, pageUrl?, screenshot? (data URL) }.
   reportProblem: (body) => request("/feedback", { method: "POST", body: JSON.stringify(body) }),
+
+  // Sobe uma imagem (data URL) e devolve { url } curta. Usado para logo/capa da
+  // proposta, para o banco guardar só o link em vez da imagem em base64.
+  uploadImage: (dataUrl) => request("/uploads/image", { method: "POST", body: JSON.stringify({ image: dataUrl }) }),
 };
