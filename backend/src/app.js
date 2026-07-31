@@ -33,7 +33,7 @@ app.use(helmet({
       "script-src-attr": ["'unsafe-inline'"],
       "connect-src": ["'self'", "https://accounts.google.com", "https://*.ingest.us.sentry.io"],
       "frame-src": ["'self'", "https://accounts.google.com"],
-      "img-src": ["'self'", "data:", "https:"],
+      "img-src": ["'self'", "data:", "blob:", "https:"],
     },
   },
   // Login do Google abre popup/iframe; permite a comunicação com a janela do app.

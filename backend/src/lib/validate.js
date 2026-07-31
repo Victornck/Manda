@@ -23,7 +23,7 @@ export const proposalSchema = z.object({
   company: z.string().max(200).optional().default(""),
   clientEmail: z.string().max(200).optional().default(""),
   title: z.string().max(300).optional().default(""),
-  scope: z.string().max(5000).optional().default(""),
+  scope: z.string().max(8000).optional().default(""),
   items: z.array(itemSchema).max(20).optional().default([]),   // teto de 20 itens no servidor
   start: z.string().max(100).optional().default(""),
   end: z.string().max(100).optional().default(""),

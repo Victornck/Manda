@@ -41,8 +41,8 @@ const PRESET_COLORS = ["#D97757", "#E0A100", "#C6407E", "#9B2C3A", "#6C48B0", "#
 
 // Limites de caracteres por campo (sempre <= aos do backend, para não falhar no salvamento).
 const LIMITS = {
-  client: 80, company: 80, title: 120, scope: 5000, itemDesc: 120, itemValue: 12,
-  start: 60, end: 60, payment: 300, revisions: 120, validity: 60, bio: 600,
+  client: 80, company: 80, title: 120, scope: 8000, itemDesc: 300, itemValue: 12,
+  start: 60, end: 60, payment: 500, revisions: 200, validity: 60, bio: 2000,
 };
 
 // Chaves do localStorage escopadas por usuário (evita vazar entre contas no mesmo navegador).
