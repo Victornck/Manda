@@ -40,9 +40,11 @@
     </style>
   </head>
   <body>
-    <div id="root">
-      <!-- Conteúdo estático para leitores que não executam JavaScript (ex.: o robô
-           de verificação de marca do Google). O React substitui isto ao montar. -->
+    <div id="root"></div>
+    <!-- Conteúdo só para quem NÃO executa JavaScript (crawler de verificação de
+         marca do Google, leitores de código-fonte). Usuários com JS não veem isto,
+         então não há "flash" na tela. -->
+    <noscript>
       <div style="max-width:680px;margin:0 auto;padding:48px 24px;font-family:'General Sans',system-ui,sans-serif;color:#0A0A0A">
         <h1 style="font-family:'Satoshi',system-ui,sans-serif;font-size:34px;font-weight:900;letter-spacing:-0.02em;margin:0 0 10px">Manda</h1>
         <p style="font-size:18px;line-height:1.55;color:#52525B;margin:0 0 18px">
@@ -55,7 +57,7 @@
           <a href="/privacidade" style="color:#0A0A0A;font-weight:600">Política de Privacidade</a>
         </p>
       </div>
-    </div>
+    </noscript>
     <script>
       // Vigia de montagem: se o bundle não carregar (reloads muito rápidos
       // interrompem os módulos no dev; rede ruim em produção), o React nunca
