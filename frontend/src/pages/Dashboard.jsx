@@ -608,20 +608,27 @@ export default function Dashboard({ go }) {
     setIsCopy(false);
     setView("editor");
   };
-  const openRow = (r) => {
+  const openRow = async (r) => {
+    // A lista traz só o resumo; ao abrir uma proposta do servidor, busca o
+    // conteúdo completo (rascunho local já vem completo). Menos egress no dia a dia.
+    let src = r;
+    if (r.id && !isLocalId(r.id) && r.scope === undefined) {
+      try { const { proposal } = await api.getProposal(r.id); src = { ...r, ...fromApi(proposal) }; }
+      catch { pushToast("Não foi possível carregar a proposta. Tente de novo.", "info"); return; }
+    }
     const d = {
       ...BLANK_DOC,
-      client: r.client || "", company: r.company || "", title: r.title === "Proposta sem título" ? "" : (r.title || ""),
-      clientEmail: r.clientEmail || "", scope: r.scope || "",
-      items: Array.isArray(r.items) && r.items.length ? r.items : BLANK_DOC.items,
-      start: r.start || "", end: r.end || "", payment: r.payment || "",
-      revisions: r.revisions || "", validity: r.validity || "", bio: r.bio || "",
-      accent: r.accent || "#0A0A0A", accent2: r.accent2 || "#6C48B0", gradient: !!r.gradient, theme: r.theme || "claro", watermark: r.watermark || "", logo: r.logo || null, cover: r.cover || null, template: r.template || "minimal",
+      client: src.client || "", company: src.company || "", title: src.title === "Proposta sem título" ? "" : (src.title || ""),
+      clientEmail: src.clientEmail || "", scope: src.scope || "",
+      items: Array.isArray(src.items) && src.items.length ? src.items : BLANK_DOC.items,
+      start: src.start || "", end: src.end || "", payment: src.payment || "",
+      revisions: src.revisions || "", validity: src.validity || "", bio: src.bio || "",
+      accent: src.accent || "#0A0A0A", accent2: src.accent2 || "#6C48B0", gradient: !!src.gradient, theme: src.theme || "claro", watermark: src.watermark || "", logo: src.logo || null, cover: src.cover || null, template: src.template || "minimal",
     };
     setDoc(d);
     pristineRef.current = JSON.stringify(d); // abriu uma existente: só re-salva se editar
-    setDraftId(r.id || newId());
-    setDraftPublicId(r.publicId || null);
+    setDraftId(src.id || newId());
+    setDraftPublicId(src.publicId || null);
     setIsCopy(false);
     setEditorFrom("list");
     setFlowError("");
@@ -749,19 +756,25 @@ export default function Dashboard({ go }) {
   // Duplicar: abre uma CÓPIA como rascunho local editável (novo id local, sem
   // link público). Nada vai pro servidor nem conta cota até você concluir. Assim
   // a cópia não nasce travada como as propostas já enviadas.
-  const duplicateRow = (r) => (e) => {
+  const duplicateRow = (r) => async (e) => {
     e.stopPropagation();
-    const baseTitle = r.title && r.title !== "Proposta sem título" ? r.title : "Proposta";
+    // Busca o conteúdo completo (a lista só tem o resumo) antes de copiar.
+    let src = r;
+    if (r.id && !isLocalId(r.id) && r.scope === undefined) {
+      try { const { proposal } = await api.getProposal(r.id); src = { ...r, ...fromApi(proposal) }; }
+      catch { pushToast("Não foi possível carregar a proposta pra duplicar.", "info"); return; }
+    }
+    const baseTitle = src.title && src.title !== "Proposta sem título" ? src.title : "Proposta";
     const d = {
       ...BLANK_DOC,
-      client: r.client || "", company: r.company || "", title: `${baseTitle} (cópia)`,
-      clientEmail: r.clientEmail || "", scope: r.scope || "",
-      items: Array.isArray(r.items) && r.items.length ? r.items.map((it) => ({ ...it })) : BLANK_DOC.items,
-      start: r.start || "", end: r.end || "", payment: r.payment || "",
-      revisions: r.revisions || "", validity: r.validity || "", bio: r.bio || "",
-      accent: r.accent || "#0A0A0A", accent2: r.accent2 || "#6C48B0", gradient: !!r.gradient,
-      theme: r.theme || "claro", watermark: r.watermark || "", logo: r.logo || null, cover: r.cover || null,
-      template: r.template || "minimal",
+      client: src.client || "", company: src.company || "", title: `${baseTitle} (cópia)`,
+      clientEmail: src.clientEmail || "", scope: src.scope || "",
+      items: Array.isArray(src.items) && src.items.length ? src.items.map((it) => ({ ...it })) : BLANK_DOC.items,
+      start: src.start || "", end: src.end || "", payment: src.payment || "",
+      revisions: src.revisions || "", validity: src.validity || "", bio: src.bio || "",
+      accent: src.accent || "#0A0A0A", accent2: src.accent2 || "#6C48B0", gradient: !!src.gradient,
+      theme: src.theme || "claro", watermark: src.watermark || "", logo: src.logo || null, cover: src.cover || null,
+      template: src.template || "minimal",
     };
     setDoc(d);
     pristineRef.current = ""; // cópia já tem conteúdo: conta como rascunho

@@ -43,10 +43,20 @@ const toProposal = (p) => ({
   createdAt: p.created_at, updatedAt: p.updated_at,
 });
 
+// Lista: devolve so o RESUMO (sem escopo/itens/bio/estilo/imagens), pra reduzir
+// muito o egress do banco. O conteudo completo vem em GET /:id ao abrir a proposta.
 r.get("/", async (req, res, next) => {
   try {
-    const { rows } = await query("select * from proposals where user_id=$1 order by created_at desc", [req.user.id]);
-    res.json({ proposals: rows.map(toProposal) });
+    const { rows } = await query(
+      "select id, public_id, client, company, client_email, title, status, value, created_at, updated_at from proposals where user_id=$1 order by created_at desc",
+      [req.user.id]
+    );
+    res.json({
+      proposals: rows.map((p) => ({
+        id: p.id, publicId: p.public_id, client: p.client, company: p.company, clientEmail: p.client_email,
+        title: p.title, status: p.status, value: Number(p.value), createdAt: p.created_at, updatedAt: p.updated_at,
+      })),
+    });
   } catch (e) { next(e); }
 });
 
