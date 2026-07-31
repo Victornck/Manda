@@ -40,7 +40,22 @@
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Conteúdo estático para leitores que não executam JavaScript (ex.: o robô
+           de verificação de marca do Google). O React substitui isto ao montar. -->
+      <div style="max-width:680px;margin:0 auto;padding:48px 24px;font-family:'General Sans',system-ui,sans-serif;color:#0A0A0A">
+        <h1 style="font-family:'Satoshi',system-ui,sans-serif;font-size:34px;font-weight:900;letter-spacing:-0.02em;margin:0 0 10px">Manda</h1>
+        <p style="font-size:18px;line-height:1.55;color:#52525B;margin:0 0 18px">
+          O Manda é a ferramenta para freelancers e pequenos negócios criarem propostas comerciais e orçamentos profissionais. Você monta a proposta em minutos, envia por link e acompanha na hora quando o cliente abre e quando aceita.
+        </p>
+        <p style="font-size:15px;margin:0">
+          <a href="/precos" style="color:#0A0A0A;font-weight:600">Preços</a> ·
+          <a href="/entrar" style="color:#0A0A0A;font-weight:600">Entrar</a> ·
+          <a href="/termos" style="color:#0A0A0A;font-weight:600">Termos de Uso</a> ·
+          <a href="/privacidade" style="color:#0A0A0A;font-weight:600">Política de Privacidade</a>
+        </p>
+      </div>
+    </div>
     <script>
       // Vigia de montagem: se o bundle não carregar (reloads muito rápidos
       // interrompem os módulos no dev; rede ruim em produção), o React nunca
