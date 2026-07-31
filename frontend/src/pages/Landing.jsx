@@ -301,9 +301,6 @@ export default function Landing({ go }) {
       <section style={{ position: "relative", overflow: "hidden", background: `radial-gradient(120% 90% at 85% -10%,${color.accentGlow} 0%,#FFFFFF 55%)` }}>
         <div className="lp-hero">
           <div style={{ animation: "mandaFadeUp .6s ease both" }}>
-            <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em", color: color.ink, margin: "0 0 16px" }}>
-              Manda <span style={{ fontWeight: 500, color: color.gray500 }}>— propostas e orçamentos que fecham</span>
-            </div>
             <h1 className="lp-h1">
               Cria.<br />Envia.<br /><span style={{ color: color.accent }}>Fecha.</span>
             </h1>
