@@ -562,6 +562,11 @@ export default function Auth({ go, tab = "signup" }) {
                   <div role="alert" style={{ fontSize: 13.5, color: "#B4443C", textAlign: "center", margin: "12px 0 0" }}>{fgErr}</div>
                 )}
                 {fgStatus !== "success" && (
+                  <p style={{ fontSize: 12.5, lineHeight: 1.5, color: color.gray500, background: color.surface, border: `1px solid ${color.line2}`, borderRadius: 9, padding: "9px 12px", margin: "14px 0 0", textAlign: "center" }}>
+                    Não chegou? Confira também a caixa de <strong style={{ color: color.gray700, fontWeight: 600 }}>spam</strong> ou lixo eletrônico.
+                  </p>
+                )}
+                {fgStatus !== "success" && (
                   <button type="button" onClick={sendForgot} disabled={fgBusy} className="au-link au-linksm" style={{ display: "block", margin: "16px auto 0" }}>Reenviar código</button>
                 )}
               </>
