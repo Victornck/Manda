@@ -6,7 +6,7 @@ import {
   Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
   Copy, Send, GripVertical, Home as HomeIcon,
 } from "lucide-react";
-import { font, color, statusColors, avatarPalette, brl, initials } from "../theme.js";
+import { font, color, statusColors, avatarPalette, brl, initials, shadow } from "../theme.js";
 import HomePage from "./Home.jsx";
 import { api, setToken } from "../lib/api.js";
 import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
@@ -173,6 +173,7 @@ export default function Dashboard({ go }) {
   const [copied, setCopied] = useState(false);
   const [toDelete, setToDelete] = useState(null);
   const [showPreview, setShowPreview] = useState(true); // toggle do painel de pré-visualização
+  const [profileMenu, setProfileMenu] = useState(false); // dropdown do perfil (topo da sidebar)
   const [onb, setOnb] = useState({});                   // progresso do tutorial (carregado por usuário)
   const [onbLoaded, setOnbLoaded] = useState(false);    // só persiste/mostra DEPOIS de carregar o salvo
   const [onbCelebrate, setOnbCelebrate] = useState(false); // banner "Tudo pronto" (7s, só em memória)
@@ -853,16 +854,35 @@ export default function Dashboard({ go }) {
 
   const unread = notifs.filter((n) => !notifRead.has(n.id)).length;
 
-  const nav = [
+  // Nav em dois grupos (como na referência): o uso do dia a dia em cima e, sob o
+  // rótulo "Preferências", as telas de ajuste.
+  const navMain = [
     { key: "home", label: "Início", Icon: HomeIcon },
     { key: "list", label: "Propostas", Icon: FileText },
     { key: "templates", label: "Templates", Icon: LayoutGrid },
     { key: "calc", label: "Calculadora", Icon: Calculator },
     { key: "clients", label: "Clientes", Icon: Users },
     { key: "notifications", label: "Notificações", Icon: Bell, badge: unread },
+  ];
+  const navPrefs = [
     { key: "settings", label: "Configurações", Icon: Settings },
     { key: "support", label: "Suporte", Icon: LifeBuoy },
   ];
+  // Menu do perfil (topo da sidebar): abre com "Sair".
+  const navItem = (n) => {
+    const on = view === n.key || (n.key === "list" && view === "editor");
+    return (
+      <a key={n.key} href="#" className={on ? "on" : "idle"} title={n.label} aria-current={on ? "page" : undefined}
+        onClick={(e) => { e.preventDefault(); navTo(n.key); }}>
+        <span style={{ display: "flex", flex: "none", position: "relative" }}>
+          <n.Icon size={18} strokeWidth={1.9} />
+          {n.badge > 0 && <span className="db-nav-dot" />}
+        </span>
+        <span className="db-collapsed" style={{ flex: 1 }}>{n.label}</span>
+        {n.badge > 0 && <span className="db-collapsed db-nav-badge">{n.badge}</span>}
+      </a>
+    );
+  };
 
   const profileName = user?.name || "Sua conta";
   // Propostas restantes: vêm do USO append-only do backend (não some ao apagar).
@@ -920,10 +940,12 @@ export default function Dashboard({ go }) {
         .db-toast.success{ background:#1F7A48; }
         .db-toast.info{ background:${color.ink}; }
         @keyframes dbToastIn{ from{ opacity:0; transform:translateY(12px) scale(.98); } to{ opacity:1; transform:none; } }
-        .db-profile{ display:flex; align-items:center; gap:11px; padding:10px 12px; margin:8px; border-radius:11px; }
-        .db-logout{ flex:none; margin-left:auto; display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:none; background:none; color:${color.gray400}; border-radius:8px; cursor:pointer; transition:background .14s ease, color .14s ease; }
-        .db-logout:hover{ background:${color.surface}; color:${color.ink}; }
-        .db-logout:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
+        .db-profile{ display:flex; align-items:center; gap:11px; padding:8px 10px; width:100%; border:1px solid ${color.line2}; background:${color.white}; border-radius:11px; cursor:pointer; text-align:left; font-family:${font.body}; transition:background .14s ease, border-color .14s ease; }
+        .db-profbtn:hover{ background:${color.surface3}; border-color:${color.gray300}; }
+        .db-profbtn:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
+        .db-navlabel{ font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:${color.gray400}; padding:14px 12px 6px; }
+        .db-menuitem{ display:flex; align-items:center; gap:10px; width:100%; padding:9px 11px; border:none; background:none; border-radius:8px; font-family:${font.body}; font-size:13.5px; font-weight:500; color:${color.gray700}; cursor:pointer; text-align:left; transition:background .12s ease; }
+        .db-menuitem:hover{ background:${color.surface}; color:${color.ink}; }
 
         .db-search{ display:flex; align-items:center; gap:8px; background:#fff; border:1px solid ${color.gray200}; border-radius:10px; padding:0 12px; height:40px; min-width:230px; transition:border-color .15s ease, box-shadow .15s ease; }
         .db-search:focus-within{ border-color:${color.accent}; box-shadow:0 0 0 3px rgba(217,119,87,0.15); }
@@ -1161,44 +1183,52 @@ export default function Dashboard({ go }) {
 
       {/* SIDEBAR */}
       <aside className="db-side">
-        <div style={{ padding: "20px 16px 12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 6px", marginBottom: 18, height: 28 }}>
+        <div style={{ padding: "18px 16px 10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 6px", marginBottom: 14, height: 28 }}>
             <img src="/logo-horizontal.svg" alt="Manda" className="db-collapsed" style={{ height: 24, width: "auto", display: "block" }} />
             <img src="/logo-mark.svg" alt="Manda" className="db-mark-only" style={{ width: 28, height: 28, flex: "none", display: "none" }} />
           </div>
+
+          {/* Perfil no topo (com menu Sair), como na referência */}
+          <div style={{ position: "relative", marginBottom: 12 }}>
+            <button className="db-profile db-profbtn" title={profileName} aria-haspopup="menu" aria-expanded={profileMenu}
+              onClick={() => setProfileMenu((v) => !v)}>
+              <span style={{ width: 34, height: 34, flex: "none", borderRadius: "50%", background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 700, fontSize: 14 }}>
+                {user ? initials(user.name) : <User size={17} strokeWidth={2} />}
+              </span>
+              <div className="db-collapsed" style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+                <div style={{ fontSize: "13.5px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{profileName}</div>
+                <div style={{ fontSize: 12, color: quotaLow ? "#B4443C" : color.gray400, fontWeight: quotaLow ? 600 : 400 }}>{profileSub}</div>
+              </div>
+              <ChevronDown className="db-collapsed" size={16} strokeWidth={2} color={color.gray400} style={{ flex: "none", transition: "transform .15s", transform: profileMenu ? "rotate(180deg)" : "none" }} />
+            </button>
+            {profileMenu && (
+              <>
+                <div onClick={() => setProfileMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div role="menu" style={{ position: "absolute", top: "calc(100% + 4px)", left: 8, right: 8, zIndex: 41, background: color.white, border: `1px solid ${color.line2}`, borderRadius: 11, boxShadow: shadow.card, padding: 5 }}>
+                  <button role="menuitem" onClick={() => { setProfileMenu(false); navTo("settings"); }} className="db-menuitem">
+                    <Settings size={16} strokeWidth={1.9} />Configurações
+                  </button>
+                  <button role="menuitem" onClick={() => { setToken(null); go && go("landing"); }} className="db-menuitem">
+                    <LogOut size={16} strokeWidth={1.9} />Sair
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
           <button onClick={newProposal} className="db-btn db-btn-accent db-new">
             <Plus size={17} strokeWidth={2.4} /><span className="db-collapsed">Nova proposta</span>
           </button>
         </div>
+
         <nav className="db-nav" style={{ flex: 1, padding: "6px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-          {nav.map((n) => {
-            const on = view === n.key || (n.key === "list" && view === "editor");
-            return (
-              <a key={n.key} href="#" className={on ? "on" : "idle"} title={n.label} aria-current={on ? "page" : undefined}
-                onClick={(e) => { e.preventDefault(); navTo(n.key); }}>
-                <span style={{ display: "flex", flex: "none", position: "relative" }}>
-                  <n.Icon size={18} strokeWidth={1.9} />
-                  {n.badge > 0 && <span className="db-nav-dot" />}
-                </span>
-                <span className="db-collapsed" style={{ flex: 1 }}>{n.label}</span>
-                {n.badge > 0 && <span className="db-collapsed db-nav-badge">{n.badge}</span>}
-              </a>
-            );
-          })}
+          {navMain.map(navItem)}
+          <div className="db-collapsed db-navlabel">Preferências</div>
+          {navPrefs.map(navItem)}
         </nav>
-        <div style={{ borderTop: `1px solid ${color.line2}` }}>
-          <div className="db-profile" title={profileName}>
-            <span style={{ width: 34, height: 34, flex: "none", borderRadius: "50%", background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: font.heading, fontWeight: 700, fontSize: 14 }}>
-              {user ? initials(user.name) : <User size={17} strokeWidth={2} />}
-            </span>
-            <div className="db-collapsed" style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: "13.5px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{profileName}</div>
-              <div style={{ fontSize: 12, color: quotaLow ? "#B4443C" : color.gray400, fontWeight: quotaLow ? 600 : 400 }}>{profileSub}</div>
-            </div>
-            <button onClick={() => { setToken(null); go && go("landing"); }} className="db-collapsed db-logout" aria-label="Sair" title="Sair"><LogOut size={17} strokeWidth={1.9} /></button>
-          </div>
-          {APP_VERSION && <div className="db-collapsed" style={{ padding: "0 16px 12px", fontSize: 11, color: color.gray400, letterSpacing: "0.02em" }}>Manda v{APP_VERSION}</div>}
-        </div>
+
+        {APP_VERSION && <div className="db-collapsed" style={{ borderTop: `1px solid ${color.line2}`, padding: "12px 22px", fontSize: 11, color: color.gray400, letterSpacing: "0.02em" }}>Manda v{APP_VERSION}</div>}
       </aside>
 
       {/* MAIN */}
