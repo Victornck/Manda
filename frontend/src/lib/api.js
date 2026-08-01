@@ -113,6 +113,8 @@ export const api = {
   deleteProposal: (id) => request(`/proposals/${id}`, { method: "DELETE" }),
   stats: () => request("/proposals/stats"),
   usage: () => request("/proposals/usage"),
+  // Home: agrega KPIs, funil, série, atividade, clientes quentes e templates.
+  dashboard: (days) => request(`/proposals/dashboard${days ? `?days=${days}` : ""}`),
   // Follow-up assistido: lista propostas paradas e envia lembrete pelo Gmail.
   followUps: () => request("/proposals/follow-ups"),
   remindProposal: (id) => request(`/proposals/${id}/remind`, { method: "POST" }),

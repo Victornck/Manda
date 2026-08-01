@@ -148,6 +148,92 @@ r.get("/follow-ups", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Home / painel inicial: agrega tudo numa resposta só, com dados REAIS de
+// propostas + eventos. Definido antes de /:id para não conflitar na rota.
+r.get("/dashboard", async (req, res, next) => {
+  try {
+    const uid = req.user.id;
+    const num = (v) => Number(v) || 0;
+    // Janela do gráfico (7/30/90/365 dias). Só afeta a série temporal; o resto
+    // dos KPIs olha o total/mês. Preso a limites seguros pra não virar consulta pesada.
+    const days = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 30));
+
+    const [kpi, funil, tempo, ativos, serie, templates, atividade, quentes] = await Promise.all([
+      query(`select
+          coalesce(sum(value) filter (where status in ('sent','viewed')),0) as em_negociacao,
+          count(*) filter (where created_at >= date_trunc('month', now())) as criadas_mes,
+          count(*) filter (where created_at >= date_trunc('month', now()-interval '1 month')
+                             and created_at <  date_trunc('month', now())) as criadas_mes_ant,
+          count(*) filter (where status <> 'draft') as enviadas_total,
+          count(*) filter (where status = 'accepted') as aceitas_total,
+          coalesce(round(avg(value) filter (where value > 0)),0) as valor_medio
+        from proposals where user_id=$1`, [uid]),
+      query(`select
+          count(*) filter (where status='draft')    as rascunho,
+          count(*) filter (where status='sent')     as enviada,
+          count(*) filter (where status='viewed')   as visualizada,
+          count(*) filter (where status='accepted') as aceita,
+          count(*) filter (where status='declined') as recusada
+        from proposals where user_id=$1`, [uid]),
+      query(`select coalesce(avg(extract(epoch from (e.created_at - p.created_at))/86400),0) as dias
+        from proposal_events e join proposals p on p.id=e.proposal_id
+        where p.user_id=$1 and e.type='accepted'`, [uid]),
+      query(`select count(distinct coalesce(nullif(trim(client),''),'—')) as n
+        from proposals where user_id=$1 and created_at >= now()-interval '30 days'`, [uid]),
+      query(`select to_char(created_at::date,'YYYY-MM-DD') as dia, count(*)::int as n
+        from proposals where user_id=$1 and created_at >= now()-make_interval(days => $2)
+        group by 1 order by 1`, [uid, days]),
+      query(`select template, count(*)::int as total, count(*) filter (where status='accepted')::int as aceitas
+        from proposals where user_id=$1 group by template order by aceitas desc, total desc`, [uid]),
+      query(`select e.type, e.created_at, p.client, p.title, p.public_id
+        from proposal_events e join proposals p on p.id=e.proposal_id
+        where p.user_id=$1 and e.type in ('viewed','accepted','declined','emailed')
+        order by e.created_at desc limit 8`, [uid]),
+      query(`select coalesce(nullif(trim(p.client),''),'Sem cliente') as client,
+               coalesce(sum(p.value) filter (where p.status in ('sent','viewed')),0) as em_negociacao,
+               count(*) filter (where e.type='viewed')::int as views,
+               max(e.created_at) filter (where e.type='viewed') as ultima_abertura
+        from proposals p left join proposal_events e on e.proposal_id=p.id
+        where p.user_id=$1 group by 1
+        having count(*) filter (where e.type='viewed') > 0
+            or coalesce(sum(p.value) filter (where p.status in ('sent','viewed')),0) > 0
+        order by views desc, em_negociacao desc limit 5`, [uid]),
+    ]);
+
+    const k = kpi.rows[0] || {};
+    const f = funil.rows[0] || {};
+    const enviadasTotal = num(k.enviadas_total);
+    const aceitasTotal = num(k.aceitas_total);
+
+    res.json({
+      kpis: {
+        emNegociacao: num(k.em_negociacao),
+        criadasMes: num(k.criadas_mes),
+        criadasMesAnt: num(k.criadas_mes_ant),
+        taxaAceitacao: enviadasTotal ? Math.round((aceitasTotal / enviadasTotal) * 100) : 0,
+        clientesAtivos: num(ativos.rows[0]?.n),
+        tempoMedioAceite: Math.round(num(tempo.rows[0]?.dias) * 10) / 10,
+        valorMedio: num(k.valor_medio),
+      },
+      funil: {
+        rascunho: num(f.rascunho), enviada: num(f.enviada), visualizada: num(f.visualizada),
+        aceita: num(f.aceita), recusada: num(f.recusada),
+      },
+      serie: serie.rows.map((s) => ({ dia: s.dia, n: s.n })),
+      templates: templates.rows.map((t) => ({
+        template: t.template, total: t.total, aceitas: t.aceitas,
+        conversao: t.total ? Math.round((t.aceitas / t.total) * 100) : 0,
+      })),
+      atividade: atividade.rows.map((a) => ({
+        type: a.type, client: a.client, title: a.title, publicId: a.public_id, createdAt: a.created_at,
+      })),
+      clientesQuentes: quentes.rows.map((c) => ({
+        client: c.client, emNegociacao: num(c.em_negociacao), views: c.views, ultimaAbertura: c.ultima_abertura,
+      })),
+    });
+  } catch (e) { next(e); }
+});
+
 r.get("/:id", async (req, res, next) => {
   try {
     const { rows } = await query("select * from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);

@@ -4,9 +4,10 @@ import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
   Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
-  Copy, Send, GripVertical,
+  Copy, Send, GripVertical, Home as HomeIcon,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, brl, initials } from "../theme.js";
+import HomePage from "./Home.jsx";
 import { api, setToken } from "../lib/api.js";
 import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
 import { loadNotifs, mergeNotifs, getSeen, getReadSet, markRead, removeNotifs } from "../lib/notifs.js";
@@ -131,15 +132,17 @@ const STEPS = [
 export default function Dashboard({ go }) {
   // Aba ↔ URL: recarregar a página mantém a aba, e voltar/avançar do navegador
   // navega entre abas. O editor fica fora da URL (estado de trabalho, não página).
-  const TAB_TO_VIEW = { templates: "templates", calculadora: "calc", clientes: "clients", notificacoes: "notifications", configuracoes: "settings", suporte: "support" };
-  const VIEW_TO_TAB = { templates: "templates", calc: "calculadora", clients: "clientes", notifications: "notificacoes", settings: "configuracoes", support: "suporte" };
+  // A Home é a tela inicial (base /app, sem slug). A lista de propostas ganhou a
+  // aba própria "propostas".
+  const TAB_TO_VIEW = { propostas: "list", templates: "templates", calculadora: "calc", clientes: "clients", notificacoes: "notifications", configuracoes: "settings", suporte: "support" };
+  const VIEW_TO_TAB = { list: "propostas", templates: "templates", calc: "calculadora", clients: "clientes", notifications: "notificacoes", settings: "configuracoes", support: "suporte" };
   const { tab: urlTab } = useParams();
   const navigate = useNavigate();
-  const [view, setView] = useState(() => TAB_TO_VIEW[urlTab || ""] || "list");
+  const [view, setView] = useState(() => TAB_TO_VIEW[urlTab || ""] || "home");
 
   // URL mudou (voltar/avançar): segue, exceto se estiver no meio de uma edição.
   useEffect(() => {
-    const v = TAB_TO_VIEW[urlTab || ""] || "list";
+    const v = TAB_TO_VIEW[urlTab || ""] || "home";
     setView((cur) => (cur === "editor" || cur === v ? cur : v));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlTab]);
@@ -851,6 +854,7 @@ export default function Dashboard({ go }) {
   const unread = notifs.filter((n) => !notifRead.has(n.id)).length;
 
   const nav = [
+    { key: "home", label: "Início", Icon: HomeIcon },
     { key: "list", label: "Propostas", Icon: FileText },
     { key: "templates", label: "Templates", Icon: LayoutGrid },
     { key: "calc", label: "Calculadora", Icon: Calculator },
@@ -1205,7 +1209,9 @@ export default function Dashboard({ go }) {
             <button onClick={() => refreshRows()} className="db-btn" style={{ fontSize: 13, fontWeight: 600, color: "#8A5A1A", background: "#fff", border: "1px solid #F0C98A", borderRadius: 8, padding: "6px 12px", flex: "none" }}>Tentar de novo</button>
           </div>
         )}
-        {view === "list" ? (
+        {view === "home" ? (
+          <HomePage user={user} onNewProposal={newProposal} onNavigate={navTo} />
+        ) : view === "list" ? (
           <div className="db-pad">
             <div className="db-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 22 }}>
               <div>

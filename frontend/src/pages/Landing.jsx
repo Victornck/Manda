@@ -113,7 +113,7 @@ export default function Landing({ go }) {
     { title: "Aceite com um clique", body: "O cliente aprova ali mesmo, com data e hora registradas. Sem imprimir, assinar e escanear.", soon: false, Icon: BadgeCheck },
     { title: "Calculadora de preço", body: "Sugestão de valor por tipo de serviço pra você parar de chutar o orçamento.", soon: false, Icon: Calculator },
     { title: "Painel de conversão", body: "Quantas propostas você enviou, quantas fecharam e qual o seu ticket médio, tudo num lugar só.", soon: false, Icon: LineChart },
-    { title: "Follow-up automático", body: "Um lembrete sai sozinho quando o cliente some. Você fecha mais sem parecer insistente.", soon: true, Icon: History },
+    { title: "Follow-up assistido", body: "A Manda te avisa quando o cliente some e você envia o lembrete com um clique. Fecha mais sem parecer insistente.", Icon: History },
   ];
 
   const outcomes = [
