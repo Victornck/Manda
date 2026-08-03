@@ -12,10 +12,15 @@ import { authLimiter, loginLimiter, emailLimiter, codeLimiter } from "../middlew
 import { requireAuth } from "../middleware/auth.js";
 import { issueCode, consumeCode } from "../lib/passwordCodes.js";
 import { sendMail, codeEmailHtml } from "../lib/mailer.js";
+import { isCurrency } from "../lib/currency.js";
 
 const googleClient = env.GOOGLE_CLIENT_ID ? new OAuth2Client(env.GOOGLE_CLIENT_ID) : null;
 
-const profileSchema = z.object({ name: z.string().trim().min(1).max(120) });
+// Perfil: nome sempre; moeda da conta opcional (só troca se vier uma válida).
+const profileSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  currency: z.string().optional(),
+});
 const emailSchema = z.object({ email: z.string().email() });
 const resetSchema = z.object({
   email: z.string().email(),
@@ -33,6 +38,7 @@ const safeUser = (u) => ({
   id: u.id, name: u.name, email: u.email,
   plan: u.role === "admin" ? "business" : u.plan,
   role: u.role === "admin" ? "admin" : undefined,
+  currency: u.currency || "BRL",
 });
 
 r.post("/register", authLimiter, async (req, res, next) => {
@@ -127,11 +133,16 @@ r.get("/me", requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Atualiza o nome de exibição.
+// Atualiza o nome de exibição e/ou a moeda padrão da conta.
 r.patch("/profile", requireAuth, async (req, res, next) => {
   try {
-    const { name } = profileSchema.parse(req.body);
-    const { rows } = await query("update users set name=$2 where id=$1 returning *", [req.user.id, name]);
+    const body = profileSchema.parse(req.body);
+    const sets = [];
+    const vals = [req.user.id];
+    if (body.name !== undefined) { vals.push(body.name); sets.push(`name=$${vals.length}`); }
+    if (body.currency !== undefined && isCurrency(body.currency)) { vals.push(body.currency); sets.push(`currency=$${vals.length}`); }
+    if (!sets.length) return res.status(400).json({ error: "Nada para atualizar." });
+    const { rows } = await query(`update users set ${sets.join(", ")} where id=$1 returning *`, vals);
     if (!rows[0]) return res.status(404).json({ error: "Usuário não encontrado." });
     res.json({ user: safeUser(rows[0]) });
   } catch (e) { next(e); }

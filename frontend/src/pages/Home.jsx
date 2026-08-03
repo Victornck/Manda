@@ -9,8 +9,9 @@ import {
   Plus, FileText, Eye, Check, X, Send, Clock, Users, Calculator, LayoutGrid,
   Sparkles, ArrowRight, Flame, TrendingUp, TrendingDown, Minus, RefreshCw,
 } from "lucide-react";
-import { font, color, statusColors, brl } from "../theme.js";
+import { font, color, statusColors } from "../theme.js";
 import { api } from "../lib/api.js";
+import { formatMoney, CURRENCY_LIST, currencyOf, DEFAULT_CURRENCY } from "../lib/currency.js";
 
 // Nomes amigáveis dos templates (as chaves vêm cruas do banco).
 const TEMPLATE_LABELS = {
@@ -184,7 +185,7 @@ function Section({ title, action, children }) {
 }
 
 // Deriva 2-3 frases úteis a partir dos números (sem inventar dado).
-function buildInsights(d) {
+function buildInsights(d, display = DEFAULT_CURRENCY) {
   const out = [];
   const { kpis, templates, clientesQuentes, funil } = d;
   const bestTpl = (templates || []).filter((t) => t.total >= 2).sort((a, b) => b.conversao - a.conversao)[0];
@@ -193,7 +194,7 @@ function buildInsights(d) {
   if (hot) out.push(`${hot.client} abriu sua proposta ${hot.views} vezes e ainda não respondeu — um bom momento pra um follow-up.`);
   if (kpis.taxaAceitacao > 0) out.push(`Sua taxa de aceitação está em ${kpis.taxaAceitacao}%${kpis.taxaAceitacao >= 40 ? " — acima da média do mercado." : "."}`);
   if (kpis.tempoMedioAceite > 0) out.push(`Clientes levam em média ${kpis.tempoMedioAceite} dia${kpis.tempoMedioAceite === 1 ? "" : "s"} pra aceitar depois de receber.`);
-  if (kpis.emNegociacao > 0) out.push(`Você tem ${brl(kpis.emNegociacao)} em propostas ainda em aberto.`);
+  if (kpis.emNegociacao > 0) out.push(`Você tem ${formatMoney(kpis.emNegociacao, display)} em propostas ainda em aberto.`);
   if (funil.enviada + funil.visualizada > 0 && !out.length) out.push(`Você tem ${funil.enviada + funil.visualizada} proposta(s) aguardando resposta.`);
   return out.slice(0, 3);
 }
@@ -201,15 +202,16 @@ function buildInsights(d) {
 export default function Home({ user, onNewProposal, onNavigate }) {
   const [data, setData] = useState(null);
   const [days, setDays] = useState(30);
+  const [display, setDisplay] = useState(user?.currency || DEFAULT_CURRENCY);
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
   const [err, setErr] = useState(false);
 
-  const load = async (d = days, first = false) => {
+  const load = async (d = days, disp = display, first = false) => {
     if (first) setLoading(true); else setChartLoading(true);
     setErr(false);
     try {
-      const res = await api.dashboard(d);
+      const res = await api.dashboard(d, disp);
       setData(res);
     } catch {
       setErr(true);
@@ -218,10 +220,12 @@ export default function Home({ user, onNewProposal, onNavigate }) {
     }
   };
 
-  useEffect(() => { load(days, true); /* eslint-disable-next-line */ }, []);
-  const pickDays = (d) => { if (d === days) return; setDays(d); load(d); };
+  useEffect(() => { load(days, display, true); /* eslint-disable-next-line */ }, []);
+  const pickDays = (d) => { if (d === days) return; setDays(d); load(d, display); };
+  const pickCurrency = (code) => { if (code === display) return; setDisplay(code); load(days, code); };
+  const money = (v) => formatMoney(v, display);
 
-  const insights = useMemo(() => (data ? buildInsights(data) : []), [data]);
+  const insights = useMemo(() => (data ? buildInsights(data, display) : []), [data, display]);
   const totalProps = data ? Object.values(data.funil).reduce((a, b) => a + b, 0) : 0;
   const empty = data && totalProps === 0;
 
@@ -248,6 +252,9 @@ export default function Home({ user, onNewProposal, onNavigate }) {
         .hm-link:hover { color: ${color.accentHover}; }
         .hm-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid ${color.line3}; }
         .hm-row:first-child { border-top: none; }
+        .hm-cursel { display: inline-flex; align-items: center; gap: 6px; border: 1px solid ${color.line2}; background: ${color.white}; border-radius: 10px; padding: 0 10px; height: 38px; cursor: pointer; transition: border-color .15s; }
+        .hm-cursel:hover { border-color: ${color.gray300}; }
+        .hm-cursel select { border: none; outline: none; background: transparent; font-family: ${font.body}; font-size: 13.5px; font-weight: 600; color: ${color.gray700}; cursor: pointer; padding: 8px 2px; }
         .hm-skel { background: ${color.surface}; border-radius: 12px; animation: hmpulse 1.3s ease-in-out infinite; }
         @keyframes hmpulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
         @media (max-width: 980px) { .hm-cols { grid-template-columns: 1fr; } .hm-kpis { grid-template-columns: repeat(2, 1fr); } }
@@ -262,9 +269,17 @@ export default function Home({ user, onNewProposal, onNavigate }) {
           </h1>
           <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0, textTransform: "capitalize" }}>{today()}</p>
         </div>
-        <button onClick={onNewProposal} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 16px", flex: "none", display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, borderRadius: 10, border: "none", color: "#fff", background: color.accent, cursor: "pointer" }}>
-          <Plus size={16} strokeWidth={2.4} />Nova proposta
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <label className="hm-cursel" title="Moeda de exibição do painel">
+            <span aria-hidden="true">{currencyOf(display).flag}</span>
+            <select value={display} onChange={(e) => pickCurrency(e.target.value)} aria-label="Moeda de exibição do painel">
+              {CURRENCY_LIST.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.symbol}</option>)}
+            </select>
+          </label>
+          <button onClick={onNewProposal} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 16px", flex: "none", display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, borderRadius: 10, border: "none", color: "#fff", background: color.accent, cursor: "pointer" }}>
+            <Plus size={16} strokeWidth={2.4} />Nova proposta
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -278,7 +293,7 @@ export default function Home({ user, onNewProposal, onNavigate }) {
       ) : err ? (
         <Card style={{ textAlign: "center", padding: 40 }}>
           <p style={{ color: color.gray600, margin: "0 0 14px" }}>Não foi possível carregar seu painel.</p>
-          <button onClick={() => load(days, true)} className="hm-chip" style={{ margin: "0 auto" }}>
+          <button onClick={() => load(days, display, true)} className="hm-chip" style={{ margin: "0 auto" }}>
             <RefreshCw size={13} strokeWidth={2.2} style={{ verticalAlign: "-2px", marginRight: 5 }} />Tentar de novo
           </button>
         </Card>
@@ -297,12 +312,23 @@ export default function Home({ user, onNewProposal, onNavigate }) {
         </Card>
       ) : data && (
         <>
+          {/* Moeda de exibição + aviso de cotação */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14, fontSize: 12.5, color: color.gray500 }}>
+            <span>Valores em {currencyOf(display).name} ({currencyOf(display).symbol}){display !== "BRL" ? " · convertidos pela cotação atual" : ""}.</span>
+            {data.moeda?.desatualizada && (
+              <span style={{ color: "#8A5A1A", background: "#FEF3E2", border: "1px solid #F5D9A8", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+                Cotação pode estar desatualizada
+              </span>
+            )}
+            {chartLoading && <span className="db-spin" style={{ display: "inline-block", width: 11, height: 11, border: `1.5px solid ${color.line}`, borderTopColor: color.gray400, borderRadius: "50%" }} />}
+          </div>
+
           {/* KPIs */}
           <div className="hm-kpis">
-            <Kpi label="Em negociação" value={brl(data.kpis.emNegociacao)} hint="Propostas enviadas e abertas" />
+            <Kpi label="Em negociação" value={money(data.kpis.emNegociacao)} hint="Propostas enviadas e abertas" />
             <Kpi label="Propostas no mês" value={data.kpis.criadasMes} delta={data.kpis.criadasMes - data.kpis.criadasMesAnt} hint="vs. mês anterior" />
             <Kpi label="Taxa de aceitação" value={`${data.kpis.taxaAceitacao}%`} hint="Do total já enviado" />
-            <Kpi label="Ticket médio" value={brl(data.kpis.valorMedio)} hint={`${data.kpis.clientesAtivos} cliente(s) ativo(s) · ${data.kpis.tempoMedioAceite || 0}d p/ aceitar`} />
+            <Kpi label="Ticket médio" value={money(data.kpis.valorMedio)} hint={`${data.kpis.clientesAtivos} cliente(s) ativo(s) · ${data.kpis.tempoMedioAceite || 0}d p/ aceitar`} />
           </div>
 
           <div className="hm-cols">
@@ -404,7 +430,7 @@ export default function Home({ user, onNewProposal, onNavigate }) {
                           </div>
                         </div>
                         {c.emNegociacao > 0 && (
-                          <span style={{ flex: "none", fontSize: 12.5, fontWeight: 600, color: color.gray700 }}>{brl(c.emNegociacao)}</span>
+                          <span style={{ flex: "none", fontSize: 12.5, fontWeight: 600, color: color.gray700 }}>{money(c.emNegociacao)}</span>
                         )}
                       </div>
                     ))}

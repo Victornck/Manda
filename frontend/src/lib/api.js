@@ -114,7 +114,17 @@ export const api = {
   stats: () => request("/proposals/stats"),
   usage: () => request("/proposals/usage"),
   // Home: agrega KPIs, funil, série, atividade, clientes quentes e templates.
-  dashboard: (days) => request(`/proposals/dashboard${days ? `?days=${days}` : ""}`),
+  // days = janela do gráfico; display = moeda de exibição (converte os valores).
+  dashboard: (days, display) => {
+    const qs = new URLSearchParams();
+    if (days) qs.set("days", days);
+    if (display) qs.set("display", display);
+    const s = qs.toString();
+    return request(`/proposals/dashboard${s ? `?${s}` : ""}`);
+  },
+  // Moedas suportadas e cotações atuais (para conversão no dashboard).
+  currencies: () => request("/currencies"),
+  rates: (base) => request(`/rates${base ? `?base=${base}` : ""}`),
   // Follow-up assistido: lista propostas paradas e envia lembrete pelo Gmail.
   followUps: () => request("/proposals/follow-ups"),
   remindProposal: (id) => request(`/proposals/${id}/remind`, { method: "POST" }),

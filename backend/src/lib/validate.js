@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { isCurrency, DEFAULT_CURRENCY } from "./currency.js";
+
+// Moeda: normaliza qualquer valor inválido para o padrão, nunca quebra o salvamento.
+const currencyField = z.string().optional().default(DEFAULT_CURRENCY).transform((c) => (isCurrency(c) ? c : DEFAULT_CURRENCY));
 
 export const registerSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -31,6 +35,7 @@ export const proposalSchema = z.object({
   revisions: z.string().max(200).optional().default(""),
   validity: z.string().max(100).optional().default(""),
   bio: z.string().max(2000).optional().default(""),
+  currency: currencyField,
   accent: z.string().max(20).optional().default("#D97757"),
   accent2: z.string().max(20).optional().default("#6C48B0"),
   gradient: z.boolean().optional().default(false),

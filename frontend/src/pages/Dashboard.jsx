@@ -6,7 +6,7 @@ import {
   Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
   Copy, Send, GripVertical, Home as HomeIcon,
 } from "lucide-react";
-import { font, color, statusColors, avatarPalette, brl, initials, shadow } from "../theme.js";
+import { font, color, statusColors, avatarPalette, initials, shadow } from "../theme.js";
 import HomePage from "./Home.jsx";
 import { api, setToken } from "../lib/api.js";
 import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
@@ -15,6 +15,7 @@ import { DESIGNS, ProposalDesign, sampleFor } from "../templates/designs.jsx";
 import CodeInput from "../components/CodeInput.jsx";
 import SupportChat, { SupportPage } from "../components/SupportChat.jsx";
 import { PRICE_TABLE, COMPLEXITY, URGENCY, suggest, fmtBRL, DEFAULT_CONSUMO, PROJECT_DIFFICULTY } from "../lib/pricing.js";
+import { CURRENCY_LIST, currencyOf, DEFAULT_CURRENCY, formatMoney } from "../lib/currency.js";
 
 // Versão do app (injetada pelo Vite a partir do package.json).
 const APP_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "";
@@ -31,6 +32,7 @@ const BLANK_DOC = {
   client: "", company: "", clientEmail: "", title: "",
   scope: "", items: [{ desc: "", value: "" }],
   start: "", end: "", payment: "", revisions: "", validity: "", bio: "",
+  currency: DEFAULT_CURRENCY,
   accent: "#0A0A0A", accent2: "#6C48B0", gradient: false, theme: "claro", watermark: "", logo: null, cover: null, template: "minimal",
 };
 
@@ -119,6 +121,7 @@ const fromApi = (p) => ({
   date: fmtDate(p.updatedAt || p.createdAt), scope: p.scope, items: Array.isArray(p.items) ? p.items : [],
   start: p.start, end: p.end, payment: p.payment, revisions: p.revisions, validity: p.validity,
   bio: p.bio, accent: p.accent, accent2: p.accent2 || "#6C48B0", gradient: !!p.gradient, theme: p.theme || "claro", watermark: p.watermark || "",
+  currency: p.currency || DEFAULT_CURRENCY,
   logo: p.logo || null, cover: p.cover || null, template: p.template, createdAt: p.createdAt,
 });
 
@@ -570,6 +573,7 @@ export default function Dashboard({ go }) {
     items: doc.items.filter((it) => it.desc || it.value).map((it) => ({ desc: it.desc || "", value: String(it.value || ""), hidden: !!it.hidden })),
     start: doc.start, end: doc.end, payment: doc.payment, revisions: doc.revisions,
     validity: doc.validity, bio: doc.bio, accent: doc.accent, accent2: doc.accent2, gradient: !!doc.gradient, theme: doc.theme || "claro", watermark: doc.watermark || "",
+    currency: doc.currency || DEFAULT_CURRENCY,
     logo: doc.logo || "", cover: doc.cover || "", template: doc.template,
   });
 
@@ -580,13 +584,14 @@ export default function Dashboard({ go }) {
     scope: doc.scope, items: doc.items, start: doc.start, end: doc.end,
     payment: doc.payment, revisions: doc.revisions, validity: doc.validity, bio: doc.bio,
     accent: doc.accent, accent2: doc.accent2, gradient: doc.gradient, logo: doc.logo, cover: doc.cover, template: doc.template,
+    currency: doc.currency || DEFAULT_CURRENCY,
     updatedAt: Date.now(),
   });
 
   const newProposal = () => {
     let bio = "";
     try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
-    const d = { ...BLANK_DOC, bio };
+    const d = { ...BLANK_DOC, bio, currency: user?.currency || DEFAULT_CURRENCY };
     setDoc(d);
     pristineRef.current = JSON.stringify(d); // abriu em branco: só vira rascunho se editar
     setDraftId(newId());
@@ -602,7 +607,7 @@ export default function Dashboard({ go }) {
     let bio = "";
     try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
     const items = (list && list.length) ? list.slice(0, MAX_ITEMS) : [{ desc, value: String(value) }];
-    setDoc({ ...BLANK_DOC, bio, items });
+    setDoc({ ...BLANK_DOC, bio, items, currency: user?.currency || DEFAULT_CURRENCY });
     pristineRef.current = ""; // veio da calculadora com valores: já conta como conteúdo
     setDraftId(newId());
     setDraftPublicId(null);
@@ -628,6 +633,7 @@ export default function Dashboard({ go }) {
       start: src.start || "", end: src.end || "", payment: src.payment || "",
       revisions: src.revisions || "", validity: src.validity || "", bio: src.bio || "",
       accent: src.accent || "#0A0A0A", accent2: src.accent2 || "#6C48B0", gradient: !!src.gradient, theme: src.theme || "claro", watermark: src.watermark || "", logo: src.logo || null, cover: src.cover || null, template: src.template || "minimal",
+      currency: src.currency || DEFAULT_CURRENCY,
     };
     setDoc(d);
     pristineRef.current = JSON.stringify(d); // abriu uma existente: só re-salva se editar
@@ -1335,7 +1341,7 @@ export default function Dashboard({ go }) {
                         </div>
                       </div>
                       <span className="db-c-title" style={{ fontSize: 14, color: color.gray700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", paddingRight: 12 }}>{r.title || "Proposta sem título"}</span>
-                      <span className="db-c-value db-num" style={{ fontSize: 14, fontWeight: 600, color: r.value ? color.ink : color.gray400 }}>{r.value ? brl(r.value) : "—"}</span>
+                      <span className="db-c-value db-num" style={{ fontSize: 14, fontWeight: 600, color: r.value ? color.ink : color.gray400 }}>{r.value ? formatMoney(r.value, r.currency) : "—"}</span>
                       <span className="db-c-status">
                         <span className="db-status-sel" title={`Status: ${r.status || "Rascunho"}`} style={{ display: "inline-block", cursor: "default", color: sc.c, background: sc.bg, border: `1px solid ${sc.b}` }}>{r.status || "Rascunho"}</span>
                       </span>
@@ -1579,7 +1585,21 @@ export default function Dashboard({ go }) {
                   </div>
 
                   <div>
-                    <div style={sectionLabel}>Investimento</div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                      <div style={{ ...sectionLabel, marginBottom: 0 }}>Investimento</div>
+                      <div className="db-tip" data-tip="Moeda desta proposta" style={{ position: "relative", display: "flex" }}>
+                        <select
+                          value={doc.currency || DEFAULT_CURRENCY}
+                          onChange={updDoc("currency")}
+                          disabled={locked}
+                          aria-label="Moeda da proposta"
+                          style={{ appearance: "none", fontFamily: font.body, fontSize: 13, fontWeight: 600, color: color.gray700, background: color.surface3, border: `1px solid ${color.gray200}`, borderRadius: 8, padding: "6px 26px 6px 10px", cursor: locked ? "default" : "pointer" }}
+                        >
+                          {CURRENCY_LIST.map((c) => <option key={c.code} value={c.code}>{c.flag} {c.code} · {c.symbol}</option>)}
+                        </select>
+                        <ChevronDown size={14} strokeWidth={2} color={color.gray400} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+                      </div>
+                    </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {doc.items.map((it, i) => {
                         const isDragging = dragItem === i;
@@ -1604,8 +1624,8 @@ export default function Dashboard({ go }) {
                             ><GripVertical size={16} strokeWidth={2} /></button>
                           )}
                           <input id={i === 0 ? "ed-item0" : undefined} className="db-input" value={it.desc} onChange={updItem(i, "desc")} maxLength={LIMITS.itemDesc} placeholder="Item" style={{ ...inp(), flex: 1, textDecoration: it.hidden ? "line-through" : "none", color: it.hidden ? color.gray400 : color.ink }} />
-                          <div className="db-input" style={{ display: "flex", alignItems: "center", gap: 4, flex: "none", width: 118, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "0 10px", background: it.hidden ? color.surface : color.white }}>
-                            <span style={{ fontSize: 13, color: color.gray400 }}>R$</span>
+                          <div className="db-input" style={{ display: "flex", alignItems: "center", gap: 4, flex: "none", width: 128, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "0 10px", background: it.hidden ? color.surface : color.white }}>
+                            <span style={{ fontSize: 13, color: color.gray400 }}>{currencyOf(doc.currency).symbol}</span>
                             <input value={it.value} onChange={updItem(i, "value")} maxLength={LIMITS.itemValue} inputMode="numeric" placeholder="0" style={{ width: "100%", border: "none", outline: "none", fontFamily: font.body, fontSize: 14, padding: "10px 0", background: "transparent", textDecoration: it.hidden ? "line-through" : "none", color: it.hidden ? color.gray400 : color.ink }} />
                           </div>
                           <span className="db-tip" data-tip={it.hidden ? "Cliente não vê nem paga. Clique para mostrar" : "Ocultar do cliente (não cobra)"} style={{ flex: "none", display: "flex" }}>
@@ -1669,7 +1689,7 @@ export default function Dashboard({ go }) {
               <div className="db-foot-summary">
                 <span className="db-foot-cap">Você vai cobrar</span>
                 <span className="db-foot-line">
-                  <span className="db-foot-money">{brl(total)}</span>
+                  <span className="db-foot-money">{formatMoney(total, doc.currency)}</span>
                   <span className="db-foot-meta">· {itemCount} {itemCount === 1 ? "item" : "itens"}</span>
                 </span>
               </div>
@@ -2907,9 +2927,12 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
   const [toastsOn, setToastsOn] = useState(() => toastsEnabled(user?.email));
   const [gmail, setGmail] = useState(null); // { configured, connected, email }
   const [gmailBusy, setGmailBusy] = useState(false);
+  const [currency, setCurrency] = useState(user?.currency || DEFAULT_CURRENCY);
+  const [savingCur, setSavingCur] = useState(false);
 
   useEffect(() => {
     setName(user?.name || "");
+    setCurrency(user?.currency || DEFAULT_CURRENCY);
     setToastsOn(toastsEnabled(user?.email));
     try { setBio(localStorage.getItem(bioKeyFor(user?.email)) || ""); } catch { /* ignore */ }
   }, [user]);
@@ -2952,6 +2975,21 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
       if (pushToast) pushToast("Gmail desconectado.", "success");
     } catch (e) { if (pushToast) pushToast(e.message || "Não foi possível desconectar.", "info"); }
     finally { setGmailBusy(false); }
+  };
+
+  // Moeda padrão da conta: salva na hora ao trocar (é uma preferência, não formulário).
+  const saveCurrency = async (code) => {
+    const prev = currency;
+    setCurrency(code);
+    setSavingCur(true);
+    try {
+      const { user: u } = await api.updateProfile({ currency: code });
+      if (setUser) setUser(u);
+      if (pushToast) pushToast(`Moeda da conta: ${currencyOf(code).name}.`, "success");
+    } catch (e) {
+      setCurrency(prev);
+      if (pushToast) pushToast(e.message || "Não foi possível salvar a moeda.", "info");
+    } finally { setSavingCur(false); }
   };
 
   const saveName = async () => {
@@ -3066,6 +3104,28 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
             <button onClick={saveName} disabled={!nameDirty || savingName} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "0 18px", opacity: nameDirty ? 1 : 0.55 }}>{savingName ? "Salvando…" : "Salvar"}</button>
           </div>
           <div style={{ fontSize: 12, color: color.gray400, marginTop: 7 }}>É o nome que aparece para os seus clientes.</div>
+        </div>
+
+        <div style={card}>
+          <div style={hTitle}>Moeda</div>
+          <p style={subTxt}>A moeda padrão da sua conta. Toda proposta nova começa nela (você pode trocar por proposta), e é a moeda inicial do dashboard.</p>
+          <label style={fieldLabel}>Moeda principal</label>
+          <div style={{ position: "relative", maxWidth: 320 }}>
+            <select
+              value={currency}
+              onChange={(e) => saveCurrency(e.target.value)}
+              disabled={savingCur}
+              style={{ ...inp(), appearance: "none", paddingRight: 38, cursor: "pointer" }}
+            >
+              {CURRENCY_LIST.map((c) => (
+                <option key={c.code} value={c.code}>{c.flag} {c.name} ({c.symbol} · {c.code})</option>
+              ))}
+            </select>
+            <ChevronDown size={16} strokeWidth={2} color={color.gray400} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+          </div>
+          <div style={{ fontSize: 12, color: color.gray400, marginTop: 7 }}>
+            {savingCur ? "Salvando…" : `Exibindo valores como ${currencyOf(currency).symbol} — ex.: ${currencyOf(currency).symbol} 1.500`}
+          </div>
         </div>
 
         <div style={card}>

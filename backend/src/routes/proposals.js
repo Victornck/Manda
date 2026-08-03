@@ -6,6 +6,8 @@ import { requireAuth } from "../middleware/auth.js";
 import { writeLimiter, emailSendLimiter } from "../middleware/rateLimit.js";
 import { proposalSchema, statusSchema } from "../lib/validate.js";
 import { publicId } from "../lib/ids.js";
+import { getRates, convertWith } from "../lib/rates.js";
+import { normalizeCurrency } from "../lib/currency.js";
 import { PLAN_LIMITS, templateAllowed } from "../lib/plans.js";
 import { getFreshAccess } from "../lib/googleAccount.js";
 import { buildRawEmail, sendGmail } from "../lib/googleMail.js";
@@ -39,7 +41,7 @@ const toProposal = (p) => ({
   title: p.title, scope: p.scope, items: p.items, start: p.start_date, end: p.end_date,
   payment: p.payment, revisions: p.revisions, validity: p.validity, bio: p.bio,
   accent: p.accent, accent2: p.accent2, gradient: p.gradient, theme: p.theme, watermark: p.watermark, logo: p.logo, cover: p.cover,
-  template: p.template, status: p.status, value: Number(p.value),
+  template: p.template, status: p.status, value: Number(p.value), currency: p.currency || "BRL",
   createdAt: p.created_at, updatedAt: p.updated_at,
 });
 
@@ -48,13 +50,13 @@ const toProposal = (p) => ({
 r.get("/", async (req, res, next) => {
   try {
     const { rows } = await query(
-      "select id, public_id, client, company, client_email, title, status, value, created_at, updated_at from proposals where user_id=$1 order by created_at desc",
+      "select id, public_id, client, company, client_email, title, status, value, currency, created_at, updated_at from proposals where user_id=$1 order by created_at desc",
       [req.user.id]
     );
     res.json({
       proposals: rows.map((p) => ({
         id: p.id, publicId: p.public_id, client: p.client, company: p.company, clientEmail: p.client_email,
-        title: p.title, status: p.status, value: Number(p.value), createdAt: p.created_at, updatedAt: p.updated_at,
+        title: p.title, status: p.status, value: Number(p.value), currency: p.currency || "BRL", createdAt: p.created_at, updatedAt: p.updated_at,
       })),
     });
   } catch (e) { next(e); }
@@ -158,15 +160,20 @@ r.get("/dashboard", async (req, res, next) => {
     // dos KPIs olha o total/mês. Preso a limites seguros pra não virar consulta pesada.
     const days = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 30));
 
-    const [kpi, funil, tempo, ativos, serie, templates, atividade, quentes] = await Promise.all([
+    // Moeda de exibição: ?display= (troca rápida no dashboard) ou a moeda da conta.
+    // Todos os valores monetários são convertidos para ela com a cotação atual.
+    const ucur = await query("select currency from users where id=$1", [uid]);
+    const display = normalizeCurrency(req.query.display || ucur.rows[0]?.currency || "BRL");
+    const { rates, updatedAt, stale } = await getRates("BRL");
+    const conv = (amount, from) => convertWith(rates, amount, from || "BRL", display);
+
+    const [counts, funil, tempo, ativos, serie, templates, atividade, emNego, ticket, quentes] = await Promise.all([
       query(`select
-          coalesce(sum(value) filter (where status in ('sent','viewed')),0) as em_negociacao,
           count(*) filter (where created_at >= date_trunc('month', now())) as criadas_mes,
           count(*) filter (where created_at >= date_trunc('month', now()-interval '1 month')
                              and created_at <  date_trunc('month', now())) as criadas_mes_ant,
           count(*) filter (where status <> 'draft') as enviadas_total,
-          count(*) filter (where status = 'accepted') as aceitas_total,
-          coalesce(round(avg(value) filter (where value > 0)),0) as valor_medio
+          count(*) filter (where status = 'accepted') as aceitas_total
         from proposals where user_id=$1`, [uid]),
       query(`select
           count(*) filter (where status='draft')    as rascunho,
@@ -189,31 +196,66 @@ r.get("/dashboard", async (req, res, next) => {
         from proposal_events e join proposals p on p.id=e.proposal_id
         where p.user_id=$1 and e.type in ('viewed','accepted','declined','emailed')
         order by e.created_at desc limit 8`, [uid]),
-      query(`select coalesce(nullif(trim(p.client),''),'Sem cliente') as client,
+      // Valores monetários vêm agrupados POR MOEDA; a conversão pra moeda de
+      // exibição acontece aqui no Node, com a cotação atual.
+      query(`select currency, coalesce(sum(value) filter (where status in ('sent','viewed')),0) as v
+        from proposals where user_id=$1 group by currency`, [uid]),
+      query(`select currency, coalesce(sum(value) filter (where value>0),0) as s,
+               count(*) filter (where value>0)::int as n
+        from proposals where user_id=$1 group by currency`, [uid]),
+      // Clientes quentes por (cliente, moeda). O join com eventos é agregado por
+      // proposta (lateral) pra não inflar o valor; a junção por cliente e a
+      // conversão de moeda acontecem no Node logo abaixo.
+      query(`select coalesce(nullif(trim(p.client),''),'Sem cliente') as client, p.currency,
                coalesce(sum(p.value) filter (where p.status in ('sent','viewed')),0) as em_negociacao,
-               count(*) filter (where e.type='viewed')::int as views,
-               max(e.created_at) filter (where e.type='viewed') as ultima_abertura
-        from proposals p left join proposal_events e on e.proposal_id=p.id
-        where p.user_id=$1 group by 1
-        having count(*) filter (where e.type='viewed') > 0
-            or coalesce(sum(p.value) filter (where p.status in ('sent','viewed')),0) > 0
-        order by views desc, em_negociacao desc limit 5`, [uid]),
+               coalesce(sum(ev.views),0)::int as views,
+               max(ev.last_view) as ultima_abertura
+        from proposals p
+        left join lateral (
+          select count(*) filter (where e.type='viewed') as views,
+                 max(e.created_at) filter (where e.type='viewed') as last_view
+          from proposal_events e where e.proposal_id=p.id
+        ) ev on true
+        where p.user_id=$1 group by 1,2`, [uid]),
     ]);
 
-    const k = kpi.rows[0] || {};
+    const c = counts.rows[0] || {};
     const f = funil.rows[0] || {};
-    const enviadasTotal = num(k.enviadas_total);
-    const aceitasTotal = num(k.aceitas_total);
+    const enviadasTotal = num(c.enviadas_total);
+    const aceitasTotal = num(c.aceitas_total);
+
+    // Em negociação: soma das parcelas de cada moeda, já convertidas.
+    const emNegociacao = emNego.rows.reduce((a, r) => a + conv(num(r.v), r.currency), 0);
+    // Ticket médio: soma dos valores convertidos / total de propostas com valor.
+    const ticketSoma = ticket.rows.reduce((a, r) => a + conv(num(r.s), r.currency), 0);
+    const ticketN = ticket.rows.reduce((a, r) => a + num(r.n), 0);
+
+    // Clientes quentes: junta as moedas por cliente (convertendo cada parcela),
+    // depois filtra, ordena e corta em 5.
+    const hotMap = new Map();
+    for (const r of quentes.rows) {
+      const g = hotMap.get(r.client) || { client: r.client, emNegociacao: 0, views: 0, ultimaAbertura: null };
+      g.emNegociacao += conv(num(r.em_negociacao), r.currency);
+      g.views += num(r.views);
+      if (r.ultima_abertura && (!g.ultimaAbertura || new Date(r.ultima_abertura) > new Date(g.ultimaAbertura))) g.ultimaAbertura = r.ultima_abertura;
+      hotMap.set(r.client, g);
+    }
+    const clientesQuentes = [...hotMap.values()]
+      .filter((g) => g.views > 0 || g.emNegociacao > 0)
+      .sort((a, b) => b.views - a.views || b.emNegociacao - a.emNegociacao)
+      .slice(0, 5)
+      .map((g) => ({ client: g.client, emNegociacao: Math.round(g.emNegociacao), views: g.views, ultimaAbertura: g.ultimaAbertura }));
 
     res.json({
+      moeda: { display, atualizadaEm: updatedAt, desatualizada: stale },
       kpis: {
-        emNegociacao: num(k.em_negociacao),
-        criadasMes: num(k.criadas_mes),
-        criadasMesAnt: num(k.criadas_mes_ant),
+        emNegociacao: Math.round(emNegociacao),
+        criadasMes: num(c.criadas_mes),
+        criadasMesAnt: num(c.criadas_mes_ant),
         taxaAceitacao: enviadasTotal ? Math.round((aceitasTotal / enviadasTotal) * 100) : 0,
         clientesAtivos: num(ativos.rows[0]?.n),
         tempoMedioAceite: Math.round(num(tempo.rows[0]?.dias) * 10) / 10,
-        valorMedio: num(k.valor_medio),
+        valorMedio: ticketN ? Math.round(ticketSoma / ticketN) : 0,
       },
       funil: {
         rascunho: num(f.rascunho), enviada: num(f.enviada), visualizada: num(f.visualizada),
@@ -227,9 +269,7 @@ r.get("/dashboard", async (req, res, next) => {
       atividade: atividade.rows.map((a) => ({
         type: a.type, client: a.client, title: a.title, publicId: a.public_id, createdAt: a.created_at,
       })),
-      clientesQuentes: quentes.rows.map((c) => ({
-        client: c.client, emNegociacao: num(c.em_negociacao), views: c.views, ultimaAbertura: c.ultima_abertura,
-      })),
+      clientesQuentes,
     });
   } catch (e) { next(e); }
 });
@@ -267,9 +307,9 @@ r.post("/", writeLimiter, async (req, res, next) => {
       }
     }
     const { rows } = await query(
-      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value, logo, cover, theme, watermark)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning *`,
-      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark]
+      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value, logo, cover, theme, watermark, currency)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) returning *`,
+      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark, d.currency]
     );
     // Registra o uso (append-only). Nunca é apagado ao excluir a proposta.
     await query("insert into proposal_usage (user_id) values ($1)", [req.user.id]).catch(() => {});
@@ -292,9 +332,9 @@ r.put("/:id", writeLimiter, async (req, res, next) => {
       return res.status(409).json({ error: "Esta proposta já foi enviada e não pode ser editada. Crie uma nova." });
     }
     const { rows } = await query(
-      `update proposals set client=$3, company=$4, client_email=$5, title=$6, scope=$7, items=$8, start_date=$9, end_date=$10, payment=$11, revisions=$12, validity=$13, bio=$14, accent=$15, accent2=$16, gradient=$17, template=$18, value=$19, logo=$20, cover=$21, theme=$22, watermark=$23, updated_at=now()
+      `update proposals set client=$3, company=$4, client_email=$5, title=$6, scope=$7, items=$8, start_date=$9, end_date=$10, payment=$11, revisions=$12, validity=$13, bio=$14, accent=$15, accent2=$16, gradient=$17, template=$18, value=$19, logo=$20, cover=$21, theme=$22, watermark=$23, currency=$24, updated_at=now()
        where id=$1 and user_id=$2 returning *`,
-      [req.params.id, req.user.id, d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark]
+      [req.params.id, req.user.id, d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark, d.currency]
     );
     if (!rows[0]) return res.status(404).json({ error: "Proposta não encontrada." });
     res.json({ proposal: toProposal(rows[0]) });

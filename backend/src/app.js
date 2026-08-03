@@ -15,6 +15,7 @@ import billingRoutes from "./routes/billing.js";
 import webhookRoutes from "./routes/webhook.js";
 import feedbackRoutes from "./routes/feedback.js";
 import uploadRoutes from "./routes/uploads.js";
+import currencyRoutes from "./routes/currency.js";
 import { uploadsDir } from "./lib/uploads.js";
 
 // Cria e configura o app Express, SEM abrir porta nem subir jobs. Assim os
@@ -58,6 +59,7 @@ app.use("/api/public", publicLimiter, publicRoutes);
 app.use("/api/billing", billingLimiter, billingRoutes);
 app.use("/api/feedback", feedbackRoutes);
 app.use("/api/uploads", uploadRoutes);
+app.use("/api", currencyRoutes);
 
 // Imagens enviadas (logo/capa), servidas do disco no MESMO domínio do app, então
 // o "Baixar PDF" (html2canvas) não quebra por CORS. Nomes são únicos, cache longo.

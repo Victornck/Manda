@@ -1,4 +1,5 @@
-import { font, color, brl } from "../theme.js";
+import { font, color } from "../theme.js";
+import { formatMoney } from "../lib/currency.js";
 
 // Conteúdo de exemplo usado nas miniaturas da galeria.
 export const SAMPLE_DOC = {
@@ -158,7 +159,10 @@ const filledItems = (doc) => doc.items.filter((it) => !it.hidden && (has(it.desc
 const sum = (arr) => arr.reduce((a, it) => a + (parseInt(it.value, 10) || 0), 0);
 // Valor vazio não vira "R$ 0": fica em branco, para dar itens só de entrega
 // (lista de deliverables) com o preço só onde o usuário preencher.
-const money = (v) => (has(v) ? brl(parseInt(v, 10) || 0) : "");
+// Valor de item: em branco quando vazio; senão formatado na moeda da proposta.
+const money = (v, cur = "BRL") => (has(v) ? formatMoney(parseInt(v, 10) || 0, cur) : "");
+// Total: sempre formatado (mostra até zero) na moeda da proposta.
+const fmt = (n, cur = "BRL") => formatMoney(n, cur);
 const kicker = (c) => ({ fontSize: "11px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: c, marginBottom: 8 });
 
 // Markdown mínimo e SEGURO (retorna nós React, sem HTML cru, sem risco de XSS):
@@ -242,13 +246,13 @@ function Minimal({ doc, accent, onAccept, onEdit }) {
           <div style={{ border: `1px solid ${hairFor(accent, T)}`, borderRadius: 11, overflow: "hidden", marginBottom: 12 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "11px 14px", borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none", fontSize: "13.5px" }}>
-                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
               </div>
             ))}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, background: soft, borderRadius: 10, padding: "12px 14px" }}>
             <span style={{ fontSize: 13, color: deep, fontWeight: 600 }}>Total</span>
-            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 24, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: deep }}>{brl(total)}</span>
+            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 24, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: deep }}>{fmt(total, doc.currency)}</span>
           </div>
         </>)}
 
@@ -295,13 +299,13 @@ function Bold({ doc, accent, onAccept, onEdit }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px dashed ${T.line}`, fontSize: 14 }}>
-                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
               </div>
             ))}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 22 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: T.sub }}>Total</span>
-            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 34, letterSpacing: "-0.03em", color: accentInkFor(accent, T), fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 34, letterSpacing: "-0.03em", color: accentInkFor(accent, T), fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
           </div>
         </>)}
         {chips.length > 0 && (
@@ -364,12 +368,12 @@ function Editorial({ doc, accent, onAccept, onEdit }) {
         <div style={{ ...rule, marginBottom: 0 }} />
         {items.map((it, i) => (
           <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${T.line}`, fontSize: "13.5px" }}>
-            <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+            <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
           </div>
         ))}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "12px 14px", marginTop: 8, background: soft, borderRadius: 8 }}>
           <span style={{ fontSize: "10.5px", letterSpacing: "0.08em", textTransform: "uppercase", color: deep }}>Total</span>
-          <span style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 22, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: deep }}>{brl(total)}</span>
+          <span style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 22, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: deep }}>{fmt(total, doc.currency)}</span>
         </div>
       </>)}
       {conds.length > 0 && (
@@ -413,12 +417,12 @@ function Colorido({ doc, accent, onAccept, onEdit }) {
           <div style={{ background: soft, borderRadius: 14, padding: "16px 18px", marginBottom: 20 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: i < items.length - 1 ? `1px solid ${hairFor(accent, T)}` : "none", fontSize: "13.5px" }}>
-                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
               </div>
             ))}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", paddingTop: 12, marginTop: 6, borderTop: `1px solid ${hairFor(accent, T)}` }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: deep }}>Total</span>
-              <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 24, letterSpacing: "-0.02em", color: deep, fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+              <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 24, letterSpacing: "-0.02em", color: deep, fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
             </div>
           </div>
         )}
@@ -475,13 +479,13 @@ function Capa({ doc, accent, onAccept, onEdit }) {
           <div style={{ border: `1px solid ${hairFor(accent, T)}`, borderRadius: 11, overflow: "hidden", marginBottom: 12 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "11px 14px", borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none", fontSize: "13.5px" }}>
-                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
               </div>
             ))}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22, background: panelFor(accent, T), borderRadius: 10, padding: "12px 14px" }}>
             <span style={{ fontSize: 13, color: deep, fontWeight: 600 }}>Total</span>
-            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 24, letterSpacing: "-0.02em", color: deep, fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 24, letterSpacing: "-0.02em", color: deep, fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
           </div>
         </>)}
         {dates.length > 0 && (
@@ -524,13 +528,13 @@ function Dossie({ doc, accent, onAccept, onEdit }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "11px 0", borderBottom: "1px solid #222", fontSize: 14 }}>
-                <span style={{ color: "#D4D4D8" }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+                <span style={{ color: "#D4D4D8" }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
               </div>
             ))}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 22, background: darken(accent, 0.72), border: `1px solid ${darken(accent, 0.5)}`, borderRadius: 10, padding: "12px 15px" }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "#B9B9C0" }}>Total</span>
-            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 32, letterSpacing: "-0.03em", color: onDark(accent), fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 32, letterSpacing: "-0.03em", color: onDark(accent), fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
           </div>
         </>)}
         {chips.length > 0 && (
@@ -582,13 +586,13 @@ function Carta({ doc, accent, onAccept, onEdit }) {
           {items.map((it, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 14, padding: "9px 2px", borderBottom: i < items.length - 1 ? `1px dotted ${line}` : "none", fontSize: "13.5px" }}>
               <span style={{ fontFamily: serif, color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span>
-              <span style={{ fontFamily: serif, fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+              <span style={{ fontFamily: serif, fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
             </div>
           ))}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 24, background: soft, borderRadius: 8, padding: "12px 14px" }}>
           <span style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: deep }}>Investimento total</span>
-          <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 26, color: deep, fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+          <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 26, color: deep, fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
         </div>
       </>)}
 
@@ -651,12 +655,12 @@ function Recibo({ doc, accent, onAccept, onEdit }) {
           <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6, padding: "5px 0", fontSize: "12.5px" }}>
             <span style={{ color: T.sub, flex: "none", maxWidth: "62%" }}>{(it.desc || "Item").toUpperCase()}</span>
             <span style={{ flex: 1, borderBottom: `1.5px dotted ${dash}`, transform: "translateY(-3px)" }} />
-            <span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+            <span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
           </div>
         ))}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 12, paddingTop: 12, borderTop: `2px solid ${accent}` }}>
           <span style={{ fontSize: "12px", fontWeight: 700, letterSpacing: "0.08em", color: deep }}>TOTAL</span>
-          <span style={{ fontSize: "22px", fontWeight: 700, color: deep, fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+          <span style={{ fontSize: "22px", fontWeight: 700, color: deep, fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
         </div>
       </>)}
       {meta.length > 0 && (<>
@@ -705,12 +709,12 @@ function Aurora({ doc, accent, onAccept, onEdit }) {
         <div style={{ background: glass, backdropFilter: "blur(6px)", border: `1px solid ${hairFor(accent, T)}`, borderRadius: 16, padding: "16px 18px", marginBottom: 18, boxShadow: "0 8px 24px -14px rgba(20,20,30,0.18)" }}>
           {items.map((it, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none", fontSize: "13.5px" }}>
-              <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+              <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
             </div>
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", paddingTop: 12, marginTop: 6, borderTop: `1px solid ${T.line}` }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: deep }}>Total</span>
-            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 25, letterSpacing: "-0.02em", color: deep, fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 25, letterSpacing: "-0.02em", color: deep, fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
           </div>
         </div>
       )}
@@ -757,7 +761,7 @@ function Studio({ doc, accent, onAccept, onEdit }) {
         {items.length > 0 && (
           <div style={{ marginTop: "auto", paddingTop: 16, borderTop: "1px solid #26262A" }}>
             <div style={{ fontSize: "9.5px", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#77777D", marginBottom: 4 }}>Total</div>
-            <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 21, letterSpacing: "-0.02em", color: onDark(accent), fontVariantNumeric: "tabular-nums" }}>{brl(total)}</div>
+            <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 21, letterSpacing: "-0.02em", color: onDark(accent), fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</div>
           </div>
         )}
       </div>
@@ -773,7 +777,7 @@ function Studio({ doc, accent, onAccept, onEdit }) {
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none", fontSize: "13.5px" }}>
                 <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span>
-                <span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+                <span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
               </div>
             ))}
           </div>
@@ -829,13 +833,13 @@ function Grande({ doc, accent, onAccept, onEdit }) {
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 14, borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none", paddingBottom: 9 }}>
                 <span style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 16, letterSpacing: "-0.01em", color: T.ink }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span>
-                <span style={{ fontWeight: 700, color: T.sub, fontVariantNumeric: "tabular-nums", flex: "none" }}>{money(it.value)}</span>
+                <span style={{ fontWeight: 700, color: T.sub, fontVariantNumeric: "tabular-nums", flex: "none" }}>{money(it.value, doc.currency)}</span>
               </div>
             ))}
           </div>
           <div style={{ borderTop: `2px solid ${accent}`, paddingTop: 14, marginBottom: 22, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
             <span style={{ fontSize: "12px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: deep }}>Valor de investimento</span>
-            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 32, letterSpacing: "-0.02em", color: deep, fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 32, letterSpacing: "-0.02em", color: deep, fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
           </div>
         </>)}
 
@@ -889,13 +893,13 @@ function Poster({ doc, accent, onAccept, onEdit }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none", fontSize: 14 }}>
-                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value)}</span>
+                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
               </div>
             ))}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 22, background: panelFor(accent, T), borderRadius: 10, padding: "12px 15px" }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: deep }}>Total</span>
-            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 30, letterSpacing: "-0.03em", color: deep, fontVariantNumeric: "tabular-nums" }}>{brl(total)}</span>
+            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 30, letterSpacing: "-0.03em", color: deep, fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
           </div>
         </>)}
         {dates.length > 0 && (
