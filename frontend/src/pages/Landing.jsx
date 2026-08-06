@@ -223,7 +223,7 @@ export default function Landing({ go }) {
         .lp-feat-cell{ background:${color.ink}; padding:26px 24px; }
         .lp-out{ display:grid; grid-template-columns:repeat(3,1fr); gap:22px; }
         .lp-out-card{ border:1px solid ${color.line}; border-radius:18px; padding:28px 26px; background:#fff; transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
-        .lp-out-card:hover{ box-shadow:0 18px 40px -20px rgba(20,20,30,0.2); transform:translateY(-3px); }
+        @media (hover:hover) and (pointer:fine){ .lp-out-card:hover{ box-shadow:0 18px 40px -20px rgba(20,20,30,0.2); transform:translateY(-3px); } }
         .lp-out-icon{ width:46px; height:46px; border-radius:13px; display:flex; align-items:center; justify-content:center; margin-bottom:20px; }
         .lp-out-big{ font-family:${font.heading}; font-weight:800; font-size:26px; line-height:1.08; letter-spacing:-0.02em; margin-bottom:10px; }
         .lp-out-p{ font-size:15px; line-height:1.55; color:${color.gray600}; margin:0 0 20px; }

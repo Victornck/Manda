@@ -109,7 +109,7 @@ export function SupportChatBody({ variant = "panel" }) {
         .scb-kick{ font-family:${font.heading}; font-size:10.5px; font-weight:700; letter-spacing:0.11em; text-transform:uppercase; color:${color.gray400}; margin:12px 0 7px 35px; }
         .scb-chips{ display:flex; flex-direction:column; gap:8px; margin-left:35px; }
         .scb-chip{ display:flex; align-items:center; justify-content:space-between; gap:12px; text-align:left; font-family:${font.body}; font-size:13px; font-weight:500; color:${color.ink}; background:#fff; border:1px solid #ECE6DF; border-left:2.5px solid ${color.accent}; border-radius:11px; padding:10px 13px; cursor:pointer; transition:transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
-        .scb-chip:hover{ transform:translateX(3px); box-shadow:0 8px 20px -12px rgba(30,25,20,0.35); }
+        @media (hover:hover) and (pointer:fine){ .scb-chip:hover{ transform:translateX(3px); box-shadow:0 8px 20px -12px rgba(30,25,20,0.35); } }
         .scb-chip svg{ color:${color.accent}; flex:none; opacity:.55; transition:opacity .14s ease, transform .14s ease; }
         .scb-chip:hover svg{ opacity:1; transform:translateX(3px); }
         .scb-dots{ display:flex; gap:4px; padding:13px 15px; background:#fff; border:1px solid #ECE6DF; border-radius:16px; border-bottom-left-radius:5px; }
@@ -173,7 +173,7 @@ export default function SupportChat({ raised = false, onOpenPage }) {
     <>
       <style>{`
         .sc-fab{ position:fixed; right:22px; bottom:22px; z-index:120; display:inline-flex; align-items:center; gap:9px; height:50px; padding:0 18px 0 15px; border-radius:999px; border:none; cursor:pointer; background:${color.ink}; color:#fff; font-family:${font.heading}; font-weight:700; font-size:14.5px; letter-spacing:-0.01em; box-shadow:0 14px 34px -12px rgba(0,0,0,0.5); transition:transform .16s ease, background .16s ease; }
-        .sc-fab:hover{ transform:translateY(-2px); background:#262626; }
+        @media (hover:hover) and (pointer:fine){ .sc-fab:hover{ transform:translateY(-2px); background:#262626; } }
         .sc-fab:active{ transform:scale(.97); }
         .sc-raised{ bottom:92px; }
         .sc-panel{ position:fixed; right:22px; bottom:22px; z-index:121; width:392px; max-width:calc(100vw - 32px); height:588px; max-height:calc(100vh - 44px); background:#fff; border:1px solid #ECE6DF; border-radius:20px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 44px 96px -30px rgba(30,20,10,0.5); animation:scUp .22s cubic-bezier(.2,.8,.2,1) both; }

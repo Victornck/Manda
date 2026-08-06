@@ -1023,7 +1023,7 @@ export default function Dashboard({ go }) {
         .db-onb-done{ background:linear-gradient(180deg, ${color.accentTint} 0%, #fff 70%); }
         .db-onb-trophy{ width:44px; height:44px; flex:none; border-radius:50%; background:#EAF5EE; color:#2E7D51; display:flex; align-items:center; justify-content:center; }
         .db-onb-bar{ height:7px; border-radius:999px; background:${color.surface}; overflow:hidden; }
-        .db-onb-bar span{ display:block; height:100%; background:${color.accent}; border-radius:999px; transition:width .45s cubic-bezier(.2,.8,.2,1); }
+        .db-onb-bar span{ display:block; height:100%; width:100%; transform-origin:left; background:${color.accent}; border-radius:999px; transition:transform .45s cubic-bezier(.2,.8,.2,1); }
         /* Mobile: no passo ativo do onboarding, o botão desce pra baixo do texto em vez de espremer a coluna. */
         @media (max-width:560px){
           .db-onb-row{ flex-wrap:wrap; row-gap:12px; }
@@ -1055,7 +1055,7 @@ export default function Dashboard({ go }) {
         @media (max-width:720px){ .db-plans-grid{ grid-template-columns:1fr; } }
         .db-dsn-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:22px; }
         .db-dsn-card{ border:1px solid ${color.line2}; border-radius:14px; overflow:hidden; background:#fff; transition:box-shadow .16s ease, transform .16s ease, border-color .16s ease; }
-        .db-dsn-card:hover{ box-shadow:0 20px 44px -20px rgba(20,20,30,0.3); transform:translateY(-4px); border-color:${color.gray200}; }
+        @media (hover:hover) and (pointer:fine){ .db-dsn-card:hover{ box-shadow:0 20px 44px -20px rgba(20,20,30,0.3); transform:translateY(-4px); border-color:${color.gray200}; } }
         .db-dsn-thumb{ position:relative; height:300px; overflow:hidden; background:${color.surface2}; border-bottom:1px solid ${color.line2}; }
         .db-dsn-thumb::after{ content:""; position:absolute; left:0; right:0; bottom:0; height:56px; background:linear-gradient(180deg, rgba(245,245,247,0) 0%, ${color.surface2} 96%); pointer-events:none; }
         .db-dsn-badges{ position:absolute; top:12px; left:12px; z-index:2; display:flex; gap:6px; }
@@ -1173,6 +1173,13 @@ export default function Dashboard({ go }) {
         .db-in-0{ animation:dbUp .5s ease both; }
         .db-in-1{ animation:dbUp .5s .12s both; }
         .db-in-2{ animation:dbUp .5s .24s both; }
+        /* Menos movimento: troca as entradas com deslocamento por um fade suave.
+           Spinners e feedback essencial (rotação de carregamento) continuam. */
+        @media (prefers-reduced-motion: reduce){
+          .db-onb, .db-flow, .db-flow-card, .db-plans-card, .db-toast, .db-step, .db-tick, .db-in-0, .db-in-1, .db-in-2{ animation:dbFade .2s ease both !important; }
+          .db-steps-out{ animation:none !important; }
+          .db-onb-bar span, .db-sw i::after, .db-chk .db-chk-box svg{ transition:none !important; }
+        }
         .db-in-3{ animation:dbUp .55s .38s both; }
         .db-intro{ position:fixed; inset:0; z-index:300; background:radial-gradient(120% 100% at 30% 10%,#2A1712 0%,#0A0A0A 62%); display:flex; align-items:center; justify-content:center; animation:dbIntroOut .6s .15s cubic-bezier(.4,0,.2,1) forwards; }
         .db-intro-mark{ width:64px; height:64px; border-radius:16px; background:#fff; color:#0A0A0A; display:flex; align-items:center; justify-content:center; font-family:${font.heading}; font-weight:900; font-size:34px; animation:dbIntroMark .55s ease forwards; }
@@ -2584,7 +2591,7 @@ function OnboardingCard({ steps, done, onNew, goSettings, onSkip, onFinish }) {
         <span style={{ flex: "none", fontSize: "12.5px", fontWeight: 700, color: color.accentInk, background: color.accentTint, padding: "4px 11px", borderRadius: 999, fontVariantNumeric: "tabular-nums" }}>{pct}%</span>
       </div>
       <div style={{ fontSize: "13px", color: color.gray500, marginBottom: 13 }}>{doneCount} de {items.length} passos concluídos</div>
-      <div className="db-onb-bar"><span style={{ width: `${pct}%` }} /></div>
+      <div className="db-onb-bar"><span style={{ transform: `scaleX(${(pct || 0) / 100})` }} /></div>
 
       {/* Passos: concluído (check), atual (destacado + botão), próximos (esmaecidos + seta) */}
       <div style={{ marginTop: 16, border: `1px solid ${color.line2}`, borderRadius: 12, overflow: "hidden" }}>

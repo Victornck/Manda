@@ -137,7 +137,7 @@ function Funnel({ funil }) {
         <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ width: 84, flex: "none", fontSize: 13, color: color.gray600, fontWeight: 500 }}>{s.label}</span>
           <div style={{ flex: 1, height: 26, background: color.surface, borderRadius: 8, overflow: "hidden" }}>
-            <div style={{ width: `${Math.max(s.n ? 6 : 0, (s.n / max) * 100)}%`, height: "100%", background: s.bg, borderRight: s.n ? `2px solid ${s.b}` : "none", transition: "width .4s ease" }} />
+            <div style={{ width: "100%", height: "100%", background: s.bg, transformOrigin: "left", transform: `scaleX(${Math.max(s.n ? 0.06 : 0, s.n / max)})`, transition: "transform .4s ease" }} />
           </div>
           <span style={{ width: 26, flex: "none", textAlign: "right", fontFamily: font.heading, fontWeight: 700, fontSize: 15, color: s.c }}>{s.n}</span>
         </div>
@@ -243,11 +243,11 @@ export default function Home({ user, onNewProposal, onNavigate, onboarding }) {
         .hm-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
         .hm-cols { display: grid; grid-template-columns: 1.7fr 1fr; gap: 16px; align-items: start; }
         .hm-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-        .hm-chip { font-size: 12.5px; font-weight: 600; padding: 6px 11px; border-radius: 999px; border: 1px solid ${color.line2}; background: ${color.white}; color: ${color.gray500}; cursor: pointer; transition: all .15s; }
+        .hm-chip { font-size: 12.5px; font-weight: 600; padding: 6px 11px; border-radius: 999px; border: 1px solid ${color.line2}; background: ${color.white}; color: ${color.gray500}; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }
         .hm-chip:hover { border-color: ${color.gray300}; color: ${color.gray700}; }
         .hm-chip.on { background: ${color.ink}; color: #fff; border-color: ${color.ink}; }
-        .hm-act { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 1px solid ${color.line2}; border-radius: 12px; background: ${color.white}; cursor: pointer; text-align: left; width: 100%; transition: all .15s; }
-        .hm-act:hover { border-color: ${color.gray300}; transform: translateY(-1px); box-shadow: 0 6px 20px -12px rgba(20,20,30,0.18); }
+        .hm-act { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 1px solid ${color.line2}; border-radius: 12px; background: ${color.white}; cursor: pointer; text-align: left; width: 100%; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+        @media (hover: hover) and (pointer: fine) { .hm-act:hover { border-color: ${color.gray300}; transform: translateY(-1px); box-shadow: 0 6px 20px -12px rgba(20,20,30,0.18); } }
         .hm-link { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: ${color.accentInk}; background: none; border: none; cursor: pointer; padding: 0; }
         .hm-link:hover { color: ${color.accentHover}; }
         .hm-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid ${color.line3}; }

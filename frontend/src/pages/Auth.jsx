@@ -242,7 +242,7 @@ export default function Auth({ go, tab = "signup" }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLogin]);
 
-  const tabBase = { flex: 1, fontFamily: font.body, fontSize: "14.5px", fontWeight: 600, padding: 9, borderRadius: 8, border: "none", cursor: "pointer", transition: "all .15s" };
+  const tabBase = { flex: 1, fontFamily: font.body, fontSize: "14.5px", fontWeight: 600, padding: 9, borderRadius: 8, border: "none", cursor: "pointer", transition: "color .15s ease, background .15s ease, box-shadow .15s ease" };
   const active = { ...tabBase, background: color.white, color: color.ink, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" };
   const idle = { ...tabBase, background: "transparent", color: color.gray500 };
   const labelStyle = { fontSize: "13.5px", fontWeight: 600, color: color.gray700 };
