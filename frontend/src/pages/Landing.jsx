@@ -313,7 +313,7 @@ export default function Landing({ go }) {
                 Ver como funciona <ArrowRight className="lp-arrow" size={16} strokeWidth={2.2} />
               </button>
             </div>
-            <p style={{ fontSize: "13.5px", color: color.gray400, margin: "20px 0 0" }}>Planos a partir de R$12/mês. Você começa em menos de um minuto.</p>
+            <p style={{ fontSize: "13.5px", color: color.gray400, margin: "20px 0 0" }}>Comece grátis com 2 propostas incluídas. Sem cartão de crédito.</p>
           </div>
 
           <div style={{ animation: "mandaFadeUp .7s .1s ease both" }}>

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { templateAllowed, hasPlan, PLAN_LIMITS, PLAN_PRICES_BRL } from "../../src/lib/plans.js";
+import { templateAllowed, hasPlan, proposalCap, hasFeature, FEATURES, PLAN_PRICES_BRL } from "../../src/lib/plans.js";
 
 test("templateAllowed: Básico só libera minimal/bold", () => {
   assert.equal(templateAllowed("basic", "minimal"), true);
@@ -20,11 +20,20 @@ test("hasPlan respeita a hierarquia dos planos", () => {
   assert.equal(hasPlan("free", "basic"), false);
 });
 
-test("limites de cota por plano", () => {
-  assert.equal(PLAN_LIMITS.free.proposalsPerMonth, 0);
-  assert.equal(PLAN_LIMITS.basic.proposalsPerMonth, 5);
-  assert.equal(PLAN_LIMITS.pro.proposalsPerMonth, 25);
-  assert.equal(PLAN_LIMITS.business.proposalsPerMonth, Infinity);
+test("cota de propostas: Gratuito tem teto vitalício de 2; pagos são mensais", () => {
+  assert.deepEqual(proposalCap("free"), { scope: "total", limit: 2 });
+  assert.equal(proposalCap("basic").scope, "month");
+  assert.equal(proposalCap("basic").limit, 5);
+  assert.equal(proposalCap("pro").limit, 25);
+  assert.equal(proposalCap("business").limit, Infinity);
+});
+
+test("recursos premium: Gratuito não tem calculadora nem follow-up; pagos têm", () => {
+  assert.equal(hasFeature("free", FEATURES.CALCULATOR), false);
+  assert.equal(hasFeature("free", FEATURES.FOLLOW_UP), false);
+  assert.equal(hasFeature("basic", FEATURES.CALCULATOR), true);
+  assert.equal(hasFeature("pro", FEATURES.FOLLOW_UP), true);
+  assert.equal(hasFeature("business", FEATURES.CALCULATOR), true);
 });
 
 test("preços dos planos são consistentes (server-side)", () => {

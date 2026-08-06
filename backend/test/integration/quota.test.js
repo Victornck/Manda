@@ -5,10 +5,15 @@ import { api, newUser, grantPlan, proposalBody } from "../helpers.js";
 const create = (token, body = proposalBody()) =>
   api().post("/api/proposals").set("Authorization", `Bearer ${token}`).send(body);
 
-test("usuário sem plano (free) não consegue criar proposta (402)", async () => {
-  const { token } = await newUser();
-  const res = await create(token);
-  assert.equal(res.status, 402);
+test("Gratuito cria até 2 propostas; a 3ª é bloqueada (402, limitReached)", async () => {
+  const { token } = await newUser(); // conta nova começa no plano Gratuito
+  const p1 = await create(token, proposalBody({ title: "Grátis 1" }));
+  assert.equal(p1.status, 201, "a 1ª proposta grátis deveria ser criada");
+  const p2 = await create(token, proposalBody({ title: "Grátis 2" }));
+  assert.equal(p2.status, 201, "a 2ª proposta grátis deveria ser criada");
+  const p3 = await create(token, proposalBody({ title: "Grátis 3" }));
+  assert.equal(p3.status, 402, "a 3ª deve ser bloqueada pelo teto grátis");
+  assert.equal(p3.body.limitReached, true);
 });
 
 test("Básico cria até 5 no mês; a 6ª é bloqueada (402)", async () => {

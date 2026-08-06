@@ -16,6 +16,7 @@ import CodeInput from "../components/CodeInput.jsx";
 import SupportChat, { SupportPage } from "../components/SupportChat.jsx";
 import { PRICE_TABLE, COMPLEXITY, URGENCY, suggest, fmtBRL, DEFAULT_CONSUMO, PROJECT_DIFFICULTY } from "../lib/pricing.js";
 import { CURRENCY_LIST, currencyOf, DEFAULT_CURRENCY, formatMoney } from "../lib/currency.js";
+import { FEATURES, hasFeature as planHasFeature, isFreePlan } from "../lib/plan.js";
 
 // Versão do app (injetada pelo Vite a partir do package.json).
 const APP_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "";
@@ -60,6 +61,8 @@ const toastPrefKey = (email) => scoped("manda_pref_toasts", email);
 const calcProfileKey = (email) => scoped("manda_calc_profile", email);
 // Templates cujo selo "Novo" o usuário já dispensou (some ao clicar).
 const tplSeenKey = (email) => scoped("manda_tpl_seen", email);
+// Popup de boas-vindas do plano grátis: aparece uma vez por conta neste navegador.
+const welcomeKey = (email) => scoped("manda_welcome_seen", email);
 const toastsEnabled = (email) => { try { return localStorage.getItem(toastPrefKey(email)) !== "off"; } catch { return true; } };
 
 // Comprime/redimensiona a imagem no navegador antes de salvar: logo pequena (PNG,
@@ -181,16 +184,24 @@ export default function Dashboard({ go }) {
   const [onbLoaded, setOnbLoaded] = useState(false);    // só persiste/mostra DEPOIS de carregar o salvo
   const [onbCelebrate, setOnbCelebrate] = useState(false); // banner "Tudo pronto" (7s, só em memória)
   const [showPlans, setShowPlans] = useState(false);    // modal de planos (assinar)
-  const plansAutoShown = useRef(false);
+  const [showWelcome, setShowWelcome] = useState(false); // popup de boas-vindas (free)
+  const [limitHit, setLimitHit] = useState(false);       // bateu no teto de propostas grátis
+  const welcomeShown = useRef(false);
 
-  // Conta sem plano ativo (nunca assinou ou pagamento caducou e o reconciliador
-  // bloqueou): já abre os planos uma vez, sem esperar a pessoa tentar criar.
+  // Conta no plano Gratuito: em vez de empurrar os planos, dá as boas-vindas e
+  // explica as 2 propostas grátis. Aparece uma vez por conta neste navegador.
   useEffect(() => {
-    if (user && user.plan === "free" && !plansAutoShown.current) {
-      plansAutoShown.current = true;
-      setShowPlans(true);
-    }
+    if (!user || welcomeShown.current) return;
+    welcomeShown.current = true;
+    if (!isFreePlan(user)) return;
+    let seen = false;
+    try { seen = localStorage.getItem(welcomeKey(user.email)) === "1"; } catch { /* ignore */ }
+    if (!seen) setShowWelcome(true);
   }, [user]);
+  const dismissWelcome = () => {
+    setShowWelcome(false);
+    try { localStorage.setItem(welcomeKey(user?.email), "1"); } catch { /* ignore */ }
+  };
   const [intro, setIntro] = useState(() => { try { return sessionStorage.getItem("manda_entering") === "1"; } catch { return false; } });
   const [billingMsg, setBillingMsg] = useState(null);
   const [draftPublicId, setDraftPublicId] = useState(null); // link público da proposta em edição
@@ -722,8 +733,11 @@ export default function Dashboard({ go }) {
   const finish = async () => {
     if (!canFinish || sending) return;
     setFlowError("");
-    if (user?.plan === "free") {
-      setShowPlans(true); // abre o modal de planos em vez de bloquear com texto
+    const creatingNew = !draftId || isLocalId(draftId);
+    // Rascunho local não consome cota; ela é contada ao CONCLUIR. Bloqueia só a
+    // criação de uma proposta NOVA quando a cota acabou (Gratuito: 2 no total).
+    if (creatingNew && usage && usage.limit != null && usage.used >= usage.limit) {
+      setLimitHit(true);
       return;
     }
     setSending(true);
@@ -745,7 +759,8 @@ export default function Dashboard({ go }) {
       refreshUsage();
       setFlow("finishing");
     } catch (err) {
-      setFlowError(err.message || "Não foi possível concluir. Tente de novo.");
+      if (err?.data?.limitReached || err?.status === 402) setLimitHit(true);
+      else setFlowError(err.message || "Não foi possível concluir. Tente de novo.");
     } finally {
       setSending(false);
     }
@@ -866,7 +881,7 @@ export default function Dashboard({ go }) {
     { key: "home", label: "Início", Icon: HomeIcon },
     { key: "list", label: "Propostas", Icon: FileText },
     { key: "templates", label: "Templates", Icon: LayoutGrid },
-    { key: "calc", label: "Calculadora", Icon: Calculator },
+    { key: "calc", label: "Calculadora", Icon: Calculator, feature: FEATURES.CALCULATOR },
     { key: "clients", label: "Clientes", Icon: Users },
     { key: "notifications", label: "Notificações", Icon: Bell, badge: unread },
   ];
@@ -874,17 +889,20 @@ export default function Dashboard({ go }) {
     { key: "settings", label: "Configurações", Icon: Settings },
     { key: "support", label: "Suporte", Icon: LifeBuoy },
   ];
-  // Menu do perfil (topo da sidebar): abre com "Sair".
+  // Item de menu. Recursos premium ganham selo PRO no plano grátis e, ao clicar,
+  // abrem os planos em vez da tela (que também fica protegida no render/URL).
   const navItem = (n) => {
     const on = view === n.key || (n.key === "list" && view === "editor");
+    const locked = n.feature && !planHasFeature(user, n.feature);
     return (
-      <a key={n.key} href="#" className={on ? "on" : "idle"} title={n.label} aria-current={on ? "page" : undefined}
-        onClick={(e) => { e.preventDefault(); navTo(n.key); }}>
+      <a key={n.key} href="#" className={on ? "on" : "idle"} title={locked ? `${n.label} (planos pagos)` : n.label} aria-current={on ? "page" : undefined}
+        onClick={(e) => { e.preventDefault(); if (locked) { setShowPlans(true); return; } navTo(n.key); }}>
         <span style={{ display: "flex", flex: "none", position: "relative" }}>
           <n.Icon size={18} strokeWidth={1.9} />
           {n.badge > 0 && <span className="db-nav-dot" />}
         </span>
         <span className="db-collapsed" style={{ flex: 1 }}>{n.label}</span>
+        {locked && <span className="db-collapsed db-pro"><Lock size={11} strokeWidth={2.4} />PRO</span>}
         {n.badge > 0 && <span className="db-collapsed db-nav-badge">{n.badge}</span>}
       </a>
     );
@@ -897,8 +915,8 @@ export default function Dashboard({ go }) {
   const quotaLow = !!user && user.plan !== "free" && !usageUnlimited && remaining === 0;
   const profileSub = !user
     ? (booting ? "Carregando…" : "Não conectado")
-    : user.plan === "free"
-      ? "Sem plano ativo"
+    : isFreePlan(user)
+      ? (remaining > 0 ? `${remaining} de ${usage.limit} grátis` : "Propostas grátis usadas")
       : usageUnlimited
         ? "Propostas ilimitadas"
         : `${remaining} ${remaining === 1 ? "proposta restante" : "propostas restantes"}`;
@@ -950,6 +968,7 @@ export default function Dashboard({ go }) {
         .db-profbtn:hover{ background:${color.surface3}; border-color:${color.gray300}; }
         .db-profbtn:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
         .db-navlabel{ font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:${color.gray400}; padding:14px 12px 6px; }
+        .db-pro{ margin-left:auto; display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; letter-spacing:0.03em; color:${color.accentInk}; background:${color.accentTint}; border:1px solid ${color.accentLine}; padding:1px 6px 1px 5px; border-radius:6px; }
         .db-menuitem{ display:flex; align-items:center; gap:10px; width:100%; padding:9px 11px; border:none; background:none; border-radius:8px; font-family:${font.body}; font-size:13.5px; font-weight:500; color:${color.gray700}; cursor:pointer; text-align:left; transition:background .12s ease; }
         .db-menuitem:hover{ background:${color.surface}; color:${color.ink}; }
 
@@ -1269,16 +1288,24 @@ export default function Dashboard({ go }) {
               </div>
             </div>
 
-            {user?.plan === "free" && (
+            {isFreePlan(user) && (
               <div className="db-planbar">
                 <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-                  <span className="db-planbar-icon"><Lock size={16} strokeWidth={2.2} /></span>
+                  <span className="db-planbar-icon"><Sparkles size={16} strokeWidth={2.2} /></span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>Você está no plano grátis</div>
-                    <div style={{ fontSize: "12.5px", color: color.gray600 }}>Assine um plano para concluir e enviar propostas aos seus clientes.</div>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>
+                      {remaining > 0
+                        ? `Plano Gratuito · ${remaining} de ${usage.limit} proposta${usage.limit === 1 ? "" : "s"} grátis ${remaining === usage.limit ? "disponíveis" : "restantes"}`
+                        : "Você usou suas propostas grátis"}
+                    </div>
+                    <div style={{ fontSize: "12.5px", color: color.gray600 }}>
+                      {remaining > 0
+                        ? "Crie e envie à vontade. Quando quiser propostas ilimitadas e recursos premium, faça upgrade."
+                        : "Faça upgrade para criar propostas ilimitadas e desbloquear os recursos premium."}
+                    </div>
                   </div>
                 </div>
-                <button onClick={() => setShowPlans(true)} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "9px 16px", flex: "none" }}>Ver planos</button>
+                <button onClick={() => setShowPlans(true)} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "9px 16px", flex: "none" }}>{remaining > 0 ? "Ver planos" : "Fazer upgrade"}</button>
               </div>
             )}
 
@@ -1376,7 +1403,9 @@ export default function Dashboard({ go }) {
         ) : view === "templates" ? (
           <DesignGallery onUse={startWithDesign} plan={user?.role === "admin" ? "business" : user?.plan} onUpgrade={() => setShowPlans(true)} scope={user?.email} />
         ) : view === "calc" ? (
-          <CalculatorPanel onNewProposal={(desc, value, list) => startProposalWithItem(desc, value, list)} scope={user?.email} />
+          planHasFeature(user, FEATURES.CALCULATOR)
+            ? <CalculatorPanel onNewProposal={(desc, value, list) => startProposalWithItem(desc, value, list)} scope={user?.email} />
+            : <PremiumLock title="Calculadora de preços" desc="Descubra o preço justo do seu projeto com base em horas, custos e margem. Disponível nos planos pagos." onUpgrade={() => setShowPlans(true)} />
         ) : view === "clients" ? (
           <ClientsPanel rows={rows} onRefresh={async () => { await refreshRows(); }} />
         ) : view === "notifications" ? (
@@ -1640,8 +1669,8 @@ export default function Dashboard({ go }) {
                       <button onClick={addItem} disabled={doc.items.length >= MAX_ITEMS} className="db-btn" style={{ fontSize: "13.5px", color: color.accent, background: "none", padding: "4px 2px" }}>
                         <Plus size={15} strokeWidth={2.4} />Adicionar item
                       </button>
-                      <button onClick={() => setShowCalc(true)} disabled={doc.items.length >= MAX_ITEMS} className="db-btn" style={{ fontSize: "13.5px", color: color.gray600, background: "none", padding: "4px 2px", gap: 6 }}>
-                        <Calculator size={15} strokeWidth={2} />Calcular preço
+                      <button onClick={() => (planHasFeature(user, FEATURES.CALCULATOR) ? setShowCalc(true) : setShowPlans(true))} disabled={doc.items.length >= MAX_ITEMS} className="db-btn" style={{ fontSize: "13.5px", color: color.gray600, background: "none", padding: "4px 2px", gap: 6 }}>
+                        <Calculator size={15} strokeWidth={2} />Calcular preço{!planHasFeature(user, FEATURES.CALCULATOR) && <Lock size={12} strokeWidth={2.4} color={color.gray400} />}
                       </button>
                       {doc.items.length >= MAX_ITEMS && <span style={{ fontSize: "12.5px", color: color.gray400 }}>Limite de {MAX_ITEMS} itens.</span>}
                     </div>
@@ -1828,6 +1857,8 @@ export default function Dashboard({ go }) {
         </div>
       )}
 
+      {showWelcome && <WelcomeModal freeLimit={usage.limit || 2} onStart={dismissWelcome} onSeePlans={() => { dismissWelcome(); setShowPlans(true); }} />}
+      {limitHit && <LimitModal freeLimit={usage.limit || 2} onClose={() => setLimitHit(false)} onUpgrade={() => { setLimitHit(false); setShowPlans(true); }} />}
       {showPlans && <PlansModal onClose={() => setShowPlans(false)} />}
 
       {/* POP-UPS (somem após 4s) */}
@@ -2370,6 +2401,75 @@ function Field({ label, required, children }) {
   );
 }
 
+// Boas-vindas do plano grátis (substitui o antigo empurrão de planos).
+function WelcomeModal({ freeLimit, onStart, onSeePlans }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onStart(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onStart]);
+  return (
+    <div className="db-flow" onClick={onStart}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 440, background: "#fff", borderRadius: 18, padding: "32px 28px", textAlign: "center", boxShadow: shadow.modal }}>
+        <div style={{ width: 56, height: 56, borderRadius: 16, background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+          <Sparkles size={26} strokeWidth={2} />
+        </div>
+        <h2 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 22, letterSpacing: "-0.01em", margin: "0 0 8px" }}>Sua conta está pronta 🎉</h2>
+        <p style={{ fontSize: "14.5px", lineHeight: 1.55, color: color.gray600, margin: "0 auto 8px", maxWidth: 360 }}>
+          Você ganhou <strong>{freeLimit} propostas grátis</strong> para experimentar a plataforma — sem cartão, sem pressa.
+        </p>
+        <p style={{ fontSize: "13.5px", lineHeight: 1.55, color: color.gray500, margin: "0 auto 22px", maxWidth: 360 }}>
+          Quando quiser propostas ilimitadas e os recursos premium, é só fazer upgrade.
+        </p>
+        <button onClick={onStart} className="db-btn db-btn-accent" style={{ width: "100%", fontSize: 15, fontWeight: 600, padding: "12px", borderRadius: 11, marginBottom: 10 }}>Começar a usar</button>
+        <button onClick={onSeePlans} className="db-btn" style={{ background: "none", color: color.gray500, fontSize: "13.5px", padding: "4px" }}>Ver os planos</button>
+      </div>
+    </div>
+  );
+}
+
+// Limite de propostas grátis atingido: bloqueia e leva ao upgrade.
+function LimitModal({ freeLimit, onClose, onUpgrade }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="db-flow" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 18, padding: "30px 28px", textAlign: "center", boxShadow: shadow.modal, position: "relative" }}>
+        <button onClick={onClose} aria-label="Fechar" className="db-btn" style={{ position: "absolute", top: 12, right: 12, background: "none", color: color.gray400, padding: 4 }}><X size={20} strokeWidth={2} /></button>
+        <div style={{ width: 52, height: 52, borderRadius: 14, background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+          <Lock size={23} strokeWidth={2} />
+        </div>
+        <h2 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", margin: "0 0 8px" }}>Você usou suas {freeLimit} propostas grátis</h2>
+        <p style={{ fontSize: "14px", lineHeight: 1.55, color: color.gray600, margin: "0 auto 22px", maxWidth: 340 }}>
+          Para criar novas propostas — e desbloquear a calculadora de preços e o follow-up assistido — escolha um plano. Suas propostas atuais continuam salvas.
+        </p>
+        <button onClick={onUpgrade} className="db-btn db-btn-accent" style={{ width: "100%", fontSize: 15, fontWeight: 600, padding: "12px", borderRadius: 11, marginBottom: 10 }}>Ver planos</button>
+        <button onClick={onClose} className="db-btn" style={{ background: "none", color: color.gray500, fontSize: "13.5px", padding: "4px" }}>Agora não</button>
+      </div>
+    </div>
+  );
+}
+
+// Tela de recurso premium bloqueado (calculadora etc.) para contas grátis.
+function PremiumLock({ title, desc, onUpgrade }) {
+  return (
+    <div className="db-pad" style={{ maxWidth: 560 }}>
+      <div style={{ background: "#fff", border: `1px solid ${color.line2}`, borderRadius: 16, padding: "44px 28px", textAlign: "center" }}>
+        <div style={{ width: 52, height: 52, borderRadius: 14, background: color.accentTint, color: color.accentInk, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+          <Lock size={24} strokeWidth={1.9} />
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: color.accentInk, marginBottom: 8 }}>Recurso premium</div>
+        <h2 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, margin: "0 0 8px" }}>{title}</h2>
+        <p style={{ fontSize: "14.5px", color: color.gray500, maxWidth: 420, margin: "0 auto 20px", lineHeight: 1.55 }}>{desc}</p>
+        <button onClick={onUpgrade} className="db-btn db-btn-accent" style={{ fontSize: "14.5px", fontWeight: 600, padding: "11px 20px", borderRadius: 10 }}>Ver planos</button>
+      </div>
+    </div>
+  );
+}
+
 function PlansModal({ onClose }) {
   const [annual, setAnnual] = useState(false);
   const [busyKey, setBusyKey] = useState("");
@@ -2406,7 +2506,7 @@ function PlansModal({ onClose }) {
         <button onClick={onClose} aria-label="Fechar" className="db-btn" style={{ position: "absolute", top: 14, right: 14, background: "none", color: color.gray400, padding: 4 }}><X size={20} strokeWidth={2} /></button>
         <div style={{ textAlign: "center", marginBottom: 18 }}>
           <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 22, letterSpacing: "-0.01em" }}>Escolha seu plano</div>
-          <div style={{ fontSize: "13.5px", color: color.gray500, marginTop: 4 }}>Assine para concluir e enviar suas propostas aos clientes.</div>
+          <div style={{ fontSize: "13.5px", color: color.gray500, marginTop: 4 }}>Desbloqueie propostas ilimitadas, a calculadora de preços e o follow-up assistido.</div>
         </div>
 
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 22 }}>
@@ -3052,7 +3152,7 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
 
   const isAdmin = user?.role === "admin";
   const plan = user?.plan || "free";
-  const planLabel = isAdmin ? "Admin" : ({ free: "Sem assinatura", basic: "Básico", pro: "Pro", business: "Business" }[plan] || plan);
+  const planLabel = isAdmin ? "Admin" : ({ free: "Gratuito", basic: "Básico", pro: "Pro", business: "Business" }[plan] || plan);
   const k = stats?.kpis;
 
   // Uso do mês (cota real do backend, não burlável).

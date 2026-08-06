@@ -8,7 +8,7 @@ import { proposalSchema, statusSchema } from "../lib/validate.js";
 import { publicId } from "../lib/ids.js";
 import { getRates, convertWith } from "../lib/rates.js";
 import { normalizeCurrency } from "../lib/currency.js";
-import { PLAN_LIMITS, templateAllowed } from "../lib/plans.js";
+import { PLAN_LIMITS, templateAllowed, proposalCap, hasFeature, FEATURES } from "../lib/plans.js";
 import { getFreshAccess } from "../lib/googleAccount.js";
 import { buildRawEmail, sendGmail } from "../lib/googleMail.js";
 import { proposalEmailHtml, proposalEmailText, followUpEmailHtml, followUpEmailText } from "../lib/mailer.js";
@@ -88,16 +88,17 @@ r.get("/stats", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Uso do mês x limite do plano (para "propostas restantes"). Conta o append-only.
+// Uso x limite do plano (para "propostas restantes"). Conta o append-only. No
+// Gratuito o teto é vitalício (scope "total"); nos pagos, do mês corrente.
 r.get("/usage", async (req, res, next) => {
   try {
     const plan = await getPlan(req.user.id);
-    const limit = (PLAN_LIMITS[plan] || PLAN_LIMITS.free).proposalsPerMonth;
-    const { rows } = await query(
-      "select count(*)::int as n from proposal_usage where user_id=$1 and created_at >= date_trunc('month', now())",
-      [req.user.id]
-    );
-    res.json({ used: rows[0]?.n || 0, limit: limit === Infinity ? null : limit, plan });
+    const cap = proposalCap(plan);
+    const usageSql = cap.scope === "total"
+      ? "select count(*)::int as n from proposal_usage where user_id=$1"
+      : "select count(*)::int as n from proposal_usage where user_id=$1 and created_at >= date_trunc('month', now())";
+    const { rows } = await query(usageSql, [req.user.id]);
+    res.json({ used: rows[0]?.n || 0, limit: cap.limit === Infinity ? null : cap.limit, scope: cap.scope, plan });
   } catch (e) { next(e); }
 });
 
@@ -127,6 +128,10 @@ r.get("/notifications", async (req, res, next) => {
 // foram lembradas recentemente. Definido antes de /:id para não conflitar.
 r.get("/follow-ups", async (req, res, next) => {
   try {
+    // Recurso premium: bloqueia no backend (não basta esconder no menu).
+    if (!hasFeature(await getPlan(req.user.id), FEATURES.FOLLOW_UP)) {
+      return res.status(402).json({ error: "O follow-up assistido está nos planos pagos.", upgrade: true });
+    }
     const { rows } = await query(
       `select p.id, p.public_id, p.client, p.title, p.client_email, p.status, e.created_at as sent_at
          from proposals p
@@ -287,22 +292,24 @@ r.post("/", writeLimiter, async (req, res, next) => {
     const d = proposalSchema.parse(req.body);
     // Regras de acesso do plano
     const plan = await getPlan(req.user.id);
-    const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
     if (!templateAllowed(plan, d.template)) {
       return res.status(402).json({ error: "Seu plano não inclui este template." });
     }
-    // Cota mensal: conta o USO append-only (proposal_usage), que NÃO diminui ao
-    // apagar uma proposta. Assim não dá pra burlar apagando e recriando.
-    if (limits.proposalsPerMonth !== Infinity) {
-      const { rows: c } = await query(
-        "select count(*)::int as n from proposal_usage where user_id=$1 and created_at >= date_trunc('month', now())",
-        [req.user.id]
-      );
-      if ((c[0]?.n || 0) >= limits.proposalsPerMonth) {
+    // Cota de propostas: conta o USO append-only (proposal_usage), que NÃO diminui
+    // ao apagar uma proposta (não dá pra burlar apagando e recriando). O Gratuito
+    // tem teto VITALÍCIO (scope "total"); os pagos renovam por mês.
+    const cap = proposalCap(plan);
+    if (cap.limit !== Infinity) {
+      const usageSql = cap.scope === "total"
+        ? "select count(*)::int as n from proposal_usage where user_id=$1"
+        : "select count(*)::int as n from proposal_usage where user_id=$1 and created_at >= date_trunc('month', now())";
+      const { rows: c } = await query(usageSql, [req.user.id]);
+      if ((c[0]?.n || 0) >= cap.limit) {
         return res.status(402).json({
-          error: plan === "free"
-            ? "Assine um plano para criar propostas."
-            : `Você atingiu o limite de ${limits.proposalsPerMonth} propostas neste mês.`,
+          error: cap.scope === "total"
+            ? `Você já usou suas ${cap.limit} propostas grátis. Assine um plano para criar mais.`
+            : `Você atingiu o limite de ${cap.limit} propostas neste mês.`,
+          limitReached: true,
         });
       }
     }
@@ -431,6 +438,9 @@ r.post("/:id/send-email", emailSendLimiter, async (req, res, next) => {
 // proposta), apenas marca reminded_at para dar cooldown e sumir da lista.
 r.post("/:id/remind", emailSendLimiter, async (req, res, next) => {
   try {
+    if (!hasFeature(await getPlan(req.user.id), FEATURES.FOLLOW_UP)) {
+      return res.status(402).json({ error: "O follow-up assistido está nos planos pagos.", upgrade: true });
+    }
     const { rows } = await query("select * from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);
     const p = rows[0];
     if (!p) return res.status(404).json({ error: "Proposta não encontrada." });

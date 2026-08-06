@@ -13,6 +13,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { issueCode, consumeCode } from "../lib/passwordCodes.js";
 import { sendMail, codeEmailHtml } from "../lib/mailer.js";
 import { isCurrency } from "../lib/currency.js";
+import { planFeatures, proposalCap } from "../lib/plans.js";
 
 const googleClient = env.GOOGLE_CLIENT_ID ? new OAuth2Client(env.GOOGLE_CLIENT_ID) : null;
 
@@ -34,12 +35,18 @@ const changeSchema = z.object({
 const r = Router();
 
 // Nunca expõe cpf nem password_hash. Admin aparece com plano efetivo total.
-const safeUser = (u) => ({
-  id: u.id, name: u.name, email: u.email,
-  plan: u.role === "admin" ? "business" : u.plan,
-  role: u.role === "admin" ? "admin" : undefined,
-  currency: u.currency || "BRL",
-});
+const safeUser = (u) => {
+  const effectivePlan = u.role === "admin" ? "business" : (u.plan || "free");
+  return {
+    id: u.id, name: u.name, email: u.email,
+    plan: effectivePlan,
+    role: u.role === "admin" ? "admin" : undefined,
+    currency: u.currency || "BRL",
+    // Permissões vêm do backend (fonte única em plans.js): o front NÃO hardcoda.
+    features: planFeatures(effectivePlan),
+    proposalLimit: proposalCap(effectivePlan), // { scope, limit } — Infinity vira null no JSON
+  };
+};
 
 r.post("/register", authLimiter, async (req, res, next) => {
   try {
