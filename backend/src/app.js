@@ -49,7 +49,11 @@ app.use(express.json({ limit: "3mb" })); // headroom p/ imagens comprimidas (log
 // validada dentro da rota, não do IP.
 app.use("/api/webhooks/mercadopago", webhookRoutes);
 
-app.use(generalLimiter);
+// Rate limit geral SÓ na API (/api). Nunca na frente do HTML, dos assets do SPA,
+// das imagens em /uploads nem do /health — assim um 429 jamais apaga o site
+// inteiro; no máximo segura chamadas de API. O /health fica livre de propósito
+// (health check do proxy/monitor não deve gastar cota).
+app.use("/api", generalLimiter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use("/api/auth", authRoutes);

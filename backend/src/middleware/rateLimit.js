@@ -1,12 +1,33 @@
 import rateLimit from "express-rate-limit";
+import { verifyToken } from "../lib/jwt.js";
 
-// Camadas de rate limit por superfície de ataque. Todos por IP (trust proxy=1
-// no server.js garante o IP real atrás de proxy). As mensagens usam a chave
-// "error" porque é o que o front lê e mostra.
+// Camadas de rate limit por superfície de ataque. Os limitadores específicos
+// (login, e-mail, cobrança) são por IP — o certo pra ataque não autenticado. O
+// `trust proxy=1` no app.js garante o IP real do cliente atrás do Caddy. As
+// mensagens usam a chave "error" porque é o que o front lê e mostra.
 
-// Teto geral da API: segura scraping/flood básicos sem atrapalhar uso normal.
+// Chave do teto geral: usa o ID do usuário quando a requisição está autenticada
+// (Bearer válido), senão o IP real. Assim dois usuários atrás do MESMO IP/NAT
+// (ex.: um Wi-Fi de casa ou escritório) não dividem o contador, e um F5 exagerado
+// de uma pessoa nunca bloqueia as outras.
+function keyByUserOrIp(req) {
+  const h = req.headers.authorization || "";
+  const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+  if (token) {
+    try {
+      const p = verifyToken(token);
+      if (p?.sub) return `u:${p.sub}`;
+    } catch { /* token inválido/expirado: cai para o IP */ }
+  }
+  return `ip:${req.ip}`;
+}
+
+// Teto geral da API (só em /api — nunca na frente do HTML/assets, veja app.js).
+// Alto o suficiente pra uma sessão real de SPA (que faz várias chamadas por tela),
+// baixo o suficiente pra frear scraping/flood.
 export const generalLimiter = rateLimit({
-  windowMs: 60_000, max: 120, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
+  windowMs: 60_000, max: 300, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
+  keyGenerator: keyByUserOrIp,
   message: { error: "Muitas requisições. Aguarde um instante." },
 });
 
