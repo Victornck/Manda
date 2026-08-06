@@ -42,7 +42,7 @@ export default function Pricing({ go }) {
       priceNum: annual ? 11 : 12, period: "/mês", note: annual ? "R$132/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Básico", variant: "ghost",
       popular: false, titleColor: color.ink, subColor: color.gray500, featColor: color.gray700, divider: "#EEE", checkColor: color.ink,
       cardStyle: { position: "relative", background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, padding: "30px 26px" },
-      features: ["5 propostas por mês", "Acesso aos templates básicos", "Link compartilhável", "Aceite com um clique"],
+      features: ["5 propostas por mês", "Acesso aos templates básicos", "Link compartilhável", "Aceite com um clique", "Calculadora de preço"],
     },
     {
       name: "Pro", planKey: "pro", tagline: "Para quem vive de proposta e quer fechar mais.",
@@ -56,7 +56,7 @@ export default function Pricing({ go }) {
       priceNum: annual ? 87 : 97, period: "/mês", note: annual ? "R$1.044/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Business", variant: "dark",
       popular: false, titleColor: color.ink, subColor: color.gray500, featColor: color.gray700, divider: "#EEE", checkColor: color.ink,
       cardStyle: { position: "relative", background: color.white, border: `1px solid ${color.line}`, borderRadius: 16, padding: "30px 26px" },
-      features: ["Propostas ilimitadas", "Todos os templates", "Domínio personalizado no link", "Dashboard de conversão", "Suporte prioritário"],
+      features: ["Propostas ilimitadas", "Todos os templates", "Calculadora de preço", "Domínio personalizado no link", "Dashboard de conversão", "Suporte prioritário"],
     },
   ];
 

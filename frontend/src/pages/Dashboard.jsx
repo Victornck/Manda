@@ -2493,11 +2493,11 @@ function PlansModal({ onClose }) {
 
   const plans = [
     { name: "Básico", key: "basic", m: "R$12", y: "R$11", yNote: "R$132/ano", cta: "Assinar Básico", variant: "ghost", popular: false,
-      features: ["5 propostas por mês", "Templates básicos", "Link compartilhável"] },
+      features: ["5 propostas por mês", "Templates básicos", "Calculadora de preço", "Link compartilhável"] },
     { name: "Pro", key: "pro", m: "R$29", y: "R$26", yNote: "R$312/ano", cta: "Assinar Pro", variant: "accent", popular: true,
-      features: ["25 propostas por mês", "Todos os templates", "Notificação de visualização", "Sem marca d’água"] },
+      features: ["25 propostas por mês", "Todos os templates", "Calculadora de preço", "Notificação de visualização", "Sem marca d’água"] },
     { name: "Business", key: "business", m: "R$97", y: "R$87", yNote: "R$1.044/ano", cta: "Assinar Business", variant: "dark", popular: false,
-      features: ["Propostas ilimitadas", "Todos os templates", "Domínio personalizado", "Suporte prioritário"] },
+      features: ["Propostas ilimitadas", "Todos os templates", "Calculadora de preço", "Domínio personalizado", "Suporte prioritário"] },
   ];
 
   return (
