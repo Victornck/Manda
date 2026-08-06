@@ -199,7 +199,7 @@ function buildInsights(d, display = DEFAULT_CURRENCY) {
   return out.slice(0, 3);
 }
 
-export default function Home({ user, onNewProposal, onNavigate }) {
+export default function Home({ user, onNewProposal, onNavigate, onboarding }) {
   const [data, setData] = useState(null);
   const [days, setDays] = useState(30);
   const [display, setDisplay] = useState(user?.currency || DEFAULT_CURRENCY);
@@ -282,6 +282,9 @@ export default function Home({ user, onNewProposal, onNavigate }) {
           </button>
         </div>
       </div>
+
+      {/* Tutorial de primeiros passos (mora aqui na Home, a tela inicial). */}
+      {onboarding && <div style={{ marginBottom: 18 }}>{onboarding}</div>}
 
       {loading ? (
         <>

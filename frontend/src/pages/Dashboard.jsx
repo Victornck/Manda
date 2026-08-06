@@ -1265,7 +1265,14 @@ export default function Dashboard({ go }) {
           </div>
         )}
         {view === "home" ? (
-          <HomePage user={user} onNewProposal={newProposal} onNavigate={navTo} />
+          <HomePage
+            user={user}
+            onNewProposal={newProposal}
+            onNavigate={navTo}
+            onboarding={onbLoaded && (!onb.hidden || onbCelebrate)
+              ? <OnboardingCard steps={onbSteps} done={onbDone} onNew={newProposal} goSettings={() => navTo("settings")} onSkip={dismissOnb} onFinish={() => setOnbCelebrate(false)} />
+              : null}
+          />
         ) : view === "list" ? (
           <div className="db-pad">
             <div className="db-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 22 }}>
@@ -1307,10 +1314,6 @@ export default function Dashboard({ go }) {
                 </div>
                 <button onClick={() => setShowPlans(true)} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "9px 16px", flex: "none" }}>{remaining > 0 ? "Ver planos" : "Fazer upgrade"}</button>
               </div>
-            )}
-
-            {onbLoaded && (!onb.hidden || onbCelebrate) && (
-              <OnboardingCard steps={onbSteps} done={onbDone} onNew={newProposal} goSettings={() => navTo("settings")} onSkip={dismissOnb} onFinish={() => setOnbCelebrate(false)} />
             )}
 
             {followUps.length > 0 && (
