@@ -7,6 +7,9 @@ const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations"
 
 async function run() {
   await query("create table if not exists _migrations (name text primary key, run_at timestamptz default now())");
+  // Fecha o controle de migrações para a API pública (anon) do Supabase. RLS sem
+  // política = sem acesso via API; o backend (dono do banco) ignora RLS e segue.
+  await query("alter table _migrations enable row level security").catch(() => {});
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
   for (const f of files) {
     const { rows } = await query("select 1 from _migrations where name=$1", [f]);

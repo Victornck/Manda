@@ -12,3 +12,8 @@ create table if not exists exchange_rates (
   rates      jsonb       not null default '{}'::jsonb,
   fetched_at timestamptz not null default now()
 );
+
+-- RLS ligado, SEM política: a API pública (anon) do Supabase fica sem acesso a
+-- esta tabela. O backend conecta como dono do banco e ignora RLS, então segue
+-- lendo/gravando normalmente. Sem isso, a tabela ficaria aberta na API pública.
+alter table exchange_rates enable row level security;
