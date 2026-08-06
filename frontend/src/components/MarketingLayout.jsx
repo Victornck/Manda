@@ -42,7 +42,19 @@ export default function MarketingLayout() {
           .ml-flink:hover{ font-weight:700; color:#fff; }
         `}</style>
         <div className="ml-head" style={{ maxWidth: 1120, margin: "0 auto", height: 64, padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-          <Link to="/" style={{ flex: "none" }}><Logo /></Link>
+          <Link
+            to="/"
+            style={{ flex: "none" }}
+            aria-label="Manda — ir para o topo"
+            onClick={(e) => {
+              // Já na home: não recarrega a rota, só sobe suave. Em outra página,
+              // deixa o Link navegar pra home normalmente.
+              if (window.location.pathname === "/") {
+                e.preventDefault();
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }
+            }}
+          ><Logo /></Link>
           <nav className="ml-nav">
             <Link to="/precos" className="ml-precos" style={{ fontSize: "14.5px", fontWeight: 500, color: color.gray700, padding: "8px 12px", borderRadius: 8 }}>Preços</Link>
             <Link to="/entrar" style={{ fontSize: "14.5px", fontWeight: 500, color: color.gray700, padding: "8px 12px", borderRadius: 8 }}>Entrar</Link>
