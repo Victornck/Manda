@@ -1595,7 +1595,7 @@ export default function Dashboard({ go }) {
                           aria-label="Moeda da proposta"
                           style={{ appearance: "none", fontFamily: font.body, fontSize: 13, fontWeight: 600, color: color.gray700, background: color.surface3, border: `1px solid ${color.gray200}`, borderRadius: 8, padding: "6px 26px 6px 10px", cursor: locked ? "default" : "pointer" }}
                         >
-                          {CURRENCY_LIST.map((c) => <option key={c.code} value={c.code}>{c.flag} {c.code} · {c.symbol}</option>)}
+                          {CURRENCY_LIST.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.symbol}</option>)}
                         </select>
                         <ChevronDown size={14} strokeWidth={2} color={color.gray400} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
                       </div>
@@ -3118,7 +3118,7 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
               style={{ ...inp(), appearance: "none", paddingRight: 38, cursor: "pointer" }}
             >
               {CURRENCY_LIST.map((c) => (
-                <option key={c.code} value={c.code}>{c.flag} {c.name} ({c.symbol} · {c.code})</option>
+                <option key={c.code} value={c.code}>{c.name} · {c.symbol} ({c.code})</option>
               ))}
             </select>
             <ChevronDown size={16} strokeWidth={2} color={color.gray400} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />

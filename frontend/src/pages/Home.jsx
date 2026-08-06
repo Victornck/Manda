@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus, FileText, Eye, Check, X, Send, Clock, Users, Calculator, LayoutGrid,
-  Sparkles, ArrowRight, Flame, TrendingUp, TrendingDown, Minus, RefreshCw,
+  Sparkles, ArrowRight, Flame, TrendingUp, TrendingDown, Minus, RefreshCw, ChevronDown,
 } from "lucide-react";
 import { font, color, statusColors } from "../theme.js";
 import { api } from "../lib/api.js";
@@ -252,9 +252,10 @@ export default function Home({ user, onNewProposal, onNavigate }) {
         .hm-link:hover { color: ${color.accentHover}; }
         .hm-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid ${color.line3}; }
         .hm-row:first-child { border-top: none; }
-        .hm-cursel { display: inline-flex; align-items: center; gap: 6px; border: 1px solid ${color.line2}; background: ${color.white}; border-radius: 10px; padding: 0 10px; height: 38px; cursor: pointer; transition: border-color .15s; }
+        .hm-cursel { display: inline-flex; align-items: center; gap: 4px; border: 1px solid ${color.line2}; background: ${color.white}; border-radius: 10px; padding: 0 8px 0 12px; height: 38px; cursor: pointer; transition: border-color .15s; }
         .hm-cursel:hover { border-color: ${color.gray300}; }
-        .hm-cursel select { border: none; outline: none; background: transparent; font-family: ${font.body}; font-size: 13.5px; font-weight: 600; color: ${color.gray700}; cursor: pointer; padding: 8px 2px; }
+        .hm-cursel select { -webkit-appearance: none; appearance: none; border: none; outline: none; background: transparent; font-family: ${font.body}; font-size: 13.5px; font-weight: 600; color: ${color.gray700}; cursor: pointer; padding: 8px 2px; }
+        .hm-cursel svg { pointer-events: none; flex: none; }
         .hm-skel { background: ${color.surface}; border-radius: 12px; animation: hmpulse 1.3s ease-in-out infinite; }
         @keyframes hmpulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
         @media (max-width: 980px) { .hm-cols { grid-template-columns: 1fr; } .hm-kpis { grid-template-columns: repeat(2, 1fr); } }
@@ -271,10 +272,10 @@ export default function Home({ user, onNewProposal, onNavigate }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <label className="hm-cursel" title="Moeda de exibição do painel">
-            <span aria-hidden="true">{currencyOf(display).flag}</span>
             <select value={display} onChange={(e) => pickCurrency(e.target.value)} aria-label="Moeda de exibição do painel">
               {CURRENCY_LIST.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.symbol}</option>)}
             </select>
+            <ChevronDown size={15} strokeWidth={2} color={color.gray400} aria-hidden="true" />
           </label>
           <button onClick={onNewProposal} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 16px", flex: "none", display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, borderRadius: 10, border: "none", color: "#fff", background: color.accent, cursor: "pointer" }}>
             <Plus size={16} strokeWidth={2.4} />Nova proposta
