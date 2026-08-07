@@ -11,6 +11,7 @@ import { encryptCpf, cpfIndex } from "../lib/pii.js";
 import { authLimiter, loginLimiter, emailLimiter, codeLimiter } from "../middleware/rateLimit.js";
 import { requireAuth } from "../middleware/auth.js";
 import { issueCode, consumeCode } from "../lib/passwordCodes.js";
+import { securityEvent, maskEmail } from "../lib/securityLog.js";
 import { sendMail, codeEmailHtml } from "../lib/mailer.js";
 import { isCurrency } from "../lib/currency.js";
 import { planFeatures, proposalCap } from "../lib/plans.js";
@@ -78,7 +79,10 @@ r.post("/login", loginLimiter, async (req, res, next) => {
     const { rows } = await query("select * from users where email=$1", [data.email.toLowerCase()]);
     const u = rows[0];
     const ok = u && (await bcrypt.compare(data.password, u.password_hash));
-    if (!ok) return res.status(401).json({ error: "Email ou senha incorretos." });
+    if (!ok) {
+      securityEvent("login_falhou", req, { email: maskEmail(data.email) });
+      return res.status(401).json({ error: "Email ou senha incorretos." });
+    }
     res.json({ token: signToken({ sub: u.id }), user: safeUser(u) });
   } catch (e) { next(e); }
 });

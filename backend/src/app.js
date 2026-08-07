@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { env } from "./env.js";
-import { generalLimiter, publicLimiter, billingLimiter } from "./middleware/rateLimit.js";
+import { generalLimiter, publicLimiter, billingLimiter, webhookLimiter } from "./middleware/rateLimit.js";
 import { notFound, errorHandler } from "./middleware/error.js";
 import authRoutes from "./routes/auth.js";
 import proposalRoutes from "./routes/proposals.js";
@@ -45,9 +45,10 @@ app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()) }));
 app.use(express.json({ limit: "3mb" })); // headroom p/ imagens comprimidas (logo/capa) em base64
 
 // Webhook do Mercado Pago: usa JSON e fica ANTES do rate limit geral, para que
-// os reenvios da notificação nunca sejam barrados. A confiança vem da assinatura
-// validada dentro da rota, não do IP.
-app.use("/api/webhooks/mercadopago", webhookRoutes);
+// os reenvios da notificação não disputem cota com o resto da API. Tem teto
+// próprio (webhookLimiter), bem mais largo. A confiança em QUEM chamou vem da
+// checagem dentro da rota, não do IP.
+app.use("/api/webhooks/mercadopago", webhookLimiter, webhookRoutes);
 
 // Rate limit geral SÓ na API (/api). Nunca na frente do HTML, dos assets do SPA,
 // das imagens em /uploads nem do /health — assim um 429 jamais apaga o site
@@ -67,7 +68,19 @@ app.use("/api", currencyRoutes);
 
 // Imagens enviadas (logo/capa), servidas do disco no MESMO domínio do app, então
 // o "Baixar PDF" (html2canvas) não quebra por CORS. Nomes são únicos, cache longo.
-app.use("/uploads", express.static(uploadsDir, { maxAge: "30d", immutable: true }));
+// Porteiro: /uploads entrega SÓ imagem. Qualquer outra extensão (arquivo legado,
+// erro futuro no upload) vira 404 antes de chegar no disco. O CSP fecha a porta
+// de vez: mesmo que algum arquivo escape, ele não roda script nenhum.
+app.use("/uploads", (req, res, next) => {
+  if (!/\.(png|jpe?g|webp|gif)$/i.test(req.path)) {
+    return res.status(404).json({ error: "Arquivo não encontrado." });
+  }
+  res.setHeader("Content-Security-Policy", "default-src 'none'; img-src 'self'; sandbox");
+  next();
+});
+app.use("/uploads", express.static(uploadsDir, {
+  maxAge: "30d", immutable: true, index: false, dotfiles: "ignore",
+}));
 
 // Serve o FRONT (build do Vite) pelo próprio backend, se o dist existir. Assim,
 // em produção, um serviço só entrega o app e a API no mesmo domínio (e a URL do

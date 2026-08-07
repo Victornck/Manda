@@ -1,5 +1,6 @@
 import rateLimit from "express-rate-limit";
 import { verifyToken } from "../lib/jwt.js";
+import { securityEvent } from "../lib/securityLog.js";
 
 // Camadas de rate limit por superfície de ataque. Os limitadores específicos
 // (login, e-mail, cobrança) são por IP — o certo pra ataque não autenticado. O
@@ -22,6 +23,13 @@ function keyByUserOrIp(req) {
   return `ip:${req.ip}`;
 }
 
+// Estourar um teto sensível é o sinal mais confiável de robô. Registra e barra.
+// Mantém a chave "error" na resposta, que é o que o front lê e mostra.
+const logAndBlock = (kind, body) => (req, res) => {
+  securityEvent(kind, req);
+  res.status(429).json(body);
+};
+
 // Teto geral da API (só em /api — nunca na frente do HTML/assets, veja app.js).
 // Alto o suficiente pra uma sessão real de SPA (que faz várias chamadas por tela),
 // baixo o suficiente pra frear scraping/flood.
@@ -34,7 +42,7 @@ export const generalLimiter = rateLimit({
 // Cadastro e login com Google: criação de conta em massa.
 export const authLimiter = rateLimit({
   windowMs: 15 * 60_000, max: 20, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
-  message: { error: "Muitas tentativas. Tente novamente mais tarde." },
+  handler: logAndBlock("teto_cadastro", { error: "Muitas tentativas. Tente novamente mais tarde." }),
 });
 
 // Login com senha: força bruta. Só conta tentativa FALHA (quem acerta não gasta
@@ -42,21 +50,21 @@ export const authLimiter = rateLimit({
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60_000, max: 10, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
   skipSuccessfulRequests: true,
-  message: { error: "Muitas tentativas de login. Aguarde 15 minutos ou use “Esqueci a senha”." },
+  handler: logAndBlock("teto_login", { error: "Muitas tentativas de login. Aguarde 15 minutos ou use “Esqueci a senha”." }),
 });
 
 // Endpoints que DISPARAM EMAIL (esqueci a senha / código de troca): cada
 // requisição custa um envio. Bem apertado; há também cooldown por conta no banco.
 export const emailLimiter = rateLimit({
   windowMs: 15 * 60_000, max: 5, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
-  message: { error: "Muitos pedidos de código. Aguarde alguns minutos." },
+  handler: logAndBlock("teto_email", { error: "Muitos pedidos de código. Aguarde alguns minutos." }),
 });
 
 // Verificação de código (reset/troca): além das 5 tentativas por código no
 // banco, limita por IP para frear robôs alternando emails.
 export const codeLimiter = rateLimit({
   windowMs: 15 * 60_000, max: 15, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
-  message: { error: "Muitas tentativas. Aguarde alguns minutos e peça um novo código." },
+  handler: logAndBlock("teto_codigo", { error: "Muitas tentativas. Aguarde alguns minutos e peça um novo código." }),
 });
 
 // Página pública da proposta (view/accept/decline): evita enumeração de links
@@ -70,7 +78,7 @@ export const publicLimiter = rateLimit({
 // motivo legítimo para dezenas por minuto.
 export const billingLimiter = rateLimit({
   windowMs: 15 * 60_000, max: 10, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
-  message: { error: "Muitas tentativas. Aguarde um instante e tente de novo." },
+  handler: logAndBlock("teto_cobranca", { error: "Muitas tentativas. Aguarde um instante e tente de novo." }),
 });
 
 // Envio de proposta por e-mail (Gmail API): cada chamada dispara um e-mail real.
@@ -92,4 +100,15 @@ export const feedbackLimiter = rateLimit({
 export const writeLimiter = rateLimit({
   windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
   message: { error: "Muitas operações seguidas. Aguarde um instante." },
+});
+
+// Webhook do Mercado Pago: fica FORA do teto geral de propósito (reenvio de
+// notificação não pode disputar cota com o resto da API), mas não pode ficar sem
+// teto nenhum — cada chamada gera uma consulta na API do MP. O MP manda poucas
+// notificações por minuto; 120 é bem folgado pro uso real e fecha a porta pra
+// flood. Notificação legítima barrada não se perde: o MP reenvia.
+export const webhookLimiter = rateLimit({
+  windowMs: 60_000, max: 120, standardHeaders: true, legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === "test",
+  message: { error: "Muitas notificações. Aguarde." },
 });

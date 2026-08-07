@@ -25,3 +25,9 @@ export async function initSentry() {
 export function captureError(err, extra) {
   if (client) client.captureException(err, extra ? { extra } : undefined);
 }
+
+// Aviso — não é erro de programa. Vai pro Sentry como evento pesquisável, que é
+// o que permite criar um alerta em cima. No-op se o Sentry não estiver ligado.
+export function captureWarning(message, extra) {
+  if (client) client.captureMessage(message, { level: "warning", extra });
+}
