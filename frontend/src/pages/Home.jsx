@@ -191,8 +191,8 @@ function buildInsights(d, display = DEFAULT_CURRENCY) {
   const bestTpl = (templates || []).filter((t) => t.total >= 2).sort((a, b) => b.conversao - a.conversao)[0];
   if (bestTpl && bestTpl.conversao > 0) out.push(`O template ${tplLabel(bestTpl.template)} é o que mais fecha: ${bestTpl.conversao}% de aceitação.`);
   const hot = (clientesQuentes || []).find((c) => c.views >= 2 && c.emNegociacao > 0);
-  if (hot) out.push(`${hot.client} abriu sua proposta ${hot.views} vezes e ainda não respondeu — um bom momento pra um follow-up.`);
-  if (kpis.taxaAceitacao > 0) out.push(`Sua taxa de aceitação está em ${kpis.taxaAceitacao}%${kpis.taxaAceitacao >= 40 ? " — acima da média do mercado." : "."}`);
+  if (hot) out.push(`${hot.client} abriu sua proposta ${hot.views} vezes e ainda não respondeu, um bom momento pra um follow-up.`);
+  if (kpis.taxaAceitacao > 0) out.push(`Sua taxa de aceitação está em ${kpis.taxaAceitacao}%${kpis.taxaAceitacao >= 40 ? ", acima da média do mercado." : "."}`);
   if (kpis.tempoMedioAceite > 0) out.push(`Clientes levam em média ${kpis.tempoMedioAceite} dia${kpis.tempoMedioAceite === 1 ? "" : "s"} pra aceitar depois de receber.`);
   if (kpis.emNegociacao > 0) out.push(`Você tem ${formatMoney(kpis.emNegociacao, display)} em propostas ainda em aberto.`);
   if (funil.enviada + funil.visualizada > 0 && !out.length) out.push(`Você tem ${funil.enviada + funil.visualizada} proposta(s) aguardando resposta.`);

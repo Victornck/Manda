@@ -87,6 +87,19 @@ export default function Landing({ go }) {
     return () => io.disconnect();
   }, []);
 
+  // Vindo do rodapé/nav com um #âncora (inclusive de outra página): rola suave
+  // até a seção. Respeita quem pediu menos movimento (rola na hora, sem animar).
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const t = setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    }, 90);
+    return () => clearTimeout(t);
+  }, []);
+
   const seeHow = () => {
     if (comoRef.current) {
       const y = comoRef.current.getBoundingClientRect().top + window.scrollY - 20;
@@ -367,7 +380,7 @@ export default function Landing({ go }) {
       </section>
 
       {/* COMO FUNCIONA */}
-      <section ref={comoRef} className="lp-sec" style={{ background: color.surface2, borderTop: `1px solid ${color.line3}`, borderBottom: `1px solid ${color.line3}`, padding: "88px 24px" }}>
+      <section ref={comoRef} id="como-funciona" className="lp-sec" style={{ background: color.surface2, borderTop: `1px solid ${color.line3}`, borderBottom: `1px solid ${color.line3}`, padding: "88px 24px", scrollMarginTop: 72 }}>
         <div style={{ maxWidth: 1120, margin: "0 auto" }}>
           <div data-reveal style={{ textAlign: "center", maxWidth: 620, margin: "0 auto 56px" }}>
             <h2 className="lp-h2">Da ideia ao aceite em três passos</h2>
@@ -488,7 +501,7 @@ export default function Landing({ go }) {
       </section>
 
       {/* POR QUE + PRA QUEM (unificado) */}
-      <section className="lp-sec" style={{ padding: "88px 24px", background: color.surface2, borderTop: `1px solid ${color.line}` }}>
+      <section id="por-que" className="lp-sec" style={{ padding: "88px 24px", background: color.surface2, borderTop: `1px solid ${color.line}`, scrollMarginTop: 72 }}>
         <div style={{ maxWidth: 1120, margin: "0 auto" }}>
           <div data-reveal style={{ maxWidth: 620, marginBottom: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: color.accent, marginBottom: 14 }}>Por que o Manda</div>

@@ -36,8 +36,20 @@ function fileToCompressedDataUrl(file, maxW = 1400, quality = 0.7) {
   });
 }
 
-// Botão "Relatar problema" + modal. Recebe o e-mail da conta para pré-preencher.
-export default function ReportProblem({ email = "" }) {
+// Botão + modal de suporte. Reaproveitável: o painel logado usa como "Relatar
+// problema" (com contexto da conta); o rodapé público usa como "Suporte" com um
+// gatilho próprio (renderTrigger) e e-mail obrigatório.
+export default function ReportProblem({
+  email = "",
+  label = "Relatar problema",
+  title = "Relatar problema",
+  sentTitle = "Relato enviado",
+  submitLabel = "Enviar relato",
+  promptLabel = "O que aconteceu?",
+  promptPlaceholder = "Descreva o problema ou a ideia. Quanto mais detalhe, melhor.",
+  requireEmail = false,
+  renderTrigger,
+}) {
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState("bug");
   const [message, setMessage] = useState("");
@@ -62,6 +74,7 @@ export default function ReportProblem({ email = "" }) {
     setShot(null); setShotName(""); setBusy(false); setSent(false); setError("");
   };
   const close = () => { setOpen(false); setTimeout(reset, 200); };
+  const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((mail || "").trim());
 
   const pickFile = async (e) => {
     const file = e.target.files?.[0];
@@ -77,6 +90,7 @@ export default function ReportProblem({ email = "" }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!message.trim() || busy) return;
+    if (requireEmail && !emailOk) { setError("Informe um e-mail válido para o suporte responder."); return; }
     setBusy(true); setError("");
     try {
       await api.reportProblem({
@@ -95,23 +109,27 @@ export default function ReportProblem({ email = "" }) {
 
   return (
     <>
-      <button className="rp-open" onClick={() => setOpen(true)}>
-        <span className="rp-open-ic"><AlertCircle size={14} strokeWidth={2.4} /></span>
-        Relatar problema
-      </button>
-      <style>{`
-        .rp-open{ display:inline-flex; align-items:center; gap:8px; font-family:${font.body}; font-size:13.5px; font-weight:600; color:${color.ink}; background:#fff; border:1px solid ${color.gray200}; border-radius:999px; padding:7px 15px 7px 8px; cursor:pointer; transition:border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .12s ease; }
-        .rp-open:hover{ border-color:${color.accent}; color:${color.accent}; box-shadow:0 8px 20px -12px rgba(217,119,87,0.55); }
-        .rp-open:active{ transform:scale(.97); }
-        .rp-open-ic{ display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:${color.accentTint}; color:${color.accent}; flex:none; }
-      `}</style>
+      {renderTrigger ? renderTrigger(() => setOpen(true)) : (
+        <>
+          <button className="rp-open" onClick={() => setOpen(true)}>
+            <span className="rp-open-ic"><AlertCircle size={14} strokeWidth={2.4} /></span>
+            {label}
+          </button>
+          <style>{`
+            .rp-open{ display:inline-flex; align-items:center; gap:8px; font-family:${font.body}; font-size:13.5px; font-weight:600; color:${color.ink}; background:#fff; border:1px solid ${color.gray200}; border-radius:999px; padding:7px 15px 7px 8px; cursor:pointer; transition:border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .12s ease; }
+            .rp-open:hover{ border-color:${color.accent}; color:${color.accent}; box-shadow:0 8px 20px -12px rgba(217,119,87,0.55); }
+            .rp-open:active{ transform:scale(.97); }
+            .rp-open-ic{ display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:${color.accentTint}; color:${color.accent}; flex:none; }
+          `}</style>
+        </>
+      )}
 
       {open && (
         <div className="rp-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
           <div className="rp-card" role="dialog" aria-label="Relatar problema">
             <div className="rp-head">
               <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em" }}>
-                {sent ? "Relato enviado" : "Relatar problema"}
+                {sent ? sentTitle : title}
               </div>
               <button onClick={close} aria-label="Fechar" className="rp-x"><X size={19} strokeWidth={2} /></button>
             </div>
@@ -132,13 +150,13 @@ export default function ReportProblem({ email = "" }) {
                   ))}
                 </div>
 
-                <label className="rp-lb">O que aconteceu?</label>
+                <label className="rp-lb">{promptLabel}</label>
                 <textarea
                   className="rp-ta" value={message} onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Descreva o problema ou a ideia. Quanto mais detalhe, melhor." maxLength={2000} rows={4} autoFocus
+                  placeholder={promptPlaceholder} maxLength={2000} rows={4} autoFocus
                 />
 
-                <label className="rp-lb">Seu e-mail (para eu responder)</label>
+                <label className="rp-lb">Seu e-mail {requireEmail ? "(obrigatório)" : "(para eu responder)"}</label>
                 <input className="rp-in" type="email" value={mail} onChange={(e) => setMail(e.target.value)} placeholder="voce@email.com" />
 
                 <label className="rp-lb">Print da tela (opcional)</label>
@@ -157,8 +175,8 @@ export default function ReportProblem({ email = "" }) {
 
                 {error && <div className="rp-err">{error}</div>}
 
-                <button type="submit" className="rp-send" disabled={!message.trim() || busy}>
-                  {busy ? "Enviando…" : (<><Send size={16} strokeWidth={2.2} />Enviar relato</>)}
+                <button type="submit" className="rp-send" disabled={!message.trim() || busy || (requireEmail && !emailOk)}>
+                  {busy ? "Enviando…" : (<><Send size={16} strokeWidth={2.2} />{submitLabel}</>)}
                 </button>
               </form>
             )}

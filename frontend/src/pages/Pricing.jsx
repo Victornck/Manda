@@ -32,10 +32,6 @@ export default function Pricing({ go }) {
     }
   };
 
-  const toggleBase = { fontFamily: font.body, fontSize: "14.5px", fontWeight: 600, padding: "9px 18px", borderRadius: 8, border: "none", cursor: "pointer", display: "flex", alignItems: "center", transition: "background .15s,color .15s" };
-  const tActive = { ...toggleBase, background: color.white, color: color.ink, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" };
-  const tIdle = { ...toggleBase, background: "transparent", color: color.gray500 };
-
   const plans = [
     {
       name: "Básico", planKey: "basic", tagline: "Para começar a mandar propostas com cara profissional.",
@@ -48,7 +44,7 @@ export default function Pricing({ go }) {
       name: "Pro", planKey: "pro", tagline: "Para quem vive de proposta e quer fechar mais.",
       priceNum: annual ? 26 : 29, period: "/mês", note: annual ? "R$312/ano · cobrado anualmente" : "cobrado mensalmente", cta: "Assinar Pro", variant: "accent",
       popular: true, titleColor: color.white, subColor: color.gray400, featColor: color.gray200, divider: color.ink800, checkColor: "#E9967B",
-      cardStyle: { position: "relative", background: color.ink, color: color.white, border: `1px solid ${color.ink}`, borderRadius: 16, padding: "30px 26px", boxShadow: "0 22px 50px -20px rgba(217,119,87,0.4)", transform: "scale(1.03)" },
+      cardStyle: { position: "relative", background: color.ink, color: color.white, border: `1px solid ${color.ink}`, borderRadius: 16, padding: "30px 26px", boxShadow: "0 26px 60px -22px rgba(217,119,87,0.45), inset 0 1px 0 rgba(255,255,255,0.14)", transform: "scale(1.03)" },
       features: ["25 propostas por mês", "Todos os templates", "Sem marca d’água", "Notificação de visualização", "Aceite com um clique", "Calculadora de preço"],
     },
     {
@@ -81,10 +77,17 @@ export default function Pricing({ go }) {
         .pr-faq-h2{ font-size:clamp(26px,4vw,34px); }
         .pr-cta-h2{ font-size:clamp(28px,5vw,40px); }
 
-        .pr-toggle:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
+        /* Segmented control (Mensal/Anual) com thumb deslizante — motion a partir
+           do estado atual, curva de "gaveta" iOS, e feedback de toque no press. */
+        .pr-seg{ position:relative; display:inline-flex; background:${color.surface}; border-radius:12px; padding:4px; }
+        .pr-seg-thumb{ position:absolute; top:4px; bottom:4px; left:4px; width:calc(50% - 4px); background:#fff; border-radius:9px; box-shadow:0 1px 3px rgba(0,0,0,0.12); transition:transform .34s cubic-bezier(.32,.72,0,1); }
+        .pr-seg-btn{ position:relative; z-index:1; flex:1; min-width:118px; font-family:${font.body}; font-size:14.5px; font-weight:600; padding:9px 18px; border:none; background:none; cursor:pointer; color:${color.gray500}; display:inline-flex; align-items:center; justify-content:center; transition:color .2s ease, transform .1s ease-out; }
+        .pr-seg-btn[data-on="true"]{ color:${color.ink}; }
+        .pr-seg-btn:active{ transform:scale(0.97); }
+        .pr-seg-btn:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; border-radius:9px; }
 
-        .pr-btn{ width:100%; font-family:${font.body}; font-weight:600; font-size:15px; border:none; cursor:pointer; border-radius:10px; padding:13px; transition:background .16s ease, border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
-        .pr-btn:active{ transform:translateY(1px); }
+        .pr-btn{ width:100%; font-family:${font.body}; font-weight:600; font-size:15px; border:none; cursor:pointer; border-radius:10px; padding:13px; transition:background .16s ease, border-color .16s ease, box-shadow .16s ease, transform .1s ease-out; }
+        .pr-btn:active{ transform:scale(0.98); }
         .pr-btn:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
         .pr-btn-ghost{ color:${color.ink900}; background:#fff; border:1px solid ${color.gray200}; }
         .pr-btn-ghost:hover{ border-color:${color.ink}; background:${color.surface3}; }
@@ -93,12 +96,13 @@ export default function Pricing({ go }) {
         .pr-btn-dark{ color:#fff; background:${color.ink}; }
         .pr-btn-dark:hover{ background:#262626; }
 
-        .pr-btn-white{ font-family:${font.body}; font-weight:600; font-size:16.5px; color:${color.ink}; background:#fff; border:none; padding:16px 30px; border-radius:12px; cursor:pointer; transition:background .16s ease; }
+        .pr-btn-white{ font-family:${font.body}; font-weight:600; font-size:16.5px; color:${color.ink}; background:#fff; border:none; padding:16px 30px; border-radius:12px; cursor:pointer; transition:background .16s ease, transform .1s ease-out; }
         .pr-btn-white:hover{ background:#EDEDED; }
+        .pr-btn-white:active{ transform:scale(0.98); }
         .pr-btn-white:focus-visible{ outline:2px solid #fff; outline-offset:3px; }
 
         .pr-card-light{ transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
-        .pr-card-light:hover{ border-color:${color.accent}; box-shadow:0 12px 30px -16px rgba(20,20,30,0.18); transform:translateY(-2px); }
+        @media (hover:hover) and (pointer:fine){ .pr-card-light:hover{ border-color:${color.accent}; box-shadow:0 12px 30px -16px rgba(20,20,30,0.18); transform:translateY(-2px); } }
 
         @media (max-width:900px){
           .pr-plans{ grid-template-columns:1fr !important; max-width:420px !important; }
@@ -115,13 +119,15 @@ export default function Pricing({ go }) {
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
           <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: color.accent, marginBottom: 16 }}>Preços</div>
           <h1 className="pr-h1" style={{ fontFamily: font.heading, fontWeight: 900, lineHeight: 1.02, letterSpacing: "-0.035em", margin: "0 0 16px" }}>Simples. Sem surpresa.</h1>
-          <p style={{ fontSize: "18.5px", lineHeight: 1.55, color: color.gray600, maxWidth: 520, margin: "0 auto 32px" }}>Escolha o plano e comece agora. Mude ou cancele quando quiser, sem multa.</p>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: color.surface, borderRadius: 11, padding: 4 }}>
-            <button onClick={() => setBilling("monthly")} className="pr-toggle" style={annual ? tIdle : tActive}>Mensal</button>
-            <button onClick={() => setBilling("annual")} className="pr-toggle" style={annual ? tActive : tIdle}>
-              Anual <span style={{ fontSize: "11.5px", fontWeight: 600, color: color.accentInk, background: color.accentTint, padding: "2px 7px", borderRadius: 999, marginLeft: 6 }}>-10%</span>
+          <p style={{ fontSize: "18.5px", lineHeight: 1.55, color: color.gray600, maxWidth: 520, margin: "0 auto 28px" }}>Comece grátis com 2 propostas. Escolha um plano quando fizer sentido, mude ou cancele quando quiser, sem multa.</p>
+          <div className="pr-seg" role="tablist" aria-label="Ciclo de cobrança">
+            <span className="pr-seg-thumb" style={{ transform: annual ? "translateX(100%)" : "translateX(0)" }} />
+            <button role="tab" aria-selected={!annual} data-on={!annual} onClick={() => setBilling("monthly")} className="pr-seg-btn">Mensal</button>
+            <button role="tab" aria-selected={annual} data-on={annual} onClick={() => setBilling("annual")} className="pr-seg-btn">
+              Anual <span style={{ fontSize: "11.5px", fontWeight: 700, color: color.accentInk, background: color.accentTint, padding: "2px 7px", borderRadius: 999, marginLeft: 7 }}>-10%</span>
             </button>
           </div>
+          <div style={{ fontSize: "13.5px", color: color.gray500, marginTop: 16 }}>Sem cartão de crédito para começar.</div>
         </div>
       </section>
 

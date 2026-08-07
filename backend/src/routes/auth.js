@@ -176,7 +176,7 @@ r.post("/forgot", emailLimiter, async (req, res, next) => {
     try {
       await sendMail({
         to: u.email,
-        subject: "Seu código para entrar — Manda",
+        subject: "Seu código para entrar, Manda",
         text: `Olá, ${u.name}. Seu código para entrar é ${code}. Ele expira em 10 minutos. Se não foi você, ignore este email.`,
         html: codeEmailHtml(u.name, code, "redefinir"),
       });
@@ -220,7 +220,7 @@ r.post("/password/request-code", requireAuth, emailLimiter, async (req, res, nex
     try {
       await sendMail({
         to: u.email,
-        subject: "Seu código para trocar a senha — Manda",
+        subject: "Seu código para trocar a senha, Manda",
         text: `Olá, ${u.name}. Seu código para trocar a senha é ${code}. Ele expira em 10 minutos.`,
         html: codeEmailHtml(u.name, code, "trocar"),
       });

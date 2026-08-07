@@ -1,5 +1,6 @@
-import { Outlet, Link } from "react-router-dom";
+import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
 import { font, color } from "../theme.js";
+import ReportProblem from "./ReportProblem.jsx";
 
 // Nav + footer das páginas públicas (Landing e Pricing).
 // Equivale ao shell de marketing do Manda.dc.html.
@@ -45,7 +46,7 @@ export default function MarketingLayout() {
           <Link
             to="/"
             style={{ flex: "none" }}
-            aria-label="Manda — ir para o topo"
+            aria-label="Manda, ir para o topo"
             onClick={(e) => {
               // Já na home: não recarrega a rota, só sobe suave. Em outra página,
               // deixa o Link navegar pra home normalmente.
@@ -76,10 +77,25 @@ export default function MarketingLayout() {
             </p>
           </div>
           <div style={{ display: "flex", gap: 56, flexWrap: "wrap" }}>
-            <FooterCol title="Produto" links={[["Como funciona", "/"], ["Preços", "/precos"], ["Começar agora", "/criar-conta"]]} />
+            <FooterCol title="Produto" links={[["Como funciona", "/#como-funciona"], ["Preços", "/precos"], ["Por que o Manda", "/#por-que"]]} />
             <FooterCol title="Conta" links={[["Login", "/entrar"], ["Criar conta", "/criar-conta"]]} />
             <FooterCol title="Legal" links={[["Termos de Uso", "/termos"], ["Política de Privacidade", "/privacidade"]]} />
-            <FooterCol title="Contato" links={[["Suporte por e-mail", "mailto:mandaaisuporte@gmail.com"]]} />
+            <div>
+              <div style={{ fontFamily: font.heading, fontSize: 12.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: color.white, marginBottom: 14 }}>Contato</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+                <ReportProblem
+                  title="Fale com o suporte"
+                  sentTitle="Mensagem enviada"
+                  submitLabel="Enviar"
+                  promptLabel="Como podemos ajudar?"
+                  promptPlaceholder="Conte o que você precisa: dúvida, cobrança, sugestão…"
+                  requireEmail
+                  renderTrigger={(open) => (
+                    <button type="button" onClick={open} className="ml-flink" data-label="Suporte" style={{ fontSize: 14, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: font.body, textAlign: "left" }}>Suporte</button>
+                  )}
+                />
+              </div>
+            </div>
           </div>
         </div>
         <div style={{ maxWidth: 1120, margin: "40px auto 0", paddingTop: 24, borderTop: `1px solid ${color.ink800}`, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
@@ -97,11 +113,39 @@ function FooterCol({ title, links }) {
       <div style={{ fontFamily: font.heading, fontSize: 12.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: color.white, marginBottom: 14 }}>{title}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
         {links.map(([label, to], i) => (
-          to.startsWith("mailto:") || to.startsWith("#")
-            ? <a key={i} href={to} className="ml-flink" data-label={label} style={{ fontSize: 14 }}>{label}</a>
-            : <Link key={i} to={to} className="ml-flink" data-label={label} style={{ fontSize: 14 }}>{label}</Link>
+          to.includes("#")
+            ? <ScrollLink key={i} to={to} label={label} />
+            : to.startsWith("mailto:")
+              ? <a key={i} href={to} className="ml-flink" data-label={label} style={{ fontSize: 14 }}>{label}</a>
+              : <Link key={i} to={to} className="ml-flink" data-label={label} style={{ fontSize: 14 }}>{label}</Link>
         ))}
       </div>
     </div>
   );
+}
+
+// Link de âncora com rolagem SUAVE. Na mesma página, só rola até a seção. Em
+// outra página, navega via SPA (sem recarregar, sem flash branco) e o destino
+// rola ao montar. Respeita prefers-reduced-motion (rola na hora, sem animar).
+function ScrollLink({ to, label }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const hi = to.indexOf("#");
+  const path = to.slice(0, hi) || "/";
+  const id = to.slice(hi + 1);
+  const onClick = (e) => {
+    e.preventDefault();
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const scrollToId = () => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    };
+    if (location.pathname === path) {
+      scrollToId();
+    } else {
+      navigate(to); // troca de página sem recarregar; a Landing rola ao montar
+      requestAnimationFrame(() => setTimeout(scrollToId, 120)); // reforço p/ variação de timing
+    }
+  };
+  return <a href={to} onClick={onClick} className="ml-flink" data-label={label} style={{ fontSize: 14 }}>{label}</a>;
 }

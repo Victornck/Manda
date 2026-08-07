@@ -2426,7 +2426,7 @@ function WelcomeModal({ freeLimit, onStart, onSeePlans }) {
         </div>
         <h2 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 22, letterSpacing: "-0.01em", margin: "0 0 8px" }}>Sua conta está pronta 🎉</h2>
         <p style={{ fontSize: "14.5px", lineHeight: 1.55, color: color.gray600, margin: "0 auto 8px", maxWidth: 360 }}>
-          Você ganhou <strong>{freeLimit} propostas grátis</strong> para experimentar a plataforma — sem cartão, sem pressa.
+          Você ganhou <strong>{freeLimit} propostas grátis</strong> para experimentar a plataforma, sem cartão, sem pressa.
         </p>
         <p style={{ fontSize: "13.5px", lineHeight: 1.55, color: color.gray500, margin: "0 auto 22px", maxWidth: 360 }}>
           Quando quiser propostas ilimitadas e os recursos premium, é só fazer upgrade.
@@ -2454,7 +2454,7 @@ function LimitModal({ freeLimit, onClose, onUpgrade }) {
         </div>
         <h2 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", margin: "0 0 8px" }}>Você usou suas {freeLimit} propostas grátis</h2>
         <p style={{ fontSize: "14px", lineHeight: 1.55, color: color.gray600, margin: "0 auto 22px", maxWidth: 340 }}>
-          Para criar novas propostas — e desbloquear a calculadora de preços e o follow-up assistido — escolha um plano. Suas propostas atuais continuam salvas.
+          Para criar novas propostas, e desbloquear a calculadora de preços e o follow-up assistido, escolha um plano. Suas propostas atuais continuam salvas.
         </p>
         <button onClick={onUpgrade} className="db-btn db-btn-accent" style={{ width: "100%", fontSize: 15, fontWeight: 600, padding: "12px", borderRadius: 11, marginBottom: 10 }}>Ver planos</button>
         <button onClick={onClose} className="db-btn" style={{ background: "none", color: color.gray500, fontSize: "13.5px", padding: "4px" }}>Agora não</button>
@@ -3234,7 +3234,7 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
             <ChevronDown size={16} strokeWidth={2} color={color.gray400} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
           </div>
           <div style={{ fontSize: 12, color: color.gray400, marginTop: 7 }}>
-            {savingCur ? "Salvando…" : `Exibindo valores como ${currencyOf(currency).symbol} — ex.: ${currencyOf(currency).symbol} 1.500`}
+            {savingCur ? "Salvando…" : `Exibindo valores como ${currencyOf(currency).symbol}, ex.: ${currencyOf(currency).symbol} 1.500`}
           </div>
         </div>
 

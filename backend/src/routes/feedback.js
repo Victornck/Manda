@@ -2,8 +2,18 @@ import { Router } from "express";
 import { z } from "zod";
 import { query } from "../db.js";
 import { env } from "../env.js";
-import { requireAuth } from "../middleware/auth.js";
+import { verifyToken } from "../lib/jwt.js";
 import { feedbackLimiter } from "../middleware/rateLimit.js";
+
+// Auth OPCIONAL: se vier um token válido, identifica a conta (contexto extra pro
+// suporte). Sem token, segue como público — o rodapé da landing usa isso. O
+// abuso é contido pelo feedbackLimiter (por IP) e pela exigência de e-mail.
+function optionalAuth(req, _res, next) {
+  const h = req.headers.authorization || "";
+  const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+  if (token) { try { req.user = { id: verifyToken(token).sub }; } catch { /* público */ } }
+  next();
+}
 import { sendMail, feedbackEmailHtml, feedbackEmailText, FEEDBACK_LABELS } from "../lib/mailer.js";
 
 const r = Router();
@@ -26,13 +36,18 @@ function toAttachment(dataUrl) {
 }
 
 // POST /api/feedback — "Relatar problema". Salva no banco e avisa o suporte por e-mail.
-r.post("/", requireAuth, feedbackLimiter, async (req, res, next) => {
+r.post("/", optionalAuth, feedbackLimiter, async (req, res, next) => {
   try {
     const data = schema.parse(req.body);
 
-    // Contexto da conta (para você saber quem falou e responder).
-    const { rows } = await query("select email, name from users where id=$1", [req.user.id]);
-    const acc = rows[0] || {};
+    // Logado: puxa o contexto da conta. Público (rodapé): exige o e-mail informado.
+    let acc = {};
+    if (req.user) {
+      const { rows } = await query("select email, name from users where id=$1", [req.user.id]);
+      acc = rows[0] || {};
+    } else if (!data.email) {
+      return res.status(400).json({ error: "Informe seu e-mail para o suporte responder." });
+    }
     const fromEmail = data.email || acc.email || "";
     const shot = data.screenshot || null;
 

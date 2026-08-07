@@ -6,22 +6,22 @@ const SECTIONS = [
     "Controlador: Victor Gabriel Rodrigues Berlinck. Contato para privacidade e encarregado (DPO): mandaaisuporte@gmail.com.",
   ] },
   { h: "2. Dados que coletamos", p: [
-    "Cadastro: nome, email e CPF. Sua senha é armazenada de forma criptografada (hash) — não temos acesso a ela.",
+    "Cadastro: nome, email e CPF. Sua senha é armazenada de forma criptografada (hash), não temos acesso a ela.",
     "Uso do serviço: as propostas que você cria (nome e empresa do seu cliente, email do cliente, escopo, itens, valores, além da logo e das imagens de capa que você enviar) e os eventos ligados a elas (quando uma proposta é visualizada, aceita ou recusada, incluindo data, hora e o endereço IP de quem abriu o link público).",
     "Pagamento: os dados de pagamento (cartão, Pix ou boleto) são coletados e processados diretamente pelo Mercado Pago. Nós não armazenamos o número do cartão: guardamos apenas identificadores do pagamento (por exemplo, o ID da operação no Mercado Pago) e o status do seu plano.",
   ] },
   { h: "3. Para que usamos (finalidade e base legal)", p: [
-    "Fornecer o serviço, criar sua conta e gerar os links de proposta — base legal: execução de contrato.",
-    "Processar pagamentos e cumprir obrigações fiscais e legais — execução de contrato e obrigação legal.",
-    "Garantir segurança, prevenir fraudes e melhorar o produto — legítimo interesse.",
-    "Comunicações e cookies não essenciais, quando aplicável — consentimento.",
+    "Fornecer o serviço, criar sua conta e gerar os links de proposta, base legal: execução de contrato.",
+    "Processar pagamentos e cumprir obrigações fiscais e legais, execução de contrato e obrigação legal.",
+    "Garantir segurança, prevenir fraudes e melhorar o produto, legítimo interesse.",
+    "Comunicações e cookies não essenciais, quando aplicável, consentimento.",
   ] },
   { h: "4. Com quem compartilhamos", p: [
     "Utilizamos prestadores que tratam dados em nosso nome (operadores): Mercado Pago (processamento de pagamentos), Supabase (banco de dados), Hostinger (hospedagem) e Google (login com Google e envio de e-mails).",
     "Alguns desses prestadores podem armazenar ou processar dados fora do Brasil (transferência internacional), sempre buscando salvaguardas adequadas. Não vendemos seus dados pessoais.",
   ] },
   { h: "5. Dados do Google e Gmail (Uso Limitado)", p: [
-    "A conexão com o Google é opcional e serve apenas para você enviar suas propostas pelo seu próprio Gmail. Ao conectar, você autoriza o Manda a usar somente a permissão de ENVIO do Gmail (escopo gmail.send), exclusivamente para enviar — a seu pedido e a partir da sua conta — os e-mails de proposta e os lembretes que você mesmo dispara.",
+    "A conexão com o Google é opcional e serve apenas para você enviar suas propostas pelo seu próprio Gmail. Ao conectar, você autoriza o Manda a usar somente a permissão de ENVIO do Gmail (escopo gmail.send), exclusivamente para enviar, a seu pedido e a partir da sua conta, os e-mails de proposta e os lembretes que você mesmo dispara.",
     "O Manda NÃO lê, importa, varre nem armazena o conteúdo da sua caixa de entrada. Guardamos apenas, de forma criptografada, o token necessário para realizar o envio e o endereço do Gmail conectado. Você pode revogar esse acesso a qualquer momento em Configurações ou na sua Conta Google (myaccount.google.com/permissions).",
     "O uso e a transferência, pelo Manda, de informações recebidas das APIs do Google seguem a Política de Dados do Usuário dos Serviços de API do Google (Google API Services User Data Policy), incluindo os requisitos de Uso Limitado (Limited Use), disponível em https://developers.google.com/terms/api-services-user-data-policy. Não usamos esses dados para publicidade, não os vendemos, e não permitimos que pessoas os leiam, exceto com o seu consentimento explícito, por motivos de segurança, para cumprir a lei, ou em operações internas com dados agregados e anonimizados.",
   ] },
