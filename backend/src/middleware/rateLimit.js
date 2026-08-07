@@ -71,7 +71,7 @@ export const codeLimiter = rateLimit({
 // e spam de eventos/notificações no dono da proposta.
 export const publicLimiter = rateLimit({
   windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
-  message: { error: "Muitas requisições. Aguarde um instante." },
+  handler: logAndBlock("teto_publico", { error: "Muitas requisições. Aguarde um instante." }),
 });
 
 // Cobrança (Mercado Pago): cada chamada cria uma preferência de checkout. Sem
@@ -85,21 +85,21 @@ export const billingLimiter = rateLimit({
 // Uso normal é baixo (algumas por dia); trava flood sem atrapalhar.
 export const emailSendLimiter = rateLimit({
   windowMs: 60_000, max: 12, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
-  message: { error: "Muitos envios seguidos. Aguarde um instante." },
+  handler: logAndBlock("teto_envio_email", { error: "Muitos envios seguidos. Aguarde um instante." }),
 });
 
 // Relatar problema: cada envio grava no banco e dispara um e-mail pro suporte.
 // Uso legítimo é raro (uma pessoa relatando algo), então trava spam sem incomodar.
 export const feedbackLimiter = rateLimit({
   windowMs: 15 * 60_000, max: 6, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
-  message: { error: "Muitos relatos seguidos. Aguarde alguns minutos." },
+  handler: logAndBlock("teto_feedback", { error: "Muitos relatos seguidos. Aguarde alguns minutos." }),
 });
 
 // Escrita de propostas (criar/editar): corpo de até 3MB (imagens base64);
 // flood disso pesa banco e banda. Uso normal fica muito abaixo.
 export const writeLimiter = rateLimit({
   windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
-  message: { error: "Muitas operações seguidas. Aguarde um instante." },
+  handler: logAndBlock("teto_escrita", { error: "Muitas operações seguidas. Aguarde um instante." }),
 });
 
 // Webhook do Mercado Pago: fica FORA do teto geral de propósito (reenvio de
@@ -110,5 +110,5 @@ export const writeLimiter = rateLimit({
 export const webhookLimiter = rateLimit({
   windowMs: 60_000, max: 120, standardHeaders: true, legacyHeaders: false,
   skip: () => process.env.NODE_ENV === "test",
-  message: { error: "Muitas notificações. Aguarde." },
+  handler: logAndBlock("teto_webhook", { error: "Muitas notificações. Aguarde." }),
 });
