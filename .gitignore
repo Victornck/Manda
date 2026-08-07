@@ -11,3 +11,8 @@ uploads/
 AUDITORIA_SEGURANCA_MANDA.md
 # Dados do Postgres embutido usado nos testes
 backend/test/.pgdata/
+
+.claude/
+.agents/
+agent/
+skills-lock.json
