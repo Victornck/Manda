@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Send, ArrowRight, MessageCircle } from "lucide-react";
+import { X, Send, ArrowRight, MessageCircle, Menu } from "lucide-react";
 import { font, color } from "../theme.js";
 import { searchSupport, topicById, SUPPORT_STARTERS } from "../lib/support.js";
 import ReportProblem from "./ReportProblem.jsx";
@@ -132,13 +132,26 @@ export function SupportChatBody({ variant = "panel" }) {
 
 // Página cheia (usada no mobile e como aba de Suporte). Fundo branco, cabeçalho
 // e conversa na mesma coluna centralizada.
-export function SupportPage({ userEmail = "" }) {
+export function SupportPage({ userEmail = "", onMenu }) {
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#fff" }}>
+    <div className="sp-root" style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#fff" }}>
+      <style>{`
+        /* Suporte no mobile (≤767px): altura real do viewport e header que quebra
+           em duas linhas em vez de espremer o título. Desktop (≥768px) intacto. */
+        @media (max-width:767px){
+          .sp-root{ height:100dvh !important; }
+          .sp-head{ flex-wrap:wrap !important; padding:16px !important; gap:10px 12px !important; }
+          .sp-head-t{ min-width:0; }
+          .sp-hamb{ display:inline-flex !important; }
+        }
+      `}</style>
       <div style={{ flex: 1, minHeight: 0, width: "100%", maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column" }}>
-        <div style={{ flex: "none", borderBottom: "1px solid #ECE6DF", padding: "20px 22px", display: "flex", alignItems: "center", gap: 13 }}>
+        <div className="sp-head" style={{ flex: "none", borderBottom: "1px solid #ECE6DF", padding: "20px 22px", display: "flex", alignItems: "center", gap: 13 }}>
+          <button className="sp-hamb" onClick={onMenu} aria-label="Abrir menu de navegação" style={{ display: "none", alignItems: "center", justifyContent: "center", width: 40, height: 40, border: "none", background: "none", color: color.gray500, borderRadius: 9, cursor: "pointer", flex: "none" }}>
+            <Menu size={22} strokeWidth={2} />
+          </button>
           <MMark size={40} />
-          <div>
+          <div className="sp-head-t">
             <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.02em" }}>Ajuda do Manda</div>
             <div style={{ fontSize: "13px", color: color.gray500 }}>Tire dúvidas sobre qualquer campo ou recurso.</div>
           </div>

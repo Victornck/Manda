@@ -4,7 +4,7 @@ import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
   Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
-  Copy, Send, GripVertical, Home as HomeIcon,
+  Copy, Send, GripVertical, Home as HomeIcon, Menu, ChevronsLeft, ChevronsRight,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, initials, shadow } from "../theme.js";
 import HomePage from "./Home.jsx";
@@ -145,6 +145,15 @@ export default function Dashboard({ go }) {
   const { tab: urlTab } = useParams();
   const navigate = useNavigate();
   const [view, setView] = useState(() => TAB_TO_VIEW[urlTab || ""] || "home");
+
+  // Navegação colapsável. Desktop: sidebar recolhida (só ícones) por padrão,
+  // expansível e lembrada no localStorage. Mobile: drawer sobre o conteúdo,
+  // fechado por padrão. Trocar de tela fecha o drawer; ESC também fecha.
+  const [sideOpen, setSideOpen] = useState(() => { try { return localStorage.getItem("manda_side_open") === "1"; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem("manda_side_open", sideOpen ? "1" : "0"); } catch { /* ignore */ } }, [sideOpen]);
+  const [drawer, setDrawer] = useState(false);
+  useEffect(() => { if (!drawer) return; const onKey = (e) => { if (e.key === "Escape") setDrawer(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [drawer]);
+  useEffect(() => { setDrawer(false); }, [view]);
 
   // URL mudou (voltar/avançar): segue, exceto se estiver no meio de uma edição.
   useEffect(() => {
@@ -924,10 +933,10 @@ export default function Dashboard({ go }) {
   const missing = [!doc.client.trim() && "Cliente", !doc.title.trim() && "Título"].filter(Boolean);
 
   return (
-    <div className="db" style={{ fontFamily: font.body, color: color.ink, background: color.surface2 }}>
+    <div className={`db${!sideOpen ? " nav-mini" : ""}${drawer ? " drawer" : ""}${view === "editor" ? " db-editing" : view === "calc" ? " db-calcfull" : ""}`} style={{ fontFamily: font.body, color: color.ink, background: color.surface2 }}>
       <style>{`
         .db{ display:flex; min-height:100vh; }
-        .db-side{ width:248px; flex:none; background:#fff; border-right:1px solid ${color.line2}; display:flex; flex-direction:column; position:sticky; top:0; height:100vh; }
+        .db-side{ width:248px; flex:none; background:#fff; border-right:1px solid ${color.line2}; display:flex; flex-direction:column; position:sticky; top:0; height:100vh; transition:width .2s ease; }
         .db-main{ flex:1; min-width:0; display:flex; flex-direction:column; }
         .db-pad{ padding:32px 40px; width:100%; max-width:1160px; }
 
@@ -969,7 +978,7 @@ export default function Dashboard({ go }) {
         .db-profbtn:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
         .db-navlabel{ font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:${color.gray400}; padding:14px 12px 6px; }
         .db-pro{ margin-left:auto; display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; letter-spacing:0.03em; color:${color.accentInk}; background:${color.accentTint}; border:1px solid ${color.accentLine}; padding:1px 6px 1px 5px; border-radius:6px; }
-        .db-menuitem{ display:flex; align-items:center; gap:10px; width:100%; padding:9px 11px; border:none; background:none; border-radius:8px; font-family:${font.body}; font-size:13.5px; font-weight:500; color:${color.gray700}; cursor:pointer; text-align:left; transition:background .12s ease; }
+        .db-menuitem{ display:flex; align-items:center; gap:10px; width:100%; padding:9px 11px; border:none; background:none; border-radius:8px; font-family:${font.body}; font-size:13.5px; font-weight:500; color:${color.gray700}; cursor:pointer; text-align:left; white-space:nowrap; transition:background .12s ease; }
         .db-menuitem:hover{ background:${color.surface}; color:${color.ink}; }
 
         .db-search{ display:flex; align-items:center; gap:8px; background:#fff; border:1px solid ${color.gray200}; border-radius:10px; padding:0 12px; height:40px; min-width:230px; transition:border-color .15s ease, box-shadow .15s ease; }
@@ -1027,7 +1036,7 @@ export default function Dashboard({ go }) {
         /* Mobile: no passo ativo do onboarding, o botão desce pra baixo do texto em vez de espremer a coluna. */
         @media (max-width:560px){
           .db-onb-row{ flex-wrap:wrap; row-gap:12px; }
-          .db-onb-cta{ width:100%; margin-left:39px; justify-content:center; }
+          .db-onb-cta{ width:calc(100% - 39px); margin-left:39px; justify-content:center; }
         }
         .db-onb-step{ display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:11px; border:1px solid ${color.line2}; transition:background .15s ease, border-color .15s ease; }
         .db-onb-step.done{ border-color:transparent; background:${color.surface2}; }
@@ -1186,13 +1195,36 @@ export default function Dashboard({ go }) {
         @keyframes dbIntroOut{ to{ opacity:0; visibility:hidden; } }
         @keyframes dbIntroMark{ 0%{ transform:scale(1); opacity:1; } 100%{ transform:scale(1.18); opacity:0; } }
 
-        @media (max-width:980px){
-          .db-side{ width:70px; }
-          .db-collapsed{ display:none !important; }
-          .db-mark-only{ display:block !important; }
-          .db-new{ padding:11px 0; }
-          .db-nav a{ justify-content:center; padding:11px 0; }
-          .db-profile{ justify-content:center; }
+        /* Controles da navegação: toggle (desktop), fechar (mobile), hambúrguer. */
+        .db-side-toggle, .db-drawer-close, .db-hamb{ display:inline-flex; align-items:center; justify-content:center; border:none; background:none; color:${color.gray500}; border-radius:9px; cursor:pointer; transition:background .14s ease, color .14s ease; }
+        .db-side-toggle{ width:32px; height:32px; margin-left:auto; }
+        .db-drawer-close{ width:34px; height:34px; margin-left:auto; display:none; }
+        .db-hamb{ width:40px; height:40px; }
+        .db-side-toggle:hover, .db-drawer-close:hover, .db-hamb:hover{ background:${color.surface}; color:${color.ink}; }
+        .db-side-toggle:focus-visible, .db-drawer-close:focus-visible, .db-hamb:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
+        .db-topbar{ display:none; }
+        .db-scrim{ display:none; }
+
+        /* DESKTOP (≥768px): sidebar recolhida (só ícones) por padrão, expansível. */
+        @media (min-width:768px){
+          .db.nav-mini .db-side{ width:72px; }
+          .db.nav-mini .db-collapsed{ display:none !important; }
+          .db.nav-mini .db-mark-only{ display:block !important; }
+          .db.nav-mini .db-logo-row{ flex-direction:column; gap:10px; height:auto; }
+          .db.nav-mini .db-side-toggle{ margin:0 auto; }
+          .db.nav-mini .db-nav a{ justify-content:center; padding:11px 0; }
+          .db.nav-mini .db-new{ padding:11px 0; }
+          .db.nav-mini .db-profile{ justify-content:center; }
+        }
+
+        /* MOBILE (≤767px): sidebar vira drawer sobre o conteúdo (largura cheia). */
+        @media (max-width:767px){
+          .db-side{ position:fixed; left:0; top:0; height:100dvh; width:min(84vw,300px); transform:translateX(-100%); transition:transform .2s ease-out; box-shadow:0 24px 60px -12px rgba(20,20,30,0.4); z-index:200; }
+          .db.drawer .db-side{ transform:translateX(0); }
+          .db.drawer .db-scrim{ display:block; position:fixed; inset:0; background:rgba(10,10,12,0.42); z-index:190; animation:dbFade .2s ease both; }
+          .db-side-toggle{ display:none !important; }
+          .db-drawer-close{ display:inline-flex; }
+          .db-topbar{ display:flex; align-items:center; gap:10px; height:54px; flex:none; padding:0 10px; background:#fff; border-bottom:1px solid ${color.line2}; position:sticky; top:0; z-index:50; }
         }
         @media (max-width:820px){
           .db-split{ grid-template-columns:1fr !important; }
@@ -1207,6 +1239,44 @@ export default function Dashboard({ go }) {
           .db-c-value, .db-c-date{ justify-self:end; text-align:right; }
           .db-del, .db-act{ opacity:1; }
         }
+
+        /* ───── MOBILE do editor de propostas (≤767px). Escopo: só .db-editing.
+           Desktop (≥768px) permanece exatamente como está. ───── */
+        @media (max-width:767px){
+          /* Editor vira tela cheia real: some a sidebar, conteúdo usa 100% da largura. */
+          .db-editing .db-side{ display:none !important; }
+          /* 100dvh respeita a barra do navegador e a safe-area; !important vence o height:100vh inline. */
+          .db-editing .db-edit-root{ height:100dvh !important; }
+          /* Header compacto; quebra em duas linhas quando faltar espaço, sem apertar. */
+          .db-edit-top{ padding:10px 14px !important; gap:8px 10px !important; }
+          /* Coluna de edição com respiro lateral de 16px, sem overflow horizontal. */
+          .db-edit-scroll{ padding:16px 16px 28px !important; }
+          .db-edit-scroll > div{ max-width:100% !important; }
+          /* Modelos: grade de 2 colunas, área de toque confortável (min 46px). */
+          .db-tpl-grid{ display:grid !important; grid-template-columns:1fr 1fr; gap:8px !important; }
+          .db-tpl-grid > .db-btn{ width:100%; justify-content:flex-start; padding:12px 13px !important; min-height:46px; }
+          /* Logo e capa empilhadas, ocupando a largura toda e claramente tocáveis. */
+          .db-upl-row{ flex-direction:column !important; gap:16px !important; }
+          .db-upl-row > div{ width:100%; }
+          .db-upload{ width:100% !important; }
+          /* Barra inferior: botão largo e padding respeitando a safe-area do iPhone. */
+          .db-footbar{ padding:12px 16px calc(14px + env(safe-area-inset-bottom)) !important; gap:12px !important; }
+          .db-foot-actions{ width:100%; }
+          .db-foot-actions .db-btn{ flex:1; }
+          .db-finish{ width:100%; justify-content:center; }
+          /* Prévia no mobile: abre como camada cheia (drawer), em vez de coluna lado a lado. */
+          .db-editing .db-preview{ position:fixed !important; inset:0 !important; z-index:130; display:block !important; padding:16px 16px calc(24px + env(safe-area-inset-bottom)) !important; -webkit-overflow-scrolling:touch; }
+          .db-preview-close{ display:inline-flex !important; position:sticky; top:0; z-index:2; }
+          /* Itens do investimento: a descrição ganha a linha inteira (e cresce em altura,
+             mostrando todo o texto); valor e controles descem para a segunda linha. */
+          .db-item-row{ flex-wrap:wrap; align-items:flex-start !important; }
+          .db-item-row > .db-item-desc{ order:-1; flex:1 1 100% !important; }
+          /* Calculadora: card com padding menor no mobile pra sobrar largura ao conteúdo. */
+          .calc-card{ padding:16px 14px !important; }
+          /* Calculadora em tela cheia no mobile: esconde a barra lateral e mostra o "voltar". */
+          .db-calcfull .db-side{ display:none !important; }
+          .calc-topbar{ display:flex !important; }
+        }
         @media (prefers-reduced-motion: reduce){
           .db *, .db *::before, .db *::after{ transition-duration:.001ms !important; animation-duration:.001ms !important; }
           .db-spin{ animation:none !important; }
@@ -1216,9 +1286,15 @@ export default function Dashboard({ go }) {
       {/* SIDEBAR */}
       <aside className="db-side">
         <div style={{ padding: "18px 16px 10px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 6px", marginBottom: 14, height: 28 }}>
+          <div className="db-logo-row" style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 6px", marginBottom: 14, height: 28 }}>
             <img src="/logo-horizontal.svg" alt="Manda" className="db-collapsed" style={{ height: 24, width: "auto", display: "block" }} />
             <img src="/logo-mark.svg" alt="Manda" className="db-mark-only" style={{ width: 28, height: 28, flex: "none", display: "none" }} />
+            <button className="db-side-toggle" onClick={() => setSideOpen((v) => !v)} aria-label={sideOpen ? "Recolher menu" : "Expandir menu"} title={sideOpen ? "Recolher menu" : "Expandir menu"}>
+              {sideOpen ? <ChevronsLeft size={18} strokeWidth={2} /> : <ChevronsRight size={18} strokeWidth={2} />}
+            </button>
+            <button className="db-drawer-close" onClick={() => setDrawer(false)} aria-label="Fechar menu">
+              <X size={20} strokeWidth={2} />
+            </button>
           </div>
 
           {/* Perfil no topo (com menu Sair), como na referência */}
@@ -1237,7 +1313,7 @@ export default function Dashboard({ go }) {
             {profileMenu && (
               <>
                 <div onClick={() => setProfileMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div role="menu" style={{ position: "absolute", top: "calc(100% + 4px)", left: 8, right: 8, zIndex: 41, background: color.white, border: `1px solid ${color.line2}`, borderRadius: 11, boxShadow: shadow.card, padding: 5 }}>
+                <div role="menu" style={{ position: "absolute", top: "calc(100% + 4px)", left: 8, right: 8, minWidth: 190, zIndex: 41, background: color.white, border: `1px solid ${color.line2}`, borderRadius: 11, boxShadow: shadow.card, padding: 5 }}>
                   <button role="menuitem" onClick={() => { setProfileMenu(false); navTo("settings"); }} className="db-menuitem">
                     <Settings size={16} strokeWidth={1.9} />Configurações
                   </button>
@@ -1263,8 +1339,21 @@ export default function Dashboard({ go }) {
         {APP_VERSION && <div className="db-collapsed" style={{ borderTop: `1px solid ${color.line2}`, padding: "12px 22px", fontSize: 11, color: color.gray400, letterSpacing: "0.02em" }}>Manda v{APP_VERSION}</div>}
       </aside>
 
+      {/* Scrim do drawer (mobile): tocar fora fecha a navegação. */}
+      <div className="db-scrim" onClick={() => setDrawer(false)} aria-hidden="true" />
+
       {/* MAIN */}
       <main className="db-main">
+        {/* Barra superior do mobile com o hambúrguer, nas telas de navegação
+            (editor, calculadora e suporte têm seu próprio topo). */}
+        {view !== "editor" && view !== "calc" && view !== "support" && (
+          <div className="db-topbar">
+            <button className="db-hamb" onClick={() => setDrawer(true)} aria-label="Abrir menu de navegação" aria-expanded={drawer}>
+              <Menu size={22} strokeWidth={2} />
+            </button>
+            <img src="/logo-horizontal.svg" alt="Manda" style={{ height: 22, width: "auto" }} />
+          </div>
+        )}
         {serverDown && (
           <div style={{ background: "#FEF3E2", borderBottom: "1px solid #F5D9A8", color: "#8A5A1A", fontSize: "13.5px", fontWeight: 500, padding: "10px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}><AlertTriangle size={15} strokeWidth={2} />Sem conexão com o servidor. Você ainda vê o que já carregou, mas concluir e sincronizar precisam de internet.</span>
@@ -1414,20 +1503,20 @@ export default function Dashboard({ go }) {
           <DesignGallery onUse={startWithDesign} plan={user?.role === "admin" ? "business" : user?.plan} onUpgrade={() => setShowPlans(true)} scope={user?.email} />
         ) : view === "calc" ? (
           planHasFeature(user, FEATURES.CALCULATOR)
-            ? <CalculatorPanel onNewProposal={(desc, value, list) => startProposalWithItem(desc, value, list)} scope={user?.email} />
+            ? <CalculatorPanel onNewProposal={(desc, value, list) => startProposalWithItem(desc, value, list)} scope={user?.email} onBack={() => navTo("home")} />
             : <PremiumLock title="Calculadora de preços" desc="Descubra o preço justo do seu projeto com base em horas, custos e margem. Disponível nos planos pagos." onUpgrade={() => setShowPlans(true)} />
         ) : view === "clients" ? (
           <ClientsPanel rows={rows} onRefresh={async () => { await refreshRows(); }} />
         ) : view === "notifications" ? (
           <NotificationsPanel notifs={notifs} readSet={notifRead} onRead={notifSetRead} onDelete={notifDelete} onRefresh={refreshNotifs} />
         ) : view === "support" ? (
-          <SupportPage userEmail={user?.email} />
+          <SupportPage userEmail={user?.email} onMenu={() => setDrawer(true)} />
         ) : view === "settings" ? (
           <SettingsPanel user={user} setUser={setUser} go={go} pushToast={pushToast} usage={usage} />
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+          <div className="db-edit-root" style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
             {/* action bar */}
-            <div style={{ flex: "none", minHeight: 60, background: color.white, borderBottom: `1px solid ${color.line2}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 20px", flexWrap: "wrap" }}>
+            <div className="db-edit-top" style={{ flex: "none", minHeight: 60, background: color.white, borderBottom: `1px solid ${color.line2}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 20px", flexWrap: "wrap" }}>
               <button onClick={exitEditor} className="db-btn" style={{ fontSize: 14, fontWeight: 500, color: color.gray600, background: "none", padding: "6px 8px" }}>
                 <ArrowLeft size={17} strokeWidth={2.2} />{{ templates: "Templates", calc: "Calculadora" }[editorFrom] || "Propostas"}
               </button>
@@ -1440,7 +1529,7 @@ export default function Dashboard({ go }) {
             {/* split */}
             <div className="db-split" style={{ flex: 1, display: "grid", gridTemplateColumns: showPreview ? "1fr 1fr" : "1fr", minHeight: 0 }}>
               {/* editor side */}
-              <div style={{ overflow: "auto", padding: "32px 36px", borderRight: showPreview ? `1px solid ${color.line2}` : "none" }}>
+              <div className="db-edit-scroll" style={{ overflow: "auto", padding: "32px 36px", borderRight: showPreview ? `1px solid ${color.line2}` : "none" }}>
                 {locked && (
                   <div style={{ maxWidth: 440, margin: "0 auto 20px", display: "flex", alignItems: "center", gap: 10, background: "#FEF3E2", border: "1px solid #F5D9A8", color: "#8A5A1A", borderRadius: 12, padding: "12px 14px", fontSize: "13.5px", fontWeight: 500 }}>
                     <Lock size={15} strokeWidth={2} style={{ flex: "none" }} />Esta proposta já foi enviada e não pode ser editada. Para outro cliente, crie uma nova.
@@ -1467,7 +1556,7 @@ export default function Dashboard({ go }) {
 
                   <div>
                     <div style={sectionLabel}>Modelo da proposta</div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <div className="db-tpl-grid" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {DESIGNS.map((d) => {
                         const on = (doc.template || "minimal") === d.id;
                         const locked = tplLocked(d.id);
@@ -1481,10 +1570,10 @@ export default function Dashboard({ go }) {
                       })}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                  <div className="db-upl-row" style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
                     <div>
                       <div style={sectionLabel}>Logo</div>
-                      <label className="db-btn" style={{ display: "flex", alignItems: "center", gap: 12, background: "none", border: "1px dashed #DDD", borderRadius: 11, padding: 12, width: "fit-content", cursor: "pointer" }}>
+                      <label className="db-btn db-upload" style={{ display: "flex", alignItems: "center", gap: 12, background: "none", border: "1px dashed #DDD", borderRadius: 11, padding: 12, width: "fit-content", cursor: "pointer" }}>
                         <input type="file" accept="image/*" onChange={onImage("logo")} style={{ display: "none" }} />
                         {doc.logo
                           ? <img src={doc.logo} alt="" style={{ width: 40, height: 40, borderRadius: 9, objectFit: "cover", display: "block" }} />
@@ -1497,7 +1586,7 @@ export default function Dashboard({ go }) {
                     {coverTpl && (
                       <div>
                         <div style={sectionLabel}>Capa</div>
-                        <label className="db-btn" style={{ display: "flex", alignItems: "center", gap: 12, background: "none", border: "1px dashed #DDD", borderRadius: 11, padding: 12, width: "fit-content", cursor: "pointer" }}>
+                        <label className="db-btn db-upload" style={{ display: "flex", alignItems: "center", gap: 12, background: "none", border: "1px dashed #DDD", borderRadius: 11, padding: 12, width: "fit-content", cursor: "pointer" }}>
                           <input type="file" accept="image/*" onChange={onImage("cover")} style={{ display: "none" }} />
                           {doc.cover
                             ? <img src={doc.cover} alt="" style={{ width: 66, height: 40, borderRadius: 9, objectFit: "cover", display: "block" }} />
@@ -1645,6 +1734,7 @@ export default function Dashboard({ go }) {
                         const isOver = overItem === i && dragItem !== null && dragItem !== i;
                         return (
                         <div
+                          className="db-item-row"
                           key={i}
                           onDragOver={(e) => { if (dragItem === null || locked) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overItem !== i) setOverItem(i); }}
                           onDrop={(e) => { e.preventDefault(); if (dragItem !== null) moveItem(dragItem, i); setDragItem(null); setOverItem(null); }}
@@ -1662,7 +1752,9 @@ export default function Dashboard({ go }) {
                               style={{ flex: "none", width: 20, height: 38, border: "none", background: "none", padding: 0, touchAction: "none" }}
                             ><GripVertical size={16} strokeWidth={2} /></button>
                           )}
-                          <input id={i === 0 ? "ed-item0" : undefined} className="db-input" value={it.desc} onChange={updItem(i, "desc")} maxLength={LIMITS.itemDesc} placeholder="Item" style={{ ...inp(), flex: 1, textDecoration: it.hidden ? "line-through" : "none", color: it.hidden ? color.gray400 : color.ink }} />
+                          <textarea id={i === 0 ? "ed-item0" : undefined} className="db-input db-item-desc" value={it.desc} onChange={updItem(i, "desc")} maxLength={LIMITS.itemDesc} placeholder="Item" rows={1}
+                            ref={(el) => { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }}
+                            style={{ ...inp(), flex: 1, minWidth: 0, resize: "none", overflow: "hidden", lineHeight: 1.4, textDecoration: it.hidden ? "line-through" : "none", color: it.hidden ? color.gray400 : color.ink }} />
                           <div className="db-input" style={{ display: "flex", alignItems: "center", gap: 4, flex: "none", width: 128, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "0 10px", background: it.hidden ? color.surface : color.white }}>
                             <span style={{ fontSize: 13, color: color.gray400 }}>{currencyOf(doc.currency).symbol}</span>
                             <input value={it.value} onChange={updItem(i, "value")} maxLength={LIMITS.itemValue} inputMode="numeric" placeholder="0" style={{ width: "100%", border: "none", outline: "none", fontFamily: font.body, fontSize: 14, padding: "10px 0", background: "transparent", textDecoration: it.hidden ? "line-through" : "none", color: it.hidden ? color.gray400 : color.ink }} />
@@ -1716,6 +1808,9 @@ export default function Dashboard({ go }) {
               {/* preview side */}
               {showPreview && (
                 <div className="db-preview" style={{ overflow: "auto", background: color.surface, padding: "32px 36px" }}>
+                  <button className="db-preview-close" onClick={() => setShowPreview(false)} style={{ display: "none", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", fontFamily: font.body, fontSize: 14, fontWeight: 600, color: color.ink, background: "#fff", border: `1px solid ${color.gray200}`, borderRadius: 10, padding: "11px 14px", marginBottom: 14, cursor: "pointer" }}>
+                    <X size={16} strokeWidth={2.2} />Fechar prévia
+                  </button>
                   <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} onEdit={locked ? undefined : focusField} />
                 </div>
               )}
@@ -2328,17 +2423,24 @@ function PriceCalcCore({ onApply, applyLabel = "Usar", scope }) {
 }
 
 // Aba dedicada: mesma calculadora, e "Usar" abre uma proposta nova com o item.
-function CalculatorPanel({ onNewProposal, scope }) {
+function CalculatorPanel({ onNewProposal, scope, onBack }) {
   return (
-    <div className="db-pad" style={{ maxWidth: 640 }}>
+    <>
+      <div className="calc-topbar" style={{ display: "none", alignItems: "center", minHeight: 52, padding: "6px 8px", borderBottom: `1px solid ${color.line2}`, background: "#fff", position: "sticky", top: 0, zIndex: 5 }}>
+        <button onClick={onBack} className="db-btn" style={{ fontSize: 14, fontWeight: 500, color: color.gray600, background: "none", padding: "6px 8px" }}>
+          <ArrowLeft size={17} strokeWidth={2.2} />Voltar
+        </button>
+      </div>
+      <div className="db-pad" style={{ maxWidth: 640 }}>
       <div style={{ marginBottom: 22 }}>
         <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Calculadora de preço</h1>
         <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Monte o preço a partir dos seus custos reais, ou compare com a faixa do mercado. Suas ferramentas e o valor da hora ficam salvos pra próxima.</p>
       </div>
-      <div style={{ background: "#fff", border: `1px solid ${color.line2}`, borderRadius: 16, padding: "22px 24px" }}>
+      <div className="calc-card" style={{ background: "#fff", border: `1px solid ${color.line2}`, borderRadius: 16, padding: "22px 24px" }}>
         <PriceCalcCore onApply={onNewProposal} applyLabel="Criar proposta com" scope={scope} />
       </div>
     </div>
+    </>
   );
 }
 
@@ -3284,8 +3386,8 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
           <p style={subTxt}>Conecte seu Gmail para mandar as propostas pelo seu próprio e-mail. O cliente recebe direto de você, e as respostas dele voltam pra sua caixa.</p>
           {gmail && gmail.connected ? (
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: "13.5px", fontWeight: 600, color: "#2E7D51", background: "#EAF6EF", border: "1px solid #CDE9D8", padding: "8px 12px", borderRadius: 9 }}>
-                <Check size={15} strokeWidth={2.6} />Conectado: {gmail.email}
+              <span style={{ display: "inline-flex", alignItems: "flex-start", gap: 8, maxWidth: "100%", fontSize: "13.5px", fontWeight: 600, color: "#2E7D51", background: "#EAF6EF", border: "1px solid #CDE9D8", padding: "8px 12px", borderRadius: 9 }}>
+                <Check size={15} strokeWidth={2.6} style={{ flex: "none", marginTop: 2 }} /><span style={{ minWidth: 0, overflowWrap: "anywhere", wordBreak: "break-word" }}>Conectado: {gmail.email}</span>
               </span>
               <button onClick={disconnectGmail} disabled={gmailBusy} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "9px 16px" }}>{gmailBusy ? "…" : "Desconectar"}</button>
             </div>
