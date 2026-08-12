@@ -4,14 +4,14 @@ import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
   Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
-  Copy, Send, GripVertical, Home as HomeIcon, Menu, ChevronsLeft, ChevronsRight,
+  Copy, Send, GripVertical, Home as HomeIcon, Menu, Pin, PinOff,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, initials, shadow } from "../theme.js";
 import HomePage from "./Home.jsx";
 import { api, setToken } from "../lib/api.js";
 import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
 import { loadNotifs, mergeNotifs, getSeen, getReadSet, markRead, removeNotifs } from "../lib/notifs.js";
-import { DESIGNS, ProposalDesign, sampleFor } from "../templates/designs.jsx";
+import { DESIGNS, ProposalDesign, sampleFor, templateFields } from "../templates/designs.jsx";
 import CodeInput from "../components/CodeInput.jsx";
 import SupportChat, { SupportPage } from "../components/SupportChat.jsx";
 import { PRICE_TABLE, COMPLEXITY, URGENCY, suggest, fmtBRL, DEFAULT_CONSUMO, PROJECT_DIFFICULTY } from "../lib/pricing.js";
@@ -152,6 +152,9 @@ export default function Dashboard({ go }) {
   const [sideOpen, setSideOpen] = useState(() => { try { return localStorage.getItem("manda_side_open") === "1"; } catch { return false; } });
   useEffect(() => { try { localStorage.setItem("manda_side_open", sideOpen ? "1" : "0"); } catch { /* ignore */ } }, [sideOpen]);
   const [drawer, setDrawer] = useState(false);
+  // Desktop: expande no hover (além do toggle que fixa aberta). No mobile o hover
+  // não dispara (é drawer por toque), e o nav-mini não tem efeito lá, então é seguro.
+  const [hovering, setHovering] = useState(false);
   useEffect(() => { if (!drawer) return; const onKey = (e) => { if (e.key === "Escape") setDrawer(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [drawer]);
   useEffect(() => { setDrawer(false); }, [view]);
 
@@ -186,6 +189,7 @@ export default function Dashboard({ go }) {
   const [step, setStep] = useState(0);
   const [sealing, setSealing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [msgCopied, setMsgCopied] = useState(false);
   const [toDelete, setToDelete] = useState(null);
   const [showPreview, setShowPreview] = useState(true); // toggle do painel de pré-visualização
   const [profileMenu, setProfileMenu] = useState(false); // dropdown do perfil (topo da sidebar)
@@ -516,6 +520,21 @@ export default function Dashboard({ go }) {
     setTimeout(() => setCopied(false), 1800);
     pushToast("Link copiado para a área de transferência.", "success");
   };
+  // Mensagem pronta pro cliente (nome + link + CTA), pra colar no WhatsApp/Instagram.
+  const proposalMessage = () => {
+    const nome = (doc.client || "").trim().split(/\s+/)[0];
+    const saud = nome ? `Olá, ${nome}! Tudo bem? 😊` : "Olá! Tudo bem? 😊";
+    return `${saud}\nPreparei sua proposta e já está disponível para você acessar:\n${shareUrl()}\nQualquer dúvida, estou à disposição!`;
+  };
+  const copyMessage = () => {
+    if (!shareUrl()) return;
+    if (navigator.clipboard) navigator.clipboard.writeText(proposalMessage()).catch(() => {});
+    setMsgCopied(true);
+    setTimeout(() => setMsgCopied(false), 1800);
+    pushToast("Mensagem copiada para a área de transferência.", "success");
+  };
+  // Campos que o modelo escolhido exibe (fonte única; o editor respeita isso).
+  const tplFields = templateFields(doc.template || "minimal");
 
   // Gera um PDF a partir do próprio design da proposta (o mesmo que o cliente vê).
   const pdfRef = useRef(null);
@@ -933,10 +952,10 @@ export default function Dashboard({ go }) {
   const missing = [!doc.client.trim() && "Cliente", !doc.title.trim() && "Título"].filter(Boolean);
 
   return (
-    <div className={`db${!sideOpen ? " nav-mini" : ""}${drawer ? " drawer" : ""}${view === "editor" ? " db-editing" : view === "calc" ? " db-calcfull" : ""}`} style={{ fontFamily: font.body, color: color.ink, background: color.surface2 }}>
+    <div className={`db${!sideOpen && !hovering ? " nav-mini" : ""}${drawer ? " drawer" : ""}${view === "editor" ? " db-editing" : view === "calc" ? " db-calcfull" : ""}`} style={{ fontFamily: font.body, color: color.ink, background: color.surface2 }}>
       <style>{`
         .db{ display:flex; min-height:100vh; }
-        .db-side{ width:248px; flex:none; background:#fff; border-right:1px solid ${color.line2}; display:flex; flex-direction:column; position:sticky; top:0; height:100vh; transition:width .2s ease; }
+        .db-side{ width:248px; flex:none; background:#fff; border-right:1px solid ${color.line2}; display:flex; flex-direction:column; position:sticky; top:0; height:100vh; transition:width .3s cubic-bezier(.2,.8,.2,1); }
         .db-main{ flex:1; min-width:0; display:flex; flex-direction:column; }
         .db-pad{ padding:32px 40px; width:100%; max-width:1160px; }
 
@@ -960,8 +979,8 @@ export default function Dashboard({ go }) {
         .db-input{ transition:border-color .15s ease, box-shadow .15s ease; }
         .db-input:focus{ border-color:${color.accent}; box-shadow:0 0 0 3px rgba(217,119,87,0.15); }
 
-        .db-new{ width:100%; font-size:14.5px; padding:11px; border-radius:10px; }
-        .db-nav a{ display:flex; align-items:center; gap:11px; font-size:14.5px; padding:9px 12px; border-radius:9px; text-decoration:none; transition:background .14s ease, color .14s ease; }
+        .db-new{ width:100%; font-size:14.5px; padding:11px; border-radius:10px; overflow:hidden; white-space:nowrap; }
+        .db-nav a{ display:flex; align-items:center; gap:11px; font-size:14.5px; padding:9px 12px; border-radius:9px; text-decoration:none; overflow:hidden; white-space:nowrap; transition:background .14s ease, color .14s ease; }
         .db-nav a:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
         .db-nav a.idle{ color:${color.gray600}; font-weight:500; background:transparent; }
         .db-nav a.idle:hover{ background:${color.surface}; color:${color.ink}; }
@@ -1210,16 +1229,19 @@ export default function Dashboard({ go }) {
           .db.nav-mini .db-side{ width:72px; }
           .db.nav-mini .db-collapsed{ display:none !important; }
           .db.nav-mini .db-mark-only{ display:block !important; }
-          .db.nav-mini .db-logo-row{ flex-direction:column; gap:10px; height:auto; }
-          .db.nav-mini .db-side-toggle{ margin:0 auto; }
-          .db.nav-mini .db-nav a{ justify-content:center; padding:11px 0; }
+          /* Recolhido: só o símbolo (centralizado) no topo. O pin de fixar aparece
+             quando a sidebar abre (hover ou já fixada), não no rail parado. */
+          .db.nav-mini .db-logo-row{ justify-content:center; }
+          .db.nav-mini .db-side-toggle{ display:none; }
           .db.nav-mini .db-new{ padding:11px 0; }
-          .db.nav-mini .db-profile{ justify-content:center; }
+          /* Perfil é uma pílula com borda: no recolhido o avatar fica centralizado
+             (senão sobra espaço vazio à direita). Ícones da navegação seguem à esquerda. */
+          .db.nav-mini .db-profile{ justify-content:center; padding-left:0; padding-right:0; }
         }
 
         /* MOBILE (≤767px): sidebar vira drawer sobre o conteúdo (largura cheia). */
         @media (max-width:767px){
-          .db-side{ position:fixed; left:0; top:0; height:100dvh; width:min(84vw,300px); transform:translateX(-100%); transition:transform .2s ease-out; box-shadow:0 24px 60px -12px rgba(20,20,30,0.4); z-index:200; }
+          .db-side{ position:fixed; left:0; top:0; height:100dvh; width:min(84vw,300px); transform:translateX(-100%); transition:transform .3s cubic-bezier(.2,.8,.2,1); box-shadow:0 24px 60px -12px rgba(20,20,30,0.4); z-index:200; }
           .db.drawer .db-side{ transform:translateX(0); }
           .db.drawer .db-scrim{ display:block; position:fixed; inset:0; background:rgba(10,10,12,0.42); z-index:190; animation:dbFade .2s ease both; }
           .db-side-toggle{ display:none !important; }
@@ -1284,13 +1306,13 @@ export default function Dashboard({ go }) {
       `}</style>
 
       {/* SIDEBAR */}
-      <aside className="db-side">
+      <aside className="db-side" onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
         <div style={{ padding: "18px 16px 10px" }}>
           <div className="db-logo-row" style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 6px", marginBottom: 14, height: 28 }}>
             <img src="/logo-horizontal.svg" alt="Manda" className="db-collapsed" style={{ height: 24, width: "auto", display: "block" }} />
             <img src="/logo-mark.svg" alt="Manda" className="db-mark-only" style={{ width: 28, height: 28, flex: "none", display: "none" }} />
-            <button className="db-side-toggle" onClick={() => setSideOpen((v) => !v)} aria-label={sideOpen ? "Recolher menu" : "Expandir menu"} title={sideOpen ? "Recolher menu" : "Expandir menu"}>
-              {sideOpen ? <ChevronsLeft size={18} strokeWidth={2} /> : <ChevronsRight size={18} strokeWidth={2} />}
+            <button className="db-side-toggle" onClick={() => setSideOpen((v) => !v)} aria-label={sideOpen ? "Desafixar menu" : "Fixar menu aberto"} title={sideOpen ? "Desafixar menu" : "Fixar menu aberto"} aria-pressed={sideOpen}>
+              {sideOpen ? <PinOff size={17} strokeWidth={2} /> : <Pin size={17} strokeWidth={2} />}
             </button>
             <button className="db-drawer-close" onClick={() => setDrawer(false)} aria-label="Fechar menu">
               <X size={20} strokeWidth={2} />
@@ -1780,19 +1802,23 @@ export default function Dashboard({ go }) {
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                     <Field label="Início"><input className="db-input" value={doc.start} onChange={updDoc("start")} maxLength={LIMITS.start} placeholder="Ex: 10 de agosto" style={inp()} /></Field>
-                    <Field label="Entrega"><input className="db-input" value={doc.end} onChange={updDoc("end")} maxLength={LIMITS.end} placeholder="Ex: 5 de setembro" style={inp()} /></Field>
+                    {tplFields.end && <Field label="Entrega"><input className="db-input" value={doc.end} onChange={updDoc("end")} maxLength={LIMITS.end} placeholder="Ex: 5 de setembro" style={inp()} /></Field>}
                   </div>
 
-                  <div>
-                    <div style={sectionLabel}>Condições</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                      <Field label="Forma de pagamento"><input className="db-input" value={doc.payment} onChange={updDoc("payment")} maxLength={LIMITS.payment} placeholder="Ex: 50% na aprovação, 50% na entrega" style={inp()} /></Field>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                        <Field label="Revisões inclusas"><input className="db-input" value={doc.revisions} onChange={updDoc("revisions")} maxLength={LIMITS.revisions} placeholder="Ex: 2 rodadas" style={inp()} /></Field>
-                        <Field label="Validade"><input className="db-input" value={doc.validity} onChange={updDoc("validity")} maxLength={LIMITS.validity} placeholder="Ex: 15 dias" style={inp()} /></Field>
+                  {(tplFields.payment || tplFields.revisions || tplFields.validity) && (
+                    <div>
+                      <div style={sectionLabel}>Condições</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {tplFields.payment && <Field label="Forma de pagamento"><input className="db-input" value={doc.payment} onChange={updDoc("payment")} maxLength={LIMITS.payment} placeholder="Ex: 50% na aprovação, 50% na entrega" style={inp()} /></Field>}
+                        {(tplFields.revisions || tplFields.validity) && (
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                            {tplFields.revisions && <Field label="Revisões inclusas"><input className="db-input" value={doc.revisions} onChange={updDoc("revisions")} maxLength={LIMITS.revisions} placeholder="Ex: 2 rodadas" style={inp()} /></Field>}
+                            {tplFields.validity && <Field label="Validade"><input className="db-input" value={doc.validity} onChange={updDoc("validity")} maxLength={LIMITS.validity} placeholder="Ex: 15 dias" style={inp()} /></Field>}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
+                  )}
 
                   <div>
                     <div style={sectionLabel}>Sobre mim</div>
@@ -1886,6 +1912,13 @@ export default function Dashboard({ go }) {
                 <div className="db-in-2" style={{ fontSize: 14, color: color.gray500, margin: "6px 0 24px" }}>Agora é só compartilhar com {doc.client || "seu cliente"}.</div>
 
                 <div className="db-in-3" style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div>
+                    <div style={{ ...labelStyle, marginBottom: 7 }}>Mensagem pronta pro cliente</div>
+                    <div style={{ fontSize: "13px", color: color.gray600, background: color.surface3, border: `1px solid ${color.gray200}`, borderRadius: 10, padding: "10px 12px", whiteSpace: "pre-wrap", lineHeight: 1.55, marginBottom: 8 }}>{proposalMessage()}</div>
+                    <button onClick={copyMessage} className="db-btn db-btn-accent" style={{ width: "100%", height: 42, borderRadius: 10, fontSize: 14, background: msgCopied ? "#22C55E" : undefined }}>
+                      {msgCopied ? <><Check size={16} strokeWidth={2.6} />Mensagem copiada!</> : <><Copy size={15} strokeWidth={2.2} />Copiar mensagem</>}
+                    </button>
+                  </div>
                   <div>
                     <div style={{ ...labelStyle, marginBottom: 7 }}>Link da proposta</div>
                     <div style={{ display: "flex", gap: 8 }}>

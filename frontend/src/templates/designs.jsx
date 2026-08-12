@@ -934,6 +934,31 @@ export const DESIGNS = [
   { id: "poster", name: "Pôster", tag: "Impacto", accent: "#5B3DF0", Comp: Poster, cat: "vibrante", novo: true },
 ];
 
+// ── Campos que cada modelo exibe (fonte única para o EDITOR) ─────────────────
+// Início e Entrega são universais em todos os modelos; validade, pagamento e
+// revisões variam por modelo. Os componentes de design acima já filtram por
+// conteúdo (has), então preview, PDF e link público seguem consistentes sem
+// duplicar esta regra. Para um campo novo: acrescente a chave aqui e no design.
+const FIELDS_BY_TEMPLATE = {
+  minimal:   { end: true, validity: false, payment: false, revisions: false },
+  bold:      { end: true, validity: true,  payment: false, revisions: false },
+  editorial: { end: true, validity: true,  payment: true,  revisions: true  },
+  colorido:  { end: true, validity: false, payment: false, revisions: false },
+  capa:      { end: true, validity: false, payment: false, revisions: false },
+  dossie:    { end: true, validity: true,  payment: false, revisions: false },
+  carta:     { end: true, validity: true,  payment: true,  revisions: true  },
+  recibo:    { end: true, validity: true,  payment: false, revisions: false },
+  aurora:    { end: true, validity: true,  payment: false, revisions: false },
+  studio:    { end: true, validity: true,  payment: true,  revisions: false },
+  grande:    { end: true, validity: true,  payment: true,  revisions: true  },
+  poster:    { end: true, validity: true,  payment: false, revisions: false },
+};
+
+// Modelo desconhecido (proposta antiga ou futura): permissivo, mostra tudo.
+export function templateFields(id) {
+  return FIELDS_BY_TEMPLATE[id] || { end: true, validity: true, payment: true, revisions: true };
+}
+
 export function ProposalDesign({ id, doc, accent, onAccept, onEdit }) {
   const d = DESIGNS.find((x) => x.id === id) || DESIGNS[0];
   const Comp = d.Comp;
