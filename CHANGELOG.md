@@ -14,6 +14,13 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.2.2] — 2026-08-12
+
+### Corrigido
+- **Mobile:** ao criar uma proposta, o editor abre nos campos editáveis em vez de
+  já mostrar a prévia por cima. A prévia passa a abrir só quando o usuário toca no
+  olhinho ("Pré-visualizar"). Desktop mantém a prévia ao lado dos campos.
+
 ## [0.2.1] — 2026-08-12
 
 ### Melhorado

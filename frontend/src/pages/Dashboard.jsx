@@ -191,7 +191,9 @@ export default function Dashboard({ go }) {
   const [copied, setCopied] = useState(false);
   const [msgCopied, setMsgCopied] = useState(false);
   const [toDelete, setToDelete] = useState(null);
-  const [showPreview, setShowPreview] = useState(true); // toggle do painel de pré-visualização
+  // Desktop começa mostrando a prévia ao lado; no mobile começa nos CAMPOS
+  // (a prévia é uma camada e cobriria o formulário), e o usuário abre no olhinho.
+  const [showPreview, setShowPreview] = useState(() => !(typeof window !== "undefined" && window.matchMedia && window.matchMedia("(max-width: 767px)").matches));
   const [profileMenu, setProfileMenu] = useState(false); // dropdown do perfil (topo da sidebar)
   const [onb, setOnb] = useState({});                   // progresso do tutorial (carregado por usuário)
   const [onbLoaded, setOnbLoaded] = useState(false);    // só persiste/mostra DEPOIS de carregar o salvo
