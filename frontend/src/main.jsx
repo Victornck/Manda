@@ -12,6 +12,14 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     dsn: import.meta.env.VITE_SENTRY_DSN,
     environment: import.meta.env.MODE,
     tracesSampleRate: 0, // só erros, sem performance monitoring
+    // Ignora ruído do navegador interno do Instagram/Facebook (script deles que
+    // chama window.webkit.messageHandlers e estoura em certas versões do iOS).
+    // Não é bug do Manda; só polui o Sentry.
+    ignoreErrors: [
+      "window.webkit.messageHandlers",
+      "sendDataToNative",
+      "sendPageHideMessage",
+    ],
   });
 }
 

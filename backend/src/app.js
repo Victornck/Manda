@@ -90,12 +90,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "../../frontend/dist");
 if (fs.existsSync(path.join(distDir, "index.html"))) {
   app.use(express.static(distDir));
+  // Lê o index.html uma vez na subida. Como é um SPA, TODAS as rotas devolvem o
+  // mesmo HTML — mas a canônica precisa apontar cada URL pra si mesma, senão o
+  // Google vê /precos, /privacidade etc. como "alternativas" da home (canônica
+  // fixa) e não indexa. Aqui injetamos a canônica e a og:url corretas por rota.
+  const indexHtml = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
   // Fallback de SPA: qualquer rota que NÃO seja /api nem /health devolve o
   // index.html, para o React Router cuidar das rotas no cliente (/app, /precos,
   // /p/:token, etc.). O 404 de /api segue para o notFound.
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api") || req.path === "/health") return next();
-    res.sendFile(path.join(distDir, "index.html"));
+    const url = "https://mandaproposta.com" + (req.path === "/" ? "/" : req.path.replace(/\/+$/, ""));
+    const html = indexHtml
+      .replace('href="https://mandaproposta.com/"', `href="${url}"`)
+      .replace('content="https://mandaproposta.com/"', `content="${url}"`);
+    res.type("html").send(html);
   });
   console.log("[web] servindo o front a partir de", distDir);
 }

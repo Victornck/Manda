@@ -14,6 +14,16 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.2.3] — 2026-08-21
+
+### Corrigido
+- **SEO / indexação:** a canônica era fixa (apontava sempre pra home) e, por ser
+  um SPA, todas as rotas herdavam ela, então o Google marcava /precos,
+  /privacidade etc. como "página alternativa" e não indexava. Agora o backend
+  injeta a canônica e a og:url corretas por rota (cada URL aponta pra si mesma).
+- **Ruído no Sentry:** ignora erros do navegador interno do Instagram/Facebook
+  (window.webkit.messageHandlers / sendDataToNative), que não são bugs do app.
+
 ## [0.2.2] — 2026-08-12
 
 ### Corrigido
