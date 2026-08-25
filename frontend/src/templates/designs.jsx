@@ -103,6 +103,15 @@ export const SAMPLE_BY_ID = {
 export const sampleFor = (id) => SAMPLE_BY_ID[id] || SAMPLE_DOC;
 
 const has = (v) => v != null && String(v).trim() !== "";
+
+// Enquadramento da capa: "x,y" (0-100) -> "x% y%" pro background-position.
+// Vazio/ausente/inválido -> "center" (padrão antigo, compatível com propostas
+// que não têm posicionamento salvo).
+export function coverPosition(s) {
+  const m = /^(\d{1,3}),(\d{1,3})$/.exec(String(s || ""));
+  if (!m) return "center";
+  return `${Math.min(100, +m[1])}% ${Math.min(100, +m[2])}%`;
+}
 // Preenchimento do destaque: sólido, ou gradiente quando o usuário liga a segunda cor.
 const accentFill = (doc, accent) => (doc.gradient && has(doc.accent2))
   ? `linear-gradient(135deg, ${accent} 0%, ${doc.accent2} 100%)`
@@ -453,7 +462,7 @@ function Capa({ doc, accent, onAccept, onEdit }) {
   const T = themeOf(doc);
   const deep = accentInkFor(accent, T);
   const hero = doc.cover
-    ? { backgroundImage: `url(${doc.cover})`, backgroundSize: "cover", backgroundPosition: "center" }
+    ? { backgroundImage: `url(${doc.cover})`, backgroundSize: "cover", backgroundPosition: coverPosition(doc.coverPos) }
     : { background: `linear-gradient(135deg, ${accent} 0%, ${accent}B3 100%)` };
   return (
     <div style={{ background: T.bg, color: T.ink, border: `1px solid ${T.border}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 12px 40px -16px rgba(20,20,30,0.16)", overflowWrap: "anywhere", wordBreak: "break-word" }}>
@@ -511,7 +520,7 @@ function Dossie({ doc, accent, onAccept, onEdit }) {
   const total = sum(items);
   const chips = [["Início", doc.start], ["Entrega", doc.end], ["Validade", doc.validity]].filter(([, v]) => has(v));
   const hero = doc.cover
-    ? { backgroundImage: `url(${doc.cover})`, backgroundSize: "cover", backgroundPosition: "center" }
+    ? { backgroundImage: `url(${doc.cover})`, backgroundSize: "cover", backgroundPosition: coverPosition(doc.coverPos) }
     : { background: `linear-gradient(155deg, ${darken(accent, 0.6)} 0%, #0C0C0C 100%)` };
   return (
     <div style={{ background: "#0E0E0E", color: "#fff", border: "1px solid #1E1E1E", borderRadius: 16, overflow: "hidden", boxShadow: "0 16px 44px -18px rgba(0,0,0,0.5)", overflowWrap: "anywhere", wordBreak: "break-word" }}>

@@ -14,6 +14,17 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.3.0] — 2026-08-21
+
+### Adicionado
+- **Enquadramento da capa:** nos modelos com foto (Capa e Dossiê), o usuário pode
+  arrastar a imagem pra escolher a parte visível (pan), com mouse ou toque, sem
+  distorcer (mantém a proporção). O enquadramento é salvo junto da proposta
+  (coluna `cover_pos`, formato "x,y" em %) e respeitado no editor, na prévia, no
+  link público e no PDF. Botão "Centralizar" para resetar. Propostas antigas sem
+  posicionamento continuam centralizadas (compatível). Validação no backend
+  (só aceita "x,y"); as validações de upload/segurança da imagem não foram tocadas.
+
 ## [0.2.3] — 2026-08-21
 
 ### Corrigido

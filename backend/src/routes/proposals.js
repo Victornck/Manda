@@ -40,7 +40,7 @@ const toProposal = (p) => ({
   id: p.id, publicId: p.public_id, client: p.client, company: p.company, clientEmail: p.client_email,
   title: p.title, scope: p.scope, items: p.items, start: p.start_date, end: p.end_date,
   payment: p.payment, revisions: p.revisions, validity: p.validity, bio: p.bio,
-  accent: p.accent, accent2: p.accent2, gradient: p.gradient, theme: p.theme, watermark: p.watermark, logo: p.logo, cover: p.cover,
+  accent: p.accent, accent2: p.accent2, gradient: p.gradient, theme: p.theme, watermark: p.watermark, logo: p.logo, cover: p.cover, coverPos: p.cover_pos || "",
   template: p.template, status: p.status, value: Number(p.value), currency: p.currency || "BRL",
   createdAt: p.created_at, updatedAt: p.updated_at,
 });
@@ -314,9 +314,9 @@ r.post("/", writeLimiter, async (req, res, next) => {
       }
     }
     const { rows } = await query(
-      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value, logo, cover, theme, watermark, currency)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) returning *`,
-      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark, d.currency]
+      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value, logo, cover, theme, watermark, currency, cover_pos)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) returning *`,
+      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark, d.currency, d.coverPos]
     );
     // Registra o uso (append-only). Nunca é apagado ao excluir a proposta.
     await query("insert into proposal_usage (user_id) values ($1)", [req.user.id]).catch(() => {});
@@ -339,9 +339,9 @@ r.put("/:id", writeLimiter, async (req, res, next) => {
       return res.status(409).json({ error: "Esta proposta já foi enviada e não pode ser editada. Crie uma nova." });
     }
     const { rows } = await query(
-      `update proposals set client=$3, company=$4, client_email=$5, title=$6, scope=$7, items=$8, start_date=$9, end_date=$10, payment=$11, revisions=$12, validity=$13, bio=$14, accent=$15, accent2=$16, gradient=$17, template=$18, value=$19, logo=$20, cover=$21, theme=$22, watermark=$23, currency=$24, updated_at=now()
+      `update proposals set client=$3, company=$4, client_email=$5, title=$6, scope=$7, items=$8, start_date=$9, end_date=$10, payment=$11, revisions=$12, validity=$13, bio=$14, accent=$15, accent2=$16, gradient=$17, template=$18, value=$19, logo=$20, cover=$21, theme=$22, watermark=$23, currency=$24, cover_pos=$25, updated_at=now()
        where id=$1 and user_id=$2 returning *`,
-      [req.params.id, req.user.id, d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark, d.currency]
+      [req.params.id, req.user.id, d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark, d.currency, d.coverPos]
     );
     if (!rows[0]) return res.status(404).json({ error: "Proposta não encontrada." });
     res.json({ proposal: toProposal(rows[0]) });

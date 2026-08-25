@@ -43,6 +43,7 @@ export const proposalSchema = z.object({
   watermark: z.string().max(4).optional().default(""), // "" auto · "off" nenhuma · uma letra
   logo: z.string().max(900000).optional().default(""),   // data URL comprimida (logo)
   cover: z.string().max(900000).optional().default(""),  // data URL comprimida (capa)
+  coverPos: z.string().max(20).regex(/^(\d{1,3},\d{1,3})?$/).optional().default(""), // enquadramento da capa: "x,y" em % (vazio = centro)
   template: z.enum(["minimal", "bold", "editorial", "colorido", "capa", "dossie", "carta", "aurora", "studio", "recibo", "grande", "poster"]).optional().default("minimal"),
 });
 

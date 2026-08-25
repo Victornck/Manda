@@ -4,7 +4,7 @@ import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
   Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
-  Copy, Send, GripVertical, Home as HomeIcon, Menu, Pin, PinOff,
+  Copy, Send, GripVertical, Home as HomeIcon, Menu, Pin, PinOff, Move,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, initials, shadow } from "../theme.js";
 import HomePage from "./Home.jsx";
@@ -34,7 +34,7 @@ const BLANK_DOC = {
   scope: "", items: [{ desc: "", value: "" }],
   start: "", end: "", payment: "", revisions: "", validity: "", bio: "",
   currency: DEFAULT_CURRENCY,
-  accent: "#0A0A0A", accent2: "#6C48B0", gradient: false, theme: "claro", watermark: "", logo: null, cover: null, template: "minimal",
+  accent: "#0A0A0A", accent2: "#6C48B0", gradient: false, theme: "claro", watermark: "", logo: null, cover: null, coverPos: "", template: "minimal",
 };
 
 const MAX_ITEMS = 20;
@@ -615,7 +615,7 @@ export default function Dashboard({ go }) {
     start: doc.start, end: doc.end, payment: doc.payment, revisions: doc.revisions,
     validity: doc.validity, bio: doc.bio, accent: doc.accent, accent2: doc.accent2, gradient: !!doc.gradient, theme: doc.theme || "claro", watermark: doc.watermark || "",
     currency: doc.currency || DEFAULT_CURRENCY,
-    logo: doc.logo || "", cover: doc.cover || "", template: doc.template,
+    logo: doc.logo || "", cover: doc.cover || "", coverPos: doc.coverPos || "", template: doc.template,
   });
 
   // Rascunho guardado localmente (não consome cota do plano até ser concluído).
@@ -624,7 +624,7 @@ export default function Dashboard({ go }) {
     title: doc.title || "Proposta sem título", value: total, status: "Rascunho", date: "Hoje",
     scope: doc.scope, items: doc.items, start: doc.start, end: doc.end,
     payment: doc.payment, revisions: doc.revisions, validity: doc.validity, bio: doc.bio,
-    accent: doc.accent, accent2: doc.accent2, gradient: doc.gradient, logo: doc.logo, cover: doc.cover, template: doc.template,
+    accent: doc.accent, accent2: doc.accent2, gradient: doc.gradient, logo: doc.logo, cover: doc.cover, coverPos: doc.coverPos || "", template: doc.template,
     currency: doc.currency || DEFAULT_CURRENCY,
     updatedAt: Date.now(),
   });
@@ -673,7 +673,7 @@ export default function Dashboard({ go }) {
       items: Array.isArray(src.items) && src.items.length ? src.items : BLANK_DOC.items,
       start: src.start || "", end: src.end || "", payment: src.payment || "",
       revisions: src.revisions || "", validity: src.validity || "", bio: src.bio || "",
-      accent: src.accent || "#0A0A0A", accent2: src.accent2 || "#6C48B0", gradient: !!src.gradient, theme: src.theme || "claro", watermark: src.watermark || "", logo: src.logo || null, cover: src.cover || null, template: src.template || "minimal",
+      accent: src.accent || "#0A0A0A", accent2: src.accent2 || "#6C48B0", gradient: !!src.gradient, theme: src.theme || "claro", watermark: src.watermark || "", logo: src.logo || null, cover: src.cover || null, coverPos: src.coverPos || "", template: src.template || "minimal",
       currency: src.currency || DEFAULT_CURRENCY,
     };
     setDoc(d);
@@ -752,7 +752,8 @@ export default function Dashboard({ go }) {
       const dataUrl = await compressImage(file, key);
       // Sobe pro disco do servidor e guarda só a URL (não o base64 no banco).
       const { url } = await api.uploadImage(dataUrl);
-      setDoc((d) => ({ ...d, [key]: url }));
+      // Trocar a capa reseta o enquadramento (a posição antiga pode não servir pra nova imagem).
+      setDoc((d) => ({ ...d, [key]: url, ...(key === "cover" ? { coverPos: "" } : {}) }));
     } catch (err) {
       pushToast(err?.message || "Não foi possível enviar a imagem.", "info");
     }
@@ -1617,8 +1618,9 @@ export default function Dashboard({ go }) {
                             : <span style={{ width: 66, height: 40, borderRadius: 9, background: color.surface, color: color.gray400, display: "flex", alignItems: "center", justifyContent: "center" }}><ImageIcon size={20} strokeWidth={1.9} /></span>}
                           <span style={{ fontSize: "13.5px", fontWeight: 500, color: color.gray500 }}>{doc.cover ? "Trocar capa" : "Enviar capa (foto)"}</span>
                         </label>
-                        {doc.cover && <button onClick={() => setDoc((d) => ({ ...d, cover: null }))} className="db-btn" style={{ marginTop: 8, fontSize: "12.5px", color: color.gray500, background: "none", padding: "2px 4px", gap: 5 }}><X size={13} strokeWidth={2.2} />Remover</button>}
+                        {doc.cover && <button onClick={() => setDoc((d) => ({ ...d, cover: null, coverPos: "" }))} className="db-btn" style={{ marginTop: 8, fontSize: "12.5px", color: color.gray500, background: "none", padding: "2px 4px", gap: 5 }}><X size={13} strokeWidth={2.2} />Remover</button>}
                         <div style={{ fontSize: "11.5px", color: color.gray400, marginTop: 6 }}>Horizontal (paisagem), recomendado 1600×600 px pra não cortar. JPG ou PNG, até 2 MB.</div>
+                        {doc.cover && <CoverFramer src={doc.cover} value={doc.coverPos} onChange={(v) => setDoc((d) => ({ ...d, coverPos: v }))} />}
                       </div>
                     )}
                   </div>
@@ -2535,6 +2537,44 @@ function RefreshButton({ onRefresh, label = "Atualizar" }) {
 
 function inp() {
   return { fontFamily: font.body, fontSize: 14, padding: "10px 12px", border: `1px solid ${color.gray200}`, borderRadius: 9, outline: "none", background: color.white, width: "100%" };
+}
+
+// Enquadramento da capa: arrasta a imagem pra escolher a parte visível (pan),
+// sem distorcer (background-size:cover mantém a proporção). Salva "x,y" em %
+// (background-position). Funciona com mouse e toque via pointer events.
+function CoverFramer({ src, value, onChange }) {
+  const ref = useRef(null);
+  const drag = useRef(null);
+  const m = /^(\d{1,3}),(\d{1,3})$/.exec(String(value || ""));
+  const x = m ? Math.min(100, +m[1]) : 50;
+  const y = m ? Math.min(100, +m[2]) : 50;
+  const clamp = (n) => Math.max(0, Math.min(100, n));
+  const onDown = (e) => {
+    drag.current = { px: e.clientX, py: e.clientY, x, y };
+    try { ref.current.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  };
+  const onMove = (e) => {
+    if (!drag.current || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const nx = clamp(drag.current.x - ((e.clientX - drag.current.px) / r.width) * 100);
+    const ny = clamp(drag.current.y - ((e.clientY - drag.current.py) / r.height) * 100);
+    onChange(`${Math.round(nx)},${Math.round(ny)}`);
+  };
+  const onUp = () => { drag.current = null; };
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div ref={ref} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+        aria-label="Arraste para reposicionar a capa"
+        style={{ height: 120, borderRadius: 11, backgroundImage: `url(${src})`, backgroundSize: "cover", backgroundPosition: `${x}% ${y}%`, backgroundRepeat: "no-repeat", border: `1px solid ${color.gray200}`, cursor: "grab", touchAction: "none", userSelect: "none", position: "relative", overflow: "hidden" }}>
+        <span style={{ position: "absolute", left: "50%", bottom: 8, transform: "translateX(-50%)", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: "#fff", background: "rgba(0,0,0,0.45)", padding: "3px 9px", borderRadius: 999, pointerEvents: "none", whiteSpace: "nowrap" }}><Move size={12} strokeWidth={2.2} />Arraste para enquadrar</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 6 }}>
+        <span style={{ fontSize: "11.5px", color: color.gray400 }}>É assim que a capa vai aparecer na proposta.</span>
+        <button type="button" onClick={() => onChange("")} className="db-btn" style={{ flex: "none", fontSize: "12px", fontWeight: 600, color: color.gray500, background: "none", padding: "3px 6px", gap: 4 }}><RotateCcw size={12} strokeWidth={2.2} />Centralizar</button>
+      </div>
+    </div>
+  );
 }
 
 function Field({ label, required, children }) {
