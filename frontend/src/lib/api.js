@@ -145,6 +145,9 @@ export const api = {
 
   // cobrança (Mercado Pago). checkout devolve { url } — redirecione com window.location = url.
   checkout: (plan, interval = "month") => request("/billing/checkout", { method: "POST", body: JSON.stringify({ plan, interval }) }),
+  // Assinatura com renovação automática (o MP cobra sozinho a cada ciclo).
+  subscribe: (plan, interval = "month") => request("/billing/subscribe", { method: "POST", body: JSON.stringify({ plan, interval }) }),
+  cancelSubscription: () => request("/billing/subscription/cancel", { method: "POST" }),
 
   // Relatar problema. body: { category, message, email?, pageUrl?, screenshot? (data URL) }.
   reportProblem: (body) => request("/feedback", { method: "POST", body: JSON.stringify(body) }),

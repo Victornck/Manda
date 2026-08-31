@@ -46,6 +46,8 @@ const safeUser = (u) => {
     plan: effectivePlan,
     suspended,
     periodEnd: u.current_period_end || null,
+    // Renovação automática: "authorized" = assinatura ativa cobrando sozinha.
+    subscriptionKind: u.subscription_kind || null,
     role: u.role === "admin" ? "admin" : undefined,
     currency: u.currency || "BRL",
     // Permissões vêm do backend (fonte única em plans.js): o front NÃO hardcoda.

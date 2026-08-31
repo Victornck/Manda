@@ -46,6 +46,63 @@ export async function createPreference({ title, amount, externalReference, metad
   return data; // { id, init_point, sandbox_init_point, ... }
 }
 
+// ── Assinaturas (cobrança recorrente automática) ────────────────────────────
+// Diferente do Checkout Pro (pagamento avulso que libera 30 dias), aqui o MP
+// cobra sozinho a cada ciclo. Criamos um "preapproval" sem plano associado: o
+// cliente autoriza uma vez e o MP debita todo mês, avisando por webhook
+// (subscription_authorized_payment) a cada cobrança.
+export async function createPreapproval({ reason, amount, externalReference, payerEmail, backUrl, frequency = 1, frequencyType = "months" }) {
+  const body = {
+    reason,
+    external_reference: externalReference,
+    payer_email: payerEmail,
+    back_url: backUrl,
+    status: "pending", // vira "authorized" quando o cliente confirma
+    auto_recurring: {
+      frequency,
+      frequency_type: frequencyType,
+      transaction_amount: Number(amount),
+      currency_id: "BRL",
+    },
+  };
+  const res = await fetch(`${API}/preapproval`, {
+    method: "POST",
+    headers: authHeaders({ "X-Idempotency-Key": crypto.randomUUID() }),
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`preapproval (${res.status}): ${data.message || data.error || ""}`.trim());
+  return data; // { id, init_point, status, ... }
+}
+
+// Estado atual da assinatura (authorized, paused, cancelled...).
+export async function getPreapproval(id) {
+  const res = await fetch(`${API}/preapproval/${id}`, { headers: authHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`preapproval ${id} (${res.status})`);
+  return data;
+}
+
+// Cancela a assinatura no MP (o acesso segue até o fim do período já pago).
+export async function cancelPreapproval(id) {
+  const res = await fetch(`${API}/preapproval/${id}`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify({ status: "cancelled" }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`cancel preapproval ${id} (${res.status})`);
+  return data;
+}
+
+// Cobrança de um ciclo da assinatura (é o que chega em cada renovação).
+export async function getAuthorizedPayment(id) {
+  const res = await fetch(`${API}/authorized_payments/${id}`, { headers: authHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`authorized_payment ${id} (${res.status})`);
+  return data; // { id, preapproval_id, status, transaction_amount, ... }
+}
+
 // Busca um pagamento pelo id (usado no webhook para confirmar o status real).
 export async function getPayment(id) {
   const res = await fetch(`${API}/v1/payments/${id}`, { headers: authHeaders() });

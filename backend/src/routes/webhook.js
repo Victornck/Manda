@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { query } from "../db.js";
-import { mpConfigured, verifyWebhook, getPayment } from "../lib/mercadopago.js";
+import { mpConfigured, verifyWebhook, getPayment, getPreapproval, getAuthorizedPayment } from "../lib/mercadopago.js";
 import { PLAN_PRICES_BRL, PERIOD_DAYS } from "../lib/plans.js";
 
 const r = Router();
@@ -19,6 +19,47 @@ r.post("/", async (req, res) => {
   const check = verifyWebhook(req);
   console.log(`[mp webhook] recebido: type=${type || "?"} id=${check.paymentId || "?"} assinatura=${check.ok ? "ok" : "sem match (confirmo pela API)"}`);
 
+  // ── Assinatura recorrente ─────────────────────────────────────────────────
+  // Estado da assinatura mudou (autorizada, pausada, cancelada pelo cliente).
+  if (type === "subscription_preapproval") {
+    try {
+      const sub = await getPreapproval(check.paymentId);
+      const userId = String(sub.external_reference || "").split(":")[0];
+      if (userId) {
+        await query("update users set subscription_kind=$2 where id=$1 and mp_preapproval_id=$3",
+          [userId, sub.status || "", String(sub.id)]);
+        console.log(`[mp webhook] assinatura ${sub.id} do user ${userId}: ${sub.status}`);
+      }
+    } catch (e) { console.error("[mp webhook] preapproval:", e.message); }
+    return res.json({ received: true });
+  }
+
+  // Cobrança de um ciclo da assinatura: é aqui que a renovação automática
+  // libera mais um período (mesma regra do pagamento avulso: empilha e zera a cota).
+  if (type === "subscription_authorized_payment") {
+    try {
+      const ap = await getAuthorizedPayment(check.paymentId);
+      const sub = await getPreapproval(ap.preapproval_id);
+      const [userId, plan, interval] = String(sub.external_reference || "").split(":");
+      const paid = ["approved", "accredited", "processed"].includes(String(ap.status || ap.payment?.status || ""));
+      if (userId && plan && paid) {
+        const days = PERIOD_DAYS[interval] || 30;
+        await query(
+          `update users set plan=$2, subscription_status='active', subscription_kind='authorized', quota_anchor=now(),
+             current_period_end = greatest(coalesce(current_period_end, now()), now()) + make_interval(days => $3)
+           where id=$1`,
+          [userId, plan, days]
+        );
+        console.log(`[mp webhook] renovação automática: user ${userId} -> ${plan}/${interval}`);
+      } else if (userId && !paid) {
+        // Cobrança falhou (cartão recusado): o MP ainda vai tentar de novo. Não
+        // corta o acesso aqui — o vencimento + carência já cuidam disso sozinhos.
+        console.warn(`[mp webhook] cobranca da assinatura falhou (user ${userId}): ${ap.status}`);
+      }
+    } catch (e) { console.error("[mp webhook] authorized_payment:", e.message); }
+    return res.json({ received: true });
+  }
+
   // Só tratamos notificações de pagamento; o resto é apenas confirmado (200).
   if (type && type !== "payment") return res.json({ received: true, ignored: type });
 
@@ -27,6 +68,30 @@ r.post("/", async (req, res) => {
 
   try {
     const pay = await getPayment(paymentId);
+
+    // Dinheiro devolvido (estorno, contestação ou cancelamento): o acesso que
+    // ESTE pagamento liberou tem que cair. Sem isso o cliente pedia o estorno e
+    // seguia usando o mês inteiro — prejuízo direto. Só encerra o período se o
+    // pagamento realmente tinha sido processado por nós (está em mp_payments) e
+    // ainda não foi tratado, para não mexer em quem já renovou depois.
+    if (["refunded", "charged_back", "cancelled"].includes(pay.status)) {
+      const { rows: prev } = await query(
+        "update mp_payments set status=$2 where id=$1 and status='approved' returning user_id, plan",
+        [String(pay.id), pay.status]
+      );
+      const owner = prev[0];
+      if (owner?.user_id) {
+        // Encerra agora: cai na carência e depois suspende (não vira 'free').
+        await query(
+          `update users set current_period_end = now(), subscription_status='expired'
+            where id=$1 and coalesce(role,'user') <> 'admin'`,
+          [owner.user_id]
+        );
+        console.warn(`[mp webhook] pagamento ${pay.id} ${pay.status}: acesso do user ${owner.user_id} encerrado.`);
+      }
+      return res.json({ received: true, status: pay.status, revoked: !!owner });
+    }
+
     if (pay.status !== "approved") {
       // pending (Pix aguardando), rejected, etc.: nada a liberar ainda.
       console.log(`[mp webhook] pagamento ${paymentId} com status ${pay.status} (não libera).`);

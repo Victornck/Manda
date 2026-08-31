@@ -7,8 +7,10 @@ alter table users add column if not exists quota_anchor timestamptz;
 
 -- Contas que ja pagam: ancora no inicio do periodo atual, para nao zerar nem
 -- duplicar a cota de quem esta no meio de um ciclo na hora do deploy.
+-- least(..., now()) protege planos anuais: sem isso a ancora cairia no futuro
+-- (period_end - 30 dias) e o ciclo nunca fecharia.
 update users
-   set quota_anchor = current_period_end - interval '30 days'
+   set quota_anchor = least(current_period_end - interval '30 days', now())
  where quota_anchor is null
    and plan <> 'free'
    and current_period_end is not null;

@@ -2682,6 +2682,9 @@ function PlansModal({ onClose }) {
   const [annual, setAnnual] = useState(false);
   const [busyKey, setBusyKey] = useState("");
   const [err, setErr] = useState("");
+  // Renovação automática ligada por padrão: evita o cliente perder acesso por
+  // esquecer de pagar. Quem preferir pode desmarcar e pagar avulso (Pix/boleto).
+  const [autoRenew, setAutoRenew] = useState(true);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -2693,7 +2696,8 @@ function PlansModal({ onClose }) {
     setErr("");
     setBusyKey(planKey);
     try {
-      const { url } = await api.checkout(planKey, annual ? "year" : "month");
+      const period = annual ? "year" : "month";
+      const { url } = autoRenew ? await api.subscribe(planKey, period) : await api.checkout(planKey, period);
       if (!url) throw new Error("Não foi possível iniciar o checkout. Tente de novo em instantes.");
       window.location.href = url; // gateway do Mercado Pago
     } catch (e) { setErr(e.message || "Falha ao iniciar o checkout."); setBusyKey(""); }
@@ -2716,6 +2720,15 @@ function PlansModal({ onClose }) {
           <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 22, letterSpacing: "-0.01em" }}>Escolha seu plano</div>
           <div style={{ fontSize: "13.5px", color: color.gray500, marginTop: 4 }}>Desbloqueie propostas ilimitadas, a calculadora de preços e o follow-up assistido.</div>
         </div>
+
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 9, marginBottom: 14, cursor: "pointer" }}>
+          <span className="db-sw"><input type="checkbox" checked={autoRenew} onChange={() => setAutoRenew((v) => !v)} aria-label="Renovação automática" /><i /></span>
+          <span style={{ fontSize: "13px", color: color.gray600 }}>
+            {autoRenew
+              ? "Renovação automática (cancele quando quiser)"
+              : "Pagamento avulso, você renova manualmente a cada período"}
+          </span>
+        </label>
 
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 22 }}>
           <div style={{ display: "inline-flex", gap: 4, background: color.surface, borderRadius: 10, padding: 4 }}>
@@ -3238,6 +3251,21 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
   const [gmailBusy, setGmailBusy] = useState(false);
   const [currency, setCurrency] = useState(user?.currency || DEFAULT_CURRENCY);
   const [savingCur, setSavingCur] = useState(false);
+  // Cancelamento da renovação automática (dois cliques, para não cancelar sem querer).
+  const [cancelArm, setCancelArm] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const cancelAuto = async () => {
+    if (!cancelArm) { setCancelArm(true); setTimeout(() => setCancelArm(false), 5000); return; }
+    setCancelBusy(true);
+    try {
+      await api.cancelSubscription();
+      const { user: fresh } = await api.me();
+      setUser(fresh);
+      pushToast("Renovação automática cancelada. Seu acesso continua até o fim do período pago.", "success");
+    } catch (e) {
+      pushToast(e?.message || "Não foi possível cancelar agora.", "info");
+    } finally { setCancelBusy(false); setCancelArm(false); }
+  };
 
   useEffect(() => {
     setName(user?.name || "");
@@ -3530,6 +3558,23 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
               </>
             )}
           </div>
+
+          {/* Renovação automática: precisa ser fácil de ver e de cancelar. */}
+          {!isAdmin && user?.subscriptionKind === "authorized" && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line2}` }}>
+              <div style={{ fontSize: "13.5px", color: color.gray600, marginBottom: 8 }}>
+                <strong style={{ fontWeight: 600, color: color.ink }}>Renovação automática ativa.</strong> Você é cobrado a cada período, sem precisar fazer nada.
+              </div>
+              <button onClick={cancelAuto} disabled={cancelBusy} className="db-btn" style={{ fontSize: "13px", padding: "8px 12px", background: "none", color: cancelArm ? "#B4443C" : color.gray500, fontWeight: 600, border: `1px solid ${cancelArm ? "#F5D2CD" : color.gray200}`, borderRadius: 9 }}>
+                {cancelBusy ? "Cancelando…" : cancelArm ? "Confirmar cancelamento?" : "Cancelar renovação automática"}
+              </button>
+              {cancelArm && !cancelBusy && (
+                <div style={{ fontSize: "12px", color: color.gray500, marginTop: 6 }}>
+                  Você continua com acesso até o fim do período já pago. Depois disso, é só pagar de novo quando quiser.
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={card}>

@@ -63,9 +63,11 @@ const countUsage = async (userId, cap, anchor) => {
       where user_id=$1
         and created_at >= case
           when $2::timestamptz is null then date_trunc('month', now())
-          else $2::timestamptz + make_interval(months =>
-                 (extract(year from age(now(), $2::timestamptz))::int * 12)
-                 + extract(month from age(now(), $2::timestamptz))::int)
+          -- least(ancora, now()) blinda contra ancora no futuro (dado ruim/legado):
+          -- sem isso o inicio do ciclo cairia adiante e a cota nunca contaria.
+          else least($2::timestamptz, now()) + make_interval(months =>
+                 (extract(year from age(now(), least($2::timestamptz, now())))::int * 12)
+                 + extract(month from age(now(), least($2::timestamptz, now())))::int)
         end`,
     [userId, anchor]
   );

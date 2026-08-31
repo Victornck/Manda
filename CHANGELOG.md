@@ -14,6 +14,23 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.5.0] — 2026-08-31
+
+### Adicionado
+- **Assinatura com renovação automática (cartão).** Além do pagamento avulso, o
+  cliente pode assinar e o Mercado Pago cobra sozinho a cada ciclo (preapproval).
+  Cada cobrança aprovada renova o período e zera a cota. O cancelamento fica em
+  Configurações, com confirmação em dois cliques, e o acesso continua até o fim
+  do período já pago. Colunas novas: `mp_preapproval_id` e `subscription_kind`.
+
+### Corrigido
+- **Estorno/contestação revoga o acesso.** O webhook passa a tratar `refunded`,
+  `charged_back` e `cancelled`: o período liberado por aquele pagamento é
+  encerrado na hora. Antes, o cliente pedia o estorno e seguia usando o ciclo
+  inteiro (prejuízo direto).
+- Âncora da cota nunca fica no futuro (protege planos anuais, que ficariam sem
+  contagem de cota). Migração `020_quota_anchor_fix`.
+
 ## [0.4.0] — 2026-08-25
 
 ### Alterado (regras de cobrança)
