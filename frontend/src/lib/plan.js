@@ -9,6 +9,10 @@ export const isAdmin = (user) => user?.role === "admin";
 // Conta no plano Gratuito (sem assinatura). Admin nunca é "free".
 export const isFreePlan = (user) => !!user && !isAdmin(user) && (user.plan === "free" || !user.plan);
 
+// Assinatura vencida (aguardando pagamento): a conta NÃO vira grátis, fica em
+// só-leitura até o pagamento entrar. Quem manda é o backend (user.suspended).
+export const isSuspended = (user) => !!user?.suspended && !isAdmin(user);
+
 // Tem acesso a um recurso premium? Admin tem tudo.
 export const hasFeature = (user, feature) => {
   if (!user) return false;

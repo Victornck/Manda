@@ -14,7 +14,7 @@ import { issueCode, consumeCode } from "../lib/passwordCodes.js";
 import { securityEvent, maskEmail } from "../lib/securityLog.js";
 import { sendMail, codeEmailHtml } from "../lib/mailer.js";
 import { isCurrency } from "../lib/currency.js";
-import { planFeatures, proposalCap } from "../lib/plans.js";
+import { planFeatures, proposalCap, isSuspended } from "../lib/plans.js";
 
 const googleClient = env.GOOGLE_CLIENT_ID ? new OAuth2Client(env.GOOGLE_CLIENT_ID) : null;
 
@@ -38,13 +38,19 @@ const r = Router();
 // Nunca expõe cpf nem password_hash. Admin aparece com plano efetivo total.
 const safeUser = (u) => {
   const effectivePlan = u.role === "admin" ? "business" : (u.plan || "free");
+  // Assinatura vencida (passada a carência): a conta NÃO vira grátis, fica
+  // aguardando pagamento (só leitura). O front usa isso pra avisar e bloquear.
+  const suspended = isSuspended(u);
   return {
     id: u.id, name: u.name, email: u.email,
     plan: effectivePlan,
+    suspended,
+    periodEnd: u.current_period_end || null,
     role: u.role === "admin" ? "admin" : undefined,
     currency: u.currency || "BRL",
     // Permissões vêm do backend (fonte única em plans.js): o front NÃO hardcoda.
-    features: planFeatures(effectivePlan),
+    // Suspenso = só leitura: os recursos premium ficam indisponíveis até pagar.
+    features: suspended ? [] : planFeatures(effectivePlan),
     proposalLimit: proposalCap(effectivePlan), // { scope, limit } — Infinity vira null no JSON
   };
 };

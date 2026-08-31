@@ -5,9 +5,18 @@ import { api, newUser } from "../helpers.js";
 // "Relatar problema": só email (sem tabela). Em teste, sem SMTP, o envio cai no
 // modo dev (console) e a rota responde 201. Aqui checamos auth e validação.
 
-test("feedback exige autenticação (401 sem token)", async () => {
+// Auth é OPCIONAL aqui de propósito: o "Suporte" do rodapé da landing é usado
+// por quem ainda não tem conta. Sem token, o e-mail passa a ser obrigatório.
+test("feedback público sem e-mail é recusado (400)", async () => {
   const res = await api().post("/api/feedback").send({ category: "bug", message: "algo quebrou" });
-  assert.equal(res.status, 401);
+  assert.equal(res.status, 400);
+});
+
+test("feedback público COM e-mail é aceito (201)", async () => {
+  const res = await api().post("/api/feedback")
+    .send({ category: "duvida", message: "como funciona o teste grátis?", email: "visitante@teste.com" });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.ok, true);
 });
 
 test("feedback válido responde 201", async () => {

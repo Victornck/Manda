@@ -34,6 +34,25 @@ export const PLAN_LIMITS = {
   business: { proposals: { scope: "month", limit: Infinity }, templates: null,            features: [FEATURES.CALCULATOR, FEATURES.FOLLOW_UP] },
 };
 
+// Dias de tolerância depois do vencimento antes de suspender o acesso (cobre
+// atraso de boleto/Pix e falha de cobrança sem punir quem paga em dia).
+export const GRACE_DAYS = 3;
+
+// Assinatura SUSPENSA: plano pago cujo acesso venceu e já passou da carência.
+// Não vira "grátis" — o plano é preservado e a conta fica aguardando pagamento
+// (só leitura). Admin e plano grátis nunca ficam suspensos. Calculado em tempo
+// real a partir da data, então não depende do job diário ter rodado.
+export function isSuspended(u, now = Date.now()) {
+  if (!u) return false;
+  if ((u.role || "user") === "admin") return false;
+  const plan = u.plan || "free";
+  if (plan === "free") return false;
+  if (!u.current_period_end) return false;
+  const end = new Date(u.current_period_end).getTime();
+  if (Number.isNaN(end)) return false;
+  return now > end + GRACE_DAYS * 86400000;
+}
+
 export const hasPlan = (userPlan, needed) => (PLAN_RANK[userPlan] || 0) >= (PLAN_RANK[needed] || 0);
 
 const limitsOf = (plan) => PLAN_LIMITS[plan] || PLAN_LIMITS.free;

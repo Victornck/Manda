@@ -1,4 +1,5 @@
 import { query } from "../db.js";
+import { GRACE_DAYS } from "../lib/plans.js";
 import { sendRenewalReminders } from "./renewalReminder.js";
 
 // Expiração de acesso (rede de segurança do modelo por período).
@@ -22,16 +23,21 @@ function spNow() {
 }
 
 export async function reconcileBilling() {
-  // Só mexe em quem tem plano pago, não é admin, e cujo acesso JÁ VENCEU.
-  // current_period_end nulo (edge/legado) é deixado em paz de propósito.
+  // Só mexe em quem tem plano pago, não é admin, e cujo acesso JÁ VENCEU (com a
+  // carência). O PLANO É PRESERVADO de propósito: quem já usou o produto não
+  // volta pro grátis, a conta fica 'expired' (aguardando pagamento, só leitura)
+  // e volta ao normal assim que o pagamento entra. O bloqueio em si é calculado
+  // por data (isSuspended), então não depende deste job ter rodado.
   const { rows } = await query(
     `update users
-        set plan='free', subscription_status='expired'
+        set subscription_status='expired'
       where plan <> 'free'
         and coalesce(role,'user') <> 'admin'
         and current_period_end is not null
-        and current_period_end < now()
-      returning id, email`
+        and current_period_end < now() - make_interval(days => $1)
+        and coalesce(subscription_status,'') <> 'expired'
+      returning id, email`,
+    [GRACE_DAYS]
   );
   if (rows.length) {
     for (const u of rows) console.log(`[billing] acesso expirado (renovação pendente): ${u.email}`);

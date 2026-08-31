@@ -6,6 +6,8 @@ import path from "node:path";
 import { requireAuth } from "../middleware/auth.js";
 import { writeLimiter } from "../middleware/rateLimit.js";
 import { uploadsDir } from "../lib/uploads.js";
+import { query } from "../db.js";
+import { isSuspended } from "../lib/plans.js";
 
 const r = Router();
 
@@ -30,8 +32,13 @@ function sniff(buf) {
   return null;
 }
 
-r.post("/image", requireAuth, writeLimiter, (req, res, next) => {
+r.post("/image", requireAuth, writeLimiter, async (req, res, next) => {
   try {
+    // Assinatura vencida: conta em só-leitura, não aceita novos arquivos.
+    const { rows } = await query("select plan, role, current_period_end from users where id=$1", [req.user.id]);
+    if (isSuspended(rows[0])) {
+      return res.status(402).json({ suspended: true, error: "Sua assinatura venceu. Renove para enviar imagens." });
+    }
     const { image } = schema.parse(req.body);
     // Lista fechada de formatos e base64 estrito — nada de subtipo livre.
     const m = /^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$/i.exec(image);

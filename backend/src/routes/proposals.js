@@ -8,7 +8,7 @@ import { proposalSchema, statusSchema } from "../lib/validate.js";
 import { publicId } from "../lib/ids.js";
 import { getRates, convertWith } from "../lib/rates.js";
 import { normalizeCurrency } from "../lib/currency.js";
-import { PLAN_LIMITS, templateAllowed, proposalCap, hasFeature, FEATURES } from "../lib/plans.js";
+import { PLAN_LIMITS, templateAllowed, proposalCap, hasFeature, FEATURES, isSuspended } from "../lib/plans.js";
 import { getFreshAccess } from "../lib/googleAccount.js";
 import { buildRawEmail, sendGmail } from "../lib/googleMail.js";
 import { proposalEmailHtml, proposalEmailText, followUpEmailHtml, followUpEmailText } from "../lib/mailer.js";
@@ -24,12 +24,52 @@ const emailProposalSchema = z.object({
 const r = Router();
 r.use(requireAuth); // tudo aqui exige login
 
-// Plano EFETIVO: admin tem acesso total (equivale a business, ilimitado),
-// independente de pagamento no Mercado Pago.
-const getPlan = async (userId) => {
-  const { rows } = await query("select plan, role from users where id=$1", [userId]);
-  if (rows[0]?.role === "admin") return "business";
-  return rows[0]?.plan || "free";
+// Conta do usuário: plano EFETIVO (admin tem acesso total, equivale a business),
+// se a assinatura está suspensa (vencida + carência) e a âncora do ciclo de cota.
+const getAccount = async (userId) => {
+  const { rows } = await query(
+    "select plan, role, subscription_status, current_period_end, quota_anchor from users where id=$1",
+    [userId]
+  );
+  const u = rows[0] || {};
+  return {
+    plan: u.role === "admin" ? "business" : (u.plan || "free"),
+    suspended: isSuspended(u),
+    anchor: u.quota_anchor || null,
+    periodEnd: u.current_period_end || null,
+  };
+};
+const getPlan = async (userId) => (await getAccount(userId)).plan;
+
+// Resposta padrão quando a assinatura venceu: a conta fica só-leitura até o
+// pagamento entrar. Não rebaixa pra grátis nem apaga nada.
+const SUSPENDED_ERROR = {
+  suspended: true,
+  error: "Sua assinatura venceu. Renove para voltar a criar e enviar propostas.",
+};
+
+// Uso append-only do plano. No teto vitalício (grátis) conta tudo; no mensal,
+// conta a partir do início do ciclo ATUAL da assinatura — o "aniversário" da
+// quota_anchor (assinou dia 20 → vira todo dia 20). Assim a sobra não acumula
+// nem o cliente ganha cota dobrada quando o mês do calendário vira no meio do
+// ciclo. Sem âncora (conta antiga/grátis), mantém o mês do calendário.
+const countUsage = async (userId, cap, anchor) => {
+  if (cap.scope === "total") {
+    const { rows } = await query("select count(*)::int as n from proposal_usage where user_id=$1", [userId]);
+    return rows[0]?.n || 0;
+  }
+  const { rows } = await query(
+    `select count(*)::int as n from proposal_usage
+      where user_id=$1
+        and created_at >= case
+          when $2::timestamptz is null then date_trunc('month', now())
+          else $2::timestamptz + make_interval(months =>
+                 (extract(year from age(now(), $2::timestamptz))::int * 12)
+                 + extract(month from age(now(), $2::timestamptz))::int)
+        end`,
+    [userId, anchor]
+  );
+  return rows[0]?.n || 0;
 };
 
 const sumItems = (items = []) =>
@@ -92,13 +132,13 @@ r.get("/stats", async (req, res, next) => {
 // Gratuito o teto é vitalício (scope "total"); nos pagos, do mês corrente.
 r.get("/usage", async (req, res, next) => {
   try {
-    const plan = await getPlan(req.user.id);
-    const cap = proposalCap(plan);
-    const usageSql = cap.scope === "total"
-      ? "select count(*)::int as n from proposal_usage where user_id=$1"
-      : "select count(*)::int as n from proposal_usage where user_id=$1 and created_at >= date_trunc('month', now())";
-    const { rows } = await query(usageSql, [req.user.id]);
-    res.json({ used: rows[0]?.n || 0, limit: cap.limit === Infinity ? null : cap.limit, scope: cap.scope, plan });
+    const acc = await getAccount(req.user.id);
+    const cap = proposalCap(acc.plan);
+    const used = await countUsage(req.user.id, cap, acc.anchor);
+    res.json({
+      used, limit: cap.limit === Infinity ? null : cap.limit, scope: cap.scope, plan: acc.plan,
+      suspended: acc.suspended, periodEnd: acc.periodEnd,
+    });
   } catch (e) { next(e); }
 });
 
@@ -291,24 +331,23 @@ r.post("/", writeLimiter, async (req, res, next) => {
   try {
     const d = proposalSchema.parse(req.body);
     // Regras de acesso do plano
-    const plan = await getPlan(req.user.id);
+    const acc = await getAccount(req.user.id);
+    const plan = acc.plan;
+    if (acc.suspended) return res.status(402).json(SUSPENDED_ERROR);
     if (!templateAllowed(plan, d.template)) {
       return res.status(402).json({ error: "Seu plano não inclui este template." });
     }
     // Cota de propostas: conta o USO append-only (proposal_usage), que NÃO diminui
     // ao apagar uma proposta (não dá pra burlar apagando e recriando). O Gratuito
-    // tem teto VITALÍCIO (scope "total"); os pagos renovam por mês.
+    // tem teto VITALÍCIO (scope "total"); os pagos renovam a cada ciclo pago.
     const cap = proposalCap(plan);
     if (cap.limit !== Infinity) {
-      const usageSql = cap.scope === "total"
-        ? "select count(*)::int as n from proposal_usage where user_id=$1"
-        : "select count(*)::int as n from proposal_usage where user_id=$1 and created_at >= date_trunc('month', now())";
-      const { rows: c } = await query(usageSql, [req.user.id]);
-      if ((c[0]?.n || 0) >= cap.limit) {
+      const used = await countUsage(req.user.id, cap, acc.anchor);
+      if (used >= cap.limit) {
         return res.status(402).json({
           error: cap.scope === "total"
             ? `Você já usou suas ${cap.limit} propostas grátis. Assine um plano para criar mais.`
-            : `Você atingiu o limite de ${cap.limit} propostas neste mês.`,
+            : `Você atingiu o limite de ${cap.limit} propostas deste ciclo. Ele renova na próxima cobrança.`,
           limitReached: true,
         });
       }
@@ -327,8 +366,9 @@ r.post("/", writeLimiter, async (req, res, next) => {
 r.put("/:id", writeLimiter, async (req, res, next) => {
   try {
     const d = proposalSchema.parse(req.body);
-    const plan = await getPlan(req.user.id);
-    if (!templateAllowed(plan, d.template)) {
+    const acc = await getAccount(req.user.id);
+    if (acc.suspended) return res.status(402).json(SUSPENDED_ERROR);
+    if (!templateAllowed(acc.plan, d.template)) {
       return res.status(402).json({ error: "Seu plano não inclui este template." });
     }
     // Proposta concluída é imutável: só rascunho pode ser editado. Impede reusar
@@ -362,6 +402,7 @@ r.patch("/:id/status", async (req, res, next) => {
 r.post("/:id/send-email", emailSendLimiter, async (req, res, next) => {
   try {
     const { to, subject, message } = emailProposalSchema.parse(req.body || {});
+    if ((await getAccount(req.user.id)).suspended) return res.status(402).json(SUSPENDED_ERROR);
     const { rows } = await query("select * from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);
     const p = rows[0];
     if (!p) return res.status(404).json({ error: "Proposta não encontrada." });
@@ -438,7 +479,9 @@ r.post("/:id/send-email", emailSendLimiter, async (req, res, next) => {
 // proposta), apenas marca reminded_at para dar cooldown e sumir da lista.
 r.post("/:id/remind", emailSendLimiter, async (req, res, next) => {
   try {
-    if (!hasFeature(await getPlan(req.user.id), FEATURES.FOLLOW_UP)) {
+    const acc = await getAccount(req.user.id);
+    if (acc.suspended) return res.status(402).json(SUSPENDED_ERROR);
+    if (!hasFeature(acc.plan, FEATURES.FOLLOW_UP)) {
       return res.status(402).json({ error: "O follow-up assistido está nos planos pagos.", upgrade: true });
     }
     const { rows } = await query("select * from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);

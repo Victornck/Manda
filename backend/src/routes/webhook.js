@@ -57,7 +57,9 @@ r.post("/", async (req, res) => {
     const days = PERIOD_DAYS[interval] || 30;
     // Libera o período. Renovação antecipada empilha a partir do fim atual.
     const upd = await query(
-      `update users set plan=$2, subscription_status='active',
+      // quota_anchor = agora: o pagamento inicia um novo ciclo de cota. O que
+      // sobrou do ciclo anterior NÃO acumula (some ao renovar).
+      `update users set plan=$2, subscription_status='active', quota_anchor=now(),
          current_period_end = greatest(coalesce(current_period_end, now()), now()) + make_interval(days => $3)
        where id=$1 returning current_period_end`,
       [userId, plan, days]

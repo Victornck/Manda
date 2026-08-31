@@ -14,6 +14,24 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.4.0] — 2026-08-25
+
+### Alterado (regras de cobrança)
+- **Cota atrelada ao ciclo da assinatura, sem acúmulo.** Antes a cota renovava no
+  dia 1º do calendário, o que desalinhava do ciclo pago (quem assinava dia 20
+  ganhava cota nova no dia 1º, dobrando o que tinha direito no mesmo ciclo).
+  Agora conta a partir do "aniversário" da assinatura (coluna `quota_anchor`,
+  gravada a cada pagamento aprovado): o que não foi usado **não vira crédito**, e
+  cada pagamento inicia um ciclo zerado. Vale igual para planos mensais e anuais.
+- **Assinatura vencida não rebaixa mais para Gratuito.** A conta entra em
+  **aguardando pagamento** (só leitura), preservando o plano: dá para ver as
+  propostas e os links públicos já enviados continuam no ar, mas criar, editar,
+  enviar, usar recursos premium, subir imagem e baixar PDF ficam bloqueados até
+  o pagamento entrar. Há **3 dias de carência** após o vencimento (cobre atraso
+  de boleto/Pix). O bloqueio é calculado por data, então não depende do job
+  diário ter rodado. Ao pagar, tudo volta na hora e a cota começa zerada.
+- Aviso no painel com o estado da assinatura e botão de renovar.
+
 ## [0.3.0] — 2026-08-21
 
 ### Adicionado

@@ -16,7 +16,7 @@ import CodeInput from "../components/CodeInput.jsx";
 import SupportChat, { SupportPage } from "../components/SupportChat.jsx";
 import { PRICE_TABLE, COMPLEXITY, URGENCY, suggest, fmtBRL, DEFAULT_CONSUMO, PROJECT_DIFFICULTY } from "../lib/pricing.js";
 import { CURRENCY_LIST, currencyOf, DEFAULT_CURRENCY, formatMoney } from "../lib/currency.js";
-import { FEATURES, hasFeature as planHasFeature, isFreePlan } from "../lib/plan.js";
+import { FEATURES, hasFeature as planHasFeature, isFreePlan, isSuspended } from "../lib/plan.js";
 
 // Versão do app (injetada pelo Vite a partir do package.json).
 const APP_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "";
@@ -542,6 +542,7 @@ export default function Dashboard({ go }) {
   const pdfRef = useRef(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const downloadPdf = async () => {
+    if (isSuspended(user)) { pushToast("Renove sua assinatura para baixar o PDF.", "info"); setShowPlans(true); return; }
     if (!pdfRef.current || pdfBusy) return;
     setPdfBusy(true);
     try {
@@ -630,6 +631,8 @@ export default function Dashboard({ go }) {
   });
 
   const newProposal = () => {
+    // Assinatura vencida: só leitura até renovar (o backend também barra).
+    if (isSuspended(user)) { setShowPlans(true); return; }
     let bio = "";
     try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
     const d = { ...BLANK_DOC, bio, currency: user?.currency || DEFAULT_CURRENCY };
@@ -940,6 +943,9 @@ export default function Dashboard({ go }) {
   };
 
   const profileName = user?.name || "Sua conta";
+  // Assinatura vencida: conta em só-leitura até o pagamento entrar (o plano é
+  // preservado, não vira Gratuito). Quem decide é o backend.
+  const suspended = isSuspended(user);
   // Propostas restantes: vêm do USO append-only do backend (não some ao apagar).
   const usageUnlimited = usage.limit == null; // null = ilimitado (Business)
   const remaining = usageUnlimited ? Infinity : Math.max(0, usage.limit - usage.used);
@@ -1416,7 +1422,22 @@ export default function Dashboard({ go }) {
               </div>
             </div>
 
-            {isFreePlan(user) && (
+            {suspended && (
+              <div className="db-planbar" style={{ background: "#FEF3E2", borderColor: "#F5D9A8" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                  <span className="db-planbar-icon" style={{ color: "#8A5A1A" }}><Lock size={16} strokeWidth={2.2} /></span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#8A5A1A" }}>Sua assinatura venceu</div>
+                    <div style={{ fontSize: "12.5px", color: color.gray600 }}>
+                      Sua conta está aguardando o pagamento. Você continua vendo suas propostas e os links enviados seguem no ar, mas para criar, enviar ou baixar é preciso renovar.
+                    </div>
+                  </div>
+                </div>
+                <button onClick={() => setShowPlans(true)} className="db-btn db-btn-accent" style={{ flex: "none", fontSize: 14, padding: "10px 18px" }}>Renovar agora</button>
+              </div>
+            )}
+
+            {!suspended && isFreePlan(user) && (
               <div className="db-planbar">
                 <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                   <span className="db-planbar-icon"><Sparkles size={16} strokeWidth={2.2} /></span>
@@ -1531,7 +1552,7 @@ export default function Dashboard({ go }) {
             ? <CalculatorPanel onNewProposal={(desc, value, list) => startProposalWithItem(desc, value, list)} scope={user?.email} onBack={() => navTo("home")} />
             : <PremiumLock title="Calculadora de preços" desc="Descubra o preço justo do seu projeto com base em horas, custos e margem. Disponível nos planos pagos." onUpgrade={() => setShowPlans(true)} />
         ) : view === "clients" ? (
-          <ClientsPanel rows={rows} onRefresh={async () => { await refreshRows(); }} />
+          <ClientsPanel rows={rows} onRefresh={async () => { await refreshRows(); }} suspended={suspended} />
         ) : view === "notifications" ? (
           <NotificationsPanel notifs={notifs} readSet={notifRead} onRead={notifSetRead} onDelete={notifDelete} onRefresh={refreshNotifs} />
         ) : view === "support" ? (
@@ -2930,7 +2951,7 @@ function DesignGallery({ onUse, plan, onUpgrade, scope }) {
   );
 }
 
-function ClientsPanel({ rows, onRefresh }) {
+function ClientsPanel({ rows, onRefresh, suspended = false }) {
   const [period, setPeriod] = useState("all");
   const thisYear = new Date().getFullYear();
   const MONTHS_FULL = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -3014,7 +3035,8 @@ function ClientsPanel({ rows, onRefresh }) {
   };
 
   const downloadPdfFor = async (r) => {
-    if (pdfBusyId) return;
+    if (suspended || pdfBusyId) return; // assinatura vencida: só leitura
+
     setPdfBusyId(r.id);
     setPdfRow(r);
     try {
