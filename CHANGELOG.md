@@ -14,6 +14,17 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.7.2] — 2026-09-14
+
+### Corrigido
+- **Login de conta Google com senha derrubava a requisição (500).** Contas
+  criadas pelo Google não têm `password_hash` (fica `null`), e o `login` passava
+  esse `null` direto pro `bcrypt.compare`, que estourava
+  `Illegal arguments: string, object`. A pessoa via um erro genérico de "algo
+  deu errado", sem nenhuma pista de que precisava usar o botão do Google — e
+  cada tentativa virava um erro 500 no Sentry. Agora a resposta é um 401 com a
+  mesma mensagem que o "Esqueci minha senha" já dava nesse caso.
+
 ## [0.7.1] — 2026-09-14
 
 ### Alterado

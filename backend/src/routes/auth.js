@@ -86,9 +86,19 @@ r.post("/login", loginLimiter, async (req, res, next) => {
     const data = loginSchema.parse(req.body);
     const { rows } = await query("select * from users where email=$1", [data.email.toLowerCase()]);
     const u = rows[0];
-    const ok = u && (await bcrypt.compare(data.password, u.password_hash));
+    // Contas criadas pelo Google não têm password_hash (fica null). Passar null
+    // pro bcrypt.compare estourava "Illegal arguments: string, object" e virava
+    // erro 500 — a pessoa via "algo deu errado" e ficava tentando pra sempre.
+    const hash = typeof u?.password_hash === "string" ? u.password_hash : "";
+    const ok = !!hash && (await bcrypt.compare(data.password, hash));
     if (!ok) {
       securityEvent("login_falhou", req, { email: maskEmail(data.email) });
+      if (u && !hash) {
+        // Mesma mensagem que o /forgot já dá nesse caso. Dizer que a conta é do
+        // Google revela que o e-mail existe, mas /register e /forgot já revelam
+        // isso — e sem a dica a pessoa não descobre por que a senha não funciona.
+        return res.status(401).json({ error: "Essa conta entra com o Google. Use o botão “Entrar com Google”." });
+      }
       return res.status(401).json({ error: "Email ou senha incorretos." });
     }
     res.json({ token: signToken({ sub: u.id }), user: safeUser(u) });
