@@ -84,8 +84,10 @@ export const SUPPORT_TOPICS = [
     a: "No Básico você usa os modelos Minimal e Bold. Os outros são do Pro e do Business e aparecem com cadeado; clicar neles leva para os planos." },
   { id: "pagamento-plano", cat: "Plano", q: "Como pago o plano? Aceita Pix?", kw: ["pagar", "pagamento", "pix", "cartao", "boleto", "assinar", "assinatura", "mensalidade", "cobranca"],
     a: "O pagamento é pelo Mercado Pago e você escolhe na hora entre Pix, cartão ou boleto. No Pix, o acesso libera assim que o pagamento é confirmado." },
-  { id: "cancelar", cat: "Plano", q: "Como cancelo o plano?", kw: ["cancelar", "cancelamento", "encerrar", "parar", "desassinar", "sair do plano", "reembolso", "renovar", "renovacao"],
-    a: "Não tem fidelidade nem cobrança automática: você paga por período (mês ou ano) e o acesso não renova sozinho. Para cancelar, é só não renovar. Para continuar, renove em Configurações > Plano e uso quando chegar perto do fim." },
+  { id: "cancelar", cat: "Plano", q: "Como cancelo o plano?", kw: ["cancelar", "cancelamento", "encerrar", "parar", "desassinar", "sair do plano", "renovar", "renovacao", "fidelidade"],
+    a: "Não tem fidelidade. Se você pagou avulso, o acesso simplesmente acaba no fim do período e nada é cobrado de novo. Se você assinou com renovação automática, dá para cancelar sozinho em Configurações > Plano e uso, sem taxa: o acesso continua até o fim do período já pago e não há nova cobrança." },
+  { id: "reembolso", cat: "Plano", q: "Como peço reembolso?", kw: ["reembolso", "estorno", "devolucao", "dinheiro de volta", "arrependimento", "desistir", "cancelar compra", "7 dias"],
+    a: "Em Configurações, no fim da página, tem o botão Pedir reembolso. Até 7 dias corridos após o pagamento a devolução é integral e sem precisar justificar (art. 49 do Código de Defesa do Consumidor). Depois desse prazo a gente analisa e responde em até 5 dias. No cartão o valor volta na fatura; no Pix, volta para a conta usada no pagamento." },
 ];
 
 // Perguntas de partida mostradas quando o chat abre.

@@ -15,6 +15,10 @@ const EMAIL_MARK = env.APP_URL.startsWith("https://")
 let transporter = null;
 function getTransport() {
   if (transporter) return transporter;
+  // Em TESTE nunca envia de verdade, mesmo que existam credenciais SMTP no
+  // ambiente. O --env-file do Node não sobrescreve variáveis já presentes na
+  // máquina, então sem esta trava um `npm test` dispara e-mail real ao suporte.
+  if (env.NODE_ENV === "test") return null;
   if (env.SMTP_USER && env.SMTP_PASS) {
     transporter = nodemailer.createTransport({
       host: env.SMTP_HOST,
@@ -256,6 +260,132 @@ export function feedbackEmailText({ category, message, fromEmail, fromName, page
     "",
     "Responda este e-mail para falar direto com a pessoa.",
   ].filter(Boolean).join("\n");
+}
+
+// Rótulo de cada motivo de pedido de reembolso.
+export const REFUND_REASONS = {
+  arrependimento: "Desistência (até 7 dias)",
+  nao_atendeu: "Não atendeu ao que eu esperava",
+  dificuldade: "Dificuldade de usar",
+  cobranca_indevida: "Cobrança que eu não reconheço",
+  outro: "Outro motivo",
+};
+
+// E-mail que chega PRA VOCÊ (dono) quando alguém pede reembolso pelo app.
+// Traz o contexto que você precisa pra decidir sem ir catar no banco: qual
+// pagamento, quanto, quando, se ainda está dentro dos 7 dias do art. 49 do CDC
+// (nesse caso a devolução é obrigatória) e o quanto a pessoa já usou.
+export function refundEmailHtml({ reason, message, fromEmail, fromName, planLabel, amountStr, paidStr, withinRegret, usedStr, dateStr }) {
+  const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  const rz = escapeHtml(REFUND_REASONS[reason] || "Pedido de reembolso");
+  const msg = escapeHtml(message || "").replace(/\n/g, "<br>");
+  const who = escapeHtml(fromName ? `${fromName} (${fromEmail || "sem e-mail"})` : (fromEmail || "sem e-mail"));
+  const row = (k, v) => (v ? `<tr><td style="padding:3px 0"><strong style="color:#1F1B17">${k}:</strong> ${escapeHtml(v)}</td></tr>` : "");
+  const flag = withinRegret
+    ? `<div style="margin:16px 0 0;background:#FDECEA;border:1px solid #F5D2CD;border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.55;color:#8A3A32">
+         <strong>Dentro dos 7 dias (art. 49 do CDC).</strong> A devolução é obrigatória, integral e imediata. Não depende do quanto foi usado.
+       </div>`
+    : `<div style="margin:16px 0 0;background:#FEF3E2;border:1px solid #F5D9A8;border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.55;color:#8A5A1A">
+         <strong>Fora dos 7 dias.</strong> A devolução passa a ser sua decisão. Responda em até 5 dias (Decreto 7.962/2013, art. 4).
+       </div>`;
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Pedido de reembolso no Manda</title></head>
+  <body style="margin:0;padding:0;background:#EEE7DD;font-family:${font};color:#1F1B17">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EEE7DD"><tr><td align="center" style="padding:36px 16px 44px">
+      <table role="presentation" width="460" cellpadding="0" cellspacing="0" style="width:460px;max-width:460px">
+        <tr><td style="padding:0 4px 22px">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td width="36" height="36" align="center" valign="middle" style="width:36px;height:36px;background:#1F1B17;border-radius:10px;color:#fff;font-family:${font};font-size:20px;font-weight:800;line-height:36px">${EMAIL_MARK}</td>
+            <td valign="middle" style="padding-left:11px;font-family:${font};font-size:20px;font-weight:700;letter-spacing:-0.02em;color:#1F1B17">Manda</td>
+          </tr></table>
+        </td></tr>
+        <tr><td style="background:#ffffff;border:1px solid #E6DCCF;border-radius:18px;padding:30px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:#C4573B">Pedido de reembolso</div>
+          <p style="margin:14px 0 0;font-size:16px;font-weight:700;color:#1F1B17">${rz}</p>
+          ${msg ? `<p style="margin:12px 0 0;font-size:15px;line-height:1.6;color:#1F1B17">${msg}</p>` : ""}
+          ${flag}
+          <div style="height:1px;background:#EFE7DB;font-size:0;line-height:0;margin:22px 0 16px">&nbsp;</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;color:#6B635A">
+            <tr><td style="padding:3px 0"><strong style="color:#1F1B17">De:</strong> ${who}</td></tr>
+            ${row("Plano", planLabel)}
+            ${row("Valor pago", amountStr)}
+            ${row("Pago em", paidStr)}
+            ${row("Uso até agora", usedStr)}
+            ${row("Pedido em", dateStr)}
+          </table>
+          <p style="margin:18px 0 0;font-size:12.5px;line-height:1.55;color:#9A9084">Responda este e-mail para falar direto com a pessoa. O estorno é feito no painel do Mercado Pago (precisa ter saldo disponível na conta).</p>
+        </td></tr>
+      </table>
+    </td></tr></table>
+  </body></html>`;
+}
+
+export function refundEmailText({ reason, message, fromEmail, fromName, planLabel, amountStr, paidStr, withinRegret, usedStr, dateStr }) {
+  return [
+    `Pedido de reembolso — ${REFUND_REASONS[reason] || "sem motivo"}`,
+    message || "",
+    withinRegret
+      ? "DENTRO DOS 7 DIAS (art. 49 do CDC): devolução obrigatória, integral e imediata."
+      : "Fora dos 7 dias: a decisão é sua. Responda em até 5 dias (Decreto 7.962/2013, art. 4).",
+    "",
+    `De: ${fromName ? `${fromName} (${fromEmail || "sem e-mail"})` : (fromEmail || "sem e-mail")}`,
+    planLabel ? `Plano: ${planLabel}` : "",
+    amountStr ? `Valor pago: ${amountStr}` : "",
+    paidStr ? `Pago em: ${paidStr}` : "",
+    usedStr ? `Uso até agora: ${usedStr}` : "",
+    dateStr ? `Pedido em: ${dateStr}` : "",
+    "",
+    "Responda este e-mail para falar direto com a pessoa.",
+  ].filter(Boolean).join("\n");
+}
+
+// Confirmação que vai PRA PESSOA. O Decreto 7.962/2013, art. 5, par. 4, exige
+// confirmação imediata do recebimento do pedido de arrependimento.
+export function refundAckHtml({ name, reason, dateStr, withinRegret }) {
+  const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  const first = escapeHtml((name || "").trim().split(" ")[0] || "");
+  const rz = escapeHtml(REFUND_REASONS[reason] || "Pedido de reembolso");
+  const prazo = withinRegret
+    ? "Como o pedido está dentro dos 7 dias da contratação, a devolução é integral e será feita assim que processarmos o estorno."
+    : "Vamos analisar e responder em até 5 dias úteis.";
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Recebemos seu pedido de reembolso</title></head>
+  <body style="margin:0;padding:0;background:#EEE7DD;font-family:${font};color:#1F1B17">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EEE7DD"><tr><td align="center" style="padding:36px 16px 44px">
+      <table role="presentation" width="460" cellpadding="0" cellspacing="0" style="width:460px;max-width:460px">
+        <tr><td style="padding:0 4px 22px">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td width="36" height="36" align="center" valign="middle" style="width:36px;height:36px;background:#1F1B17;border-radius:10px;color:#fff;font-family:${font};font-size:20px;font-weight:800;line-height:36px">${EMAIL_MARK}</td>
+            <td valign="middle" style="padding-left:11px;font-family:${font};font-size:20px;font-weight:700;letter-spacing:-0.02em;color:#1F1B17">Manda</td>
+          </tr></table>
+        </td></tr>
+        <tr><td style="background:#ffffff;border:1px solid #E6DCCF;border-radius:18px;padding:30px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:#C4573B">Pedido recebido</div>
+          <p style="margin:16px 0 0;font-size:15px;line-height:1.6;color:#1F1B17">
+            ${first ? `Oi, ${first}. ` : "Oi. "}Recebemos seu pedido de reembolso${escapeHtml(dateStr) ? ` em ${escapeHtml(dateStr)}` : ""}.
+          </p>
+          <p style="margin:12px 0 0;font-size:15px;line-height:1.6;color:#1F1B17">${prazo}</p>
+          <div style="height:1px;background:#EFE7DB;font-size:0;line-height:0;margin:22px 0 16px">&nbsp;</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;color:#6B635A">
+            <tr><td style="padding:3px 0"><strong style="color:#1F1B17">Motivo informado:</strong> ${rz}</td></tr>
+          </table>
+          <p style="margin:18px 0 0;font-size:12.5px;line-height:1.55;color:#9A9084">Se o estorno for no cartão, o valor volta na fatura. Em Pix, volta para a conta usada no pagamento. É só responder este e-mail se quiser falar com a gente.</p>
+        </td></tr>
+      </table>
+    </td></tr></table>
+  </body></html>`;
+}
+
+export function refundAckText({ name, reason, dateStr, withinRegret }) {
+  const first = (name || "").trim().split(" ")[0] || "";
+  return [
+    `${first ? `Oi, ${first}.` : "Oi."} Recebemos seu pedido de reembolso${dateStr ? ` em ${dateStr}` : ""}.`,
+    withinRegret
+      ? "Como o pedido está dentro dos 7 dias da contratação, a devolução é integral e será feita assim que processarmos o estorno."
+      : "Vamos analisar e responder em até 5 dias úteis.",
+    `Motivo informado: ${REFUND_REASONS[reason] || "não informado"}`,
+    "",
+    "Se o estorno for no cartão, o valor volta na fatura. Em Pix, volta para a conta usada no pagamento.",
+    "É só responder este e-mail se quiser falar com a gente.",
+  ].join("\n\n");
 }
 
 function escapeHtml(s) {

@@ -214,7 +214,7 @@ r.get("/dashboard", async (req, res, next) => {
     const { rates, updatedAt, stale } = await getRates("BRL");
     const conv = (amount, from) => convertWith(rates, amount, from || "BRL", display);
 
-    const [counts, funil, tempo, ativos, serie, templates, atividade, emNego, ticket, quentes] = await Promise.all([
+    const [counts, funil, tempo, ativos, serie, templates, atividade, valores, quentes] = await Promise.all([
       query(`select
           count(*) filter (where created_at >= date_trunc('month', now())) as criadas_mes,
           count(*) filter (where created_at >= date_trunc('month', now()-interval '1 month')
@@ -232,8 +232,19 @@ r.get("/dashboard", async (req, res, next) => {
       query(`select coalesce(avg(extract(epoch from (e.created_at - p.created_at))/86400),0) as dias
         from proposal_events e join proposals p on p.id=e.proposal_id
         where p.user_id=$1 and e.type='accepted'`, [uid]),
-      query(`select count(distinct coalesce(nullif(trim(client),''),'—')) as n
-        from proposals where user_id=$1 and created_at >= now()-interval '30 days'`, [uid]),
+      // Clientes: ativos (30 dias), carteira total e quantos ja fecharam contrato.
+      // Agrupa por cliente primeiro (uma linha por cliente) e so entao conta, pra
+      // nao depender de FILTER sobre count(distinct).
+      query(`select
+          count(*) filter (where recente) as n,
+          count(*) as total,
+          count(*) filter (where fechou)  as fechados
+        from (
+          select coalesce(nullif(trim(client),''),'-') as c,
+                 bool_or(created_at >= now()-interval '30 days') as recente,
+                 bool_or(status='accepted') as fechou
+          from proposals where user_id=$1 group by 1
+        ) t`, [uid]),
       query(`select to_char(created_at::date,'YYYY-MM-DD') as dia, count(*)::int as n
         from proposals where user_id=$1 and created_at >= now()-make_interval(days => $2)
         group by 1 order by 1`, [uid, days]),
@@ -245,9 +256,13 @@ r.get("/dashboard", async (req, res, next) => {
         order by e.created_at desc limit 8`, [uid]),
       // Valores monetários vêm agrupados POR MOEDA; a conversão pra moeda de
       // exibição acontece aqui no Node, com a cotação atual.
-      query(`select currency, coalesce(sum(value) filter (where status in ('sent','viewed')),0) as v
-        from proposals where user_id=$1 group by currency`, [uid]),
-      query(`select currency, coalesce(sum(value) filter (where value>0),0) as s,
+      //  - em_aberto: enviadas/visualizadas (ainda em negociação)
+      //  - fechada:   SOMENTE status='accepted' (contrato efetivamente fechado)
+      //  - soma/n:    base do ticket médio (qualquer proposta com valor)
+      query(`select currency,
+               coalesce(sum(value) filter (where status in ('sent','viewed')),0) as em_aberto,
+               coalesce(sum(value) filter (where status='accepted'),0) as fechada,
+               coalesce(sum(value) filter (where value>0),0) as soma,
                count(*) filter (where value>0)::int as n
         from proposals where user_id=$1 group by currency`, [uid]),
       // Clientes quentes por (cliente, moeda). O join com eventos é agregado por
@@ -272,10 +287,12 @@ r.get("/dashboard", async (req, res, next) => {
     const aceitasTotal = num(c.aceitas_total);
 
     // Em negociação: soma das parcelas de cada moeda, já convertidas.
-    const emNegociacao = emNego.rows.reduce((a, r) => a + conv(num(r.v), r.currency), 0);
+    const emNegociacao = valores.rows.reduce((a, r) => a + conv(num(r.em_aberto), r.currency), 0);
+    // Receita total: acumulado de TODOS os contratos aceitos (não é média).
+    const receitaTotal = valores.rows.reduce((a, r) => a + conv(num(r.fechada), r.currency), 0);
     // Ticket médio: soma dos valores convertidos / total de propostas com valor.
-    const ticketSoma = ticket.rows.reduce((a, r) => a + conv(num(r.s), r.currency), 0);
-    const ticketN = ticket.rows.reduce((a, r) => a + num(r.n), 0);
+    const ticketSoma = valores.rows.reduce((a, r) => a + conv(num(r.soma), r.currency), 0);
+    const ticketN = valores.rows.reduce((a, r) => a + num(r.n), 0);
 
     // Clientes quentes: junta as moedas por cliente (convertendo cada parcela),
     // depois filtra, ordena e corta em 5.
@@ -296,10 +313,14 @@ r.get("/dashboard", async (req, res, next) => {
     res.json({
       moeda: { display, atualizadaEm: updatedAt, desatualizada: stale },
       kpis: {
+        receitaTotal: Math.round(receitaTotal),
+        contratosFechados: aceitasTotal,
         emNegociacao: Math.round(emNegociacao),
         criadasMes: num(c.criadas_mes),
         criadasMesAnt: num(c.criadas_mes_ant),
         taxaAceitacao: enviadasTotal ? Math.round((aceitasTotal / enviadasTotal) * 100) : 0,
+        clientes: num(ativos.rows[0]?.total),
+        clientesFechados: num(ativos.rows[0]?.fechados),
         clientesAtivos: num(ativos.rows[0]?.n),
         tempoMedioAceite: Math.round(num(tempo.rows[0]?.dias) * 10) / 10,
         valorMedio: ticketN ? Math.round(ticketSoma / ticketN) : 0,

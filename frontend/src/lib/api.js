@@ -148,6 +148,9 @@ export const api = {
   // Assinatura com renovação automática (o MP cobra sozinho a cada ciclo).
   subscribe: (plan, interval = "month") => request("/billing/subscribe", { method: "POST", body: JSON.stringify({ plan, interval }) }),
   cancelSubscription: () => request("/billing/subscription/cancel", { method: "POST" }),
+  // Pedido de reembolso feito dentro do app (Decreto 7.962/2013, art. 5, §1º:
+  // o arrependimento tem que poder ser exercido pela mesma ferramenta da compra).
+  requestRefund: (reason, message = "") => request("/billing/refund-request", { method: "POST", body: JSON.stringify({ reason, message }) }),
 
   // Relatar problema. body: { category, message, email?, pageUrl?, screenshot? (data URL) }.
   reportProblem: (body) => request("/feedback", { method: "POST", body: JSON.stringify(body) }),

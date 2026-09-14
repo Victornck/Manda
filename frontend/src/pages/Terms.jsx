@@ -13,10 +13,14 @@ const SECTIONS = [
     "Você é responsável por manter a confidencialidade da sua senha e por toda atividade realizada na sua conta.",
   ] },
   { h: "4. Planos, cobrança e cancelamento", p: [
-    "O Manda tem planos pagos (Básico, Pro e Business), cobrados por período (mensal ou anual). Os pagamentos são processados pelo Mercado Pago, e você escolhe pagar por Pix, cartão ou boleto.",
-    "Não há cobrança automática nem renovação automática: o acesso vale pelo período que você pagou. Para continuar depois do vencimento, é só renovar. Você não precisa cancelar nada, e não geramos cobranças novas por conta própria.",
-    "Reembolso e direito de arrependimento: conforme o art. 49 do Código de Defesa do Consumidor, em qualquer contratação feita pelo site você pode desistir em até 7 dias corridos, contados do pagamento, e receber a devolução integral do valor daquele período, sem precisar justificar. Passado esse prazo, não há reembolso do período em andamento. Como não existe cobrança automática, você nunca é cobrado por um período que não contratou de propósito.",
-    "Os preços podem mudar. Alterações não afetam o período já pago e serão avisadas com antecedência razoável.",
+    "O Manda tem planos pagos (Básico, Pro e Business), cobrados por período (mensal ou anual). Os pagamentos são processados pelo Mercado Pago, e você escolhe a forma de pagamento na tela dele.",
+    "Duas formas de contratar. Pagamento avulso: você paga um período e o acesso vale por ele; nada é cobrado de novo automaticamente, e para continuar depois do vencimento é só pagar outra vez. Assinatura com renovação automática (disponível no cartão): o Mercado Pago cobra o valor do plano a cada ciclo, sem você precisar fazer nada, até que você cancele. Você escolhe qual das duas quer no momento da contratação, e a opção escolhida fica indicada antes da confirmação do pagamento.",
+    "Cancelamento da renovação automática: pode ser feito a qualquer momento, sozinho, em Configurações > Plano e uso, sem taxa e sem precisar falar com ninguém. Depois de cancelar, você continua com acesso até o fim do período que já foi pago e não é cobrado de novo.",
+    "Se o pagamento não entrar no vencimento, a conta não é apagada nem rebaixada: ela fica aguardando pagamento, em modo somente leitura. Você continua vendo suas propostas e os links já enviados seguem no ar, mas criar, enviar e baixar ficam bloqueados até a regularização. Há 3 dias de carência após o vencimento.",
+    "Direito de arrependimento (7 dias): conforme o art. 49 do Código de Defesa do Consumidor, em qualquer contratação feita pelo site você pode desistir em até 7 dias corridos, contados do pagamento, e receber de volta o valor integral daquele período, monetariamente atualizado, sem precisar justificar e sem qualquer desconto — inclusive se já tiver usado o serviço nesse intervalo. Esse direito não é afetado pela existência do plano Gratuito nem por qualquer outra condição destes Termos.",
+    "Como pedir: o pedido de reembolso é feito dentro do próprio aplicativo, em Configurações > Reembolso, que é a mesma ferramenta usada para contratar, conforme o art. 5º do Decreto nº 7.962/2013. Você recebe a confirmação do recebimento por e-mail na hora, e a resposta em até 5 dias. Também é possível escrever para mandaaisuporte@gmail.com. O estorno é feito pelo mesmo meio do pagamento: no cartão, o valor volta na fatura; no Pix, volta para a conta usada no pagamento.",
+    "Depois dos 7 dias: nos planos mensais, não há devolução do mês em andamento, que já estará em curso. Nos planos anuais, se você cancelar antes do fim do prazo, devolvemos o valor proporcional aos meses cheios ainda não usufruídos, contados a partir do pedido.",
+    "Os preços podem mudar. Alterações não afetam o período já pago e serão avisadas com antecedência razoável. Em caso de aumento em assinatura com renovação automática, você é avisado antes da próxima cobrança e pode cancelar sem custo.",
   ] },
   { h: "5. Uso aceitável", p: [
     "Você concorda em não usar o Manda para fins ilícitos, enganosos ou que violem direitos de terceiros, nem tentar comprometer a segurança ou o funcionamento da plataforma.",
@@ -38,5 +42,5 @@ const SECTIONS = [
 ];
 
 export default function Terms() {
-  return <LegalDoc title="Termos de Uso" updated="28 de julho de 2026" sections={SECTIONS} />;
+  return <LegalDoc title="Termos de Uso" updated="14 de setembro de 2026" sections={SECTIONS} />;
 }

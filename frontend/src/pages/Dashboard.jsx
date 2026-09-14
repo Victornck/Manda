@@ -952,11 +952,14 @@ export default function Dashboard({ go }) {
   const quotaLow = !!user && user.plan !== "free" && !usageUnlimited && remaining === 0;
   const profileSub = !user
     ? (booting ? "Carregando…" : "Não conectado")
-    : isFreePlan(user)
-      ? (remaining > 0 ? `${remaining} de ${usage.limit} grátis` : "Propostas grátis usadas")
-      : usageUnlimited
-        ? "Propostas ilimitadas"
-        : `${remaining} ${remaining === 1 ? "proposta restante" : "propostas restantes"}`;
+    : suspended
+      // Vencida: nunca anunciar cota restante aqui — parece conta ativa.
+      ? "Assinatura vencida"
+      : isFreePlan(user)
+        ? (remaining > 0 ? `${remaining} de ${usage.limit} grátis` : "Propostas grátis usadas")
+        : usageUnlimited
+          ? "Propostas ilimitadas"
+          : `${remaining} ${remaining === 1 ? "proposta restante" : "propostas restantes"}`;
   const senderMark = user?.name ? initials(user.name) : "M";
   const missing = [!doc.client.trim() && "Cliente", !doc.title.trim() && "Título"].filter(Boolean);
 
@@ -3267,6 +3270,27 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
     } finally { setCancelBusy(false); setCancelArm(false); }
   };
 
+  // Pedido de reembolso. Fica dentro do app de propósito: o Decreto 7.962/2013
+  // (art. 5, §1º) exige que o arrependimento possa ser exercido pela mesma
+  // ferramenta usada pra contratar. Aqui só registra e avisa — quem estorna de
+  // fato é você, no painel do Mercado Pago.
+  const [refOpen, setRefOpen] = useState(false);
+  const [refReason, setRefReason] = useState("arrependimento");
+  const [refMsg, setRefMsg] = useState("");
+  const [refBusy, setRefBusy] = useState(false);
+  const [refSent, setRefSent] = useState(false);
+  const sendRefund = async () => {
+    setRefBusy(true);
+    try {
+      await api.requestRefund(refReason, refMsg.trim());
+      setRefSent(true);
+      setRefOpen(false);
+      pushToast("Pedido enviado. Você recebeu uma confirmação por e-mail.", "success");
+    } catch (e) {
+      pushToast(e?.message || "Não foi possível enviar agora. Tente de novo.", "info");
+    } finally { setRefBusy(false); }
+  };
+
   useEffect(() => {
     setName(user?.name || "");
     setCurrency(user?.currency || DEFAULT_CURRENCY);
@@ -3392,6 +3416,14 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
   const planLabel = isAdmin ? "Admin" : ({ free: "Gratuito", basic: "Básico", pro: "Pro", business: "Business" }[plan] || plan);
   const k = stats?.kpis;
 
+  // Assinatura vencida: o plano é preservado, mas a cota NÃO vale mais. Nunca
+  // mostrar a barra de uso aqui nesse estado — dá a impressão de conta ativa.
+  const suspended = isSuspended(user);
+  const endedAt = (() => {
+    const d = user?.periodEnd ? new Date(user.periodEnd) : null;
+    return d && !isNaN(d.getTime()) ? d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+  })();
+
   // Uso do mês (cota real do backend, não burlável).
   const unlimited = usage && usage.limit == null;
   const uUsed = usage?.used || 0;
@@ -3433,7 +3465,14 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
               <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user?.name || "Sua conta"}</div>
               <div style={{ fontSize: "13.5px", color: color.gray500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user?.email || "Não conectado"}</div>
             </div>
-            <span style={{ flex: "none", fontFamily: font.body, fontSize: 12.5, fontWeight: 600, color: plan === "free" ? color.gray500 : "#fff", background: plan === "free" ? "transparent" : color.ink, border: plan === "free" ? `1px solid ${color.gray200}` : "none", padding: "6px 12px", borderRadius: 8 }}>{planLabel}</span>
+            {/* Selo do plano. Vencido não pode usar o selo "pago" (fundo escuro):
+                vira um selo de aviso, senão parece assinatura em dia. */}
+            <span style={{
+              flex: "none", fontFamily: font.body, fontSize: 12.5, fontWeight: 600, padding: "6px 12px", borderRadius: 8,
+              color: suspended ? "#8A5A1A" : plan === "free" ? color.gray500 : "#fff",
+              background: suspended ? "#FEF3E2" : plan === "free" ? "transparent" : color.ink,
+              border: suspended ? "1px solid #F5D9A8" : plan === "free" ? `1px solid ${color.gray200}` : "none",
+            }}>{suspended ? `${planLabel} · vencido` : planLabel}</span>
           </div>
           <label style={fieldLabel}>Nome de exibição</label>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -3528,8 +3567,24 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
 
         <div style={card}>
           <div style={hTitle}>Plano e uso</div>
-          <p style={subTxt}>Sua cota do mês e a gestão da assinatura.</p>
-          {plan === "free" ? (
+          <p style={subTxt}>
+            {suspended ? "O estado da sua assinatura e como reativar." : "Sua cota do mês e a gestão da assinatura."}
+          </p>
+          {suspended ? (
+            // Vencida: nada de barra de progresso nem "X de 5 usadas". A cota
+            // está pausada, e mostrar o contador faria parecer conta ativa.
+            <div style={{ marginBottom: 16, background: "#FEF3E2", border: "1px solid #F5D9A8", borderRadius: 11, padding: "13px 15px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                <Lock size={15} strokeWidth={2.2} color="#8A5A1A" style={{ flex: "none" }} />
+                <span style={{ fontSize: "13.5px", fontWeight: 700, color: "#8A5A1A" }}>
+                  Plano {planLabel} vencido{endedAt ? ` em ${endedAt}` : ""}
+                </span>
+              </div>
+              <div style={{ fontSize: "12.5px", color: color.gray600, lineHeight: 1.5 }}>
+                Sua cota está pausada e não renova até o pagamento entrar. Você continua vendo suas propostas e os links já enviados seguem no ar, mas criar, enviar e baixar estão bloqueados.
+              </div>
+            </div>
+          ) : plan === "free" ? (
             <p style={{ fontSize: 14, color: color.gray600, margin: "0 0 14px" }}>Você ainda não tem um plano ativo. Assine para criar e enviar propostas.</p>
           ) : (
             <div style={{ marginBottom: 16 }}>
@@ -3549,11 +3604,11 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {isAdmin ? (
               <span style={{ fontSize: "13px", color: color.gray500 }}>Conta de administrador: acesso total, sem cobrança.</span>
-            ) : plan === "free" ? (
+            ) : plan === "free" && !suspended ? (
               <button onClick={() => go && go("pricing")} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 18px" }}>Ver planos</button>
             ) : (
               <>
-                <button onClick={() => go && go("pricing")} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 18px" }}>Renovar acesso</button>
+                <button onClick={() => go && go("pricing")} className="db-btn db-btn-accent" style={{ fontSize: 14, padding: "10px 18px" }}>{suspended ? "Reativar acesso" : "Renovar acesso"}</button>
                 <button onClick={() => go && go("pricing")} className="db-btn" style={{ fontSize: 14, padding: "10px 14px", background: "none", color: color.gray500, fontWeight: 600 }}>Trocar de plano</button>
               </>
             )}
@@ -3563,14 +3618,23 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
           {!isAdmin && user?.subscriptionKind === "authorized" && (
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line2}` }}>
               <div style={{ fontSize: "13.5px", color: color.gray600, marginBottom: 8 }}>
-                <strong style={{ fontWeight: 600, color: color.ink }}>Renovação automática ativa.</strong> Você é cobrado a cada período, sem precisar fazer nada.
+                {suspended ? (
+                  // Vencida: não dá pra afirmar que a cobrança automática está em
+                  // dia (o período acabou sem pagamento entrar). Some a promessa,
+                  // fica só a saída.
+                  <>A última cobrança automática não foi concluída. Reative o acesso acima, ou cancele a renovação se não quiser continuar.</>
+                ) : (
+                  <><strong style={{ fontWeight: 600, color: color.ink }}>Renovação automática ativa.</strong> Você é cobrado a cada período, sem precisar fazer nada.</>
+                )}
               </div>
               <button onClick={cancelAuto} disabled={cancelBusy} className="db-btn" style={{ fontSize: "13px", padding: "8px 12px", background: "none", color: cancelArm ? "#B4443C" : color.gray500, fontWeight: 600, border: `1px solid ${cancelArm ? "#F5D2CD" : color.gray200}`, borderRadius: 9 }}>
                 {cancelBusy ? "Cancelando…" : cancelArm ? "Confirmar cancelamento?" : "Cancelar renovação automática"}
               </button>
               {cancelArm && !cancelBusy && (
                 <div style={{ fontSize: "12px", color: color.gray500, marginTop: 6 }}>
-                  Você continua com acesso até o fim do período já pago. Depois disso, é só pagar de novo quando quiser.
+                  {suspended
+                    ? "Cancelar só encerra as cobranças futuras. Suas propostas continuam salvas, e é só pagar de novo quando quiser voltar."
+                    : "Você continua com acesso até o fim do período já pago. Depois disso, é só pagar de novo quando quiser."}
                 </div>
               )}
             </div>
@@ -3614,6 +3678,65 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
               <i />
             </span>
           </label>
+        </div>
+
+        {/* Reembolso — fica no fim, discreto, mas sempre acessível. */}
+        <div style={card}>
+          <div style={hTitle}>Reembolso</div>
+          <p style={subTxt}>
+            Você pode desistir em até 7 dias corridos após o pagamento e receber o valor de volta integralmente, sem precisar justificar (art. 49 do Código de Defesa do Consumidor). Passado esse prazo, é só pedir aqui que a gente analisa.
+          </p>
+
+          {refSent ? (
+            <div style={{ background: "#EAF6EF", border: "1px solid #CDE9D8", borderRadius: 11, padding: "13px 15px", fontSize: "13.5px", lineHeight: 1.55, color: "#2E7D51" }}>
+              <strong style={{ fontWeight: 700 }}>Pedido recebido.</strong> Mandamos uma confirmação para o seu e-mail. A resposta vem em até 5 dias.
+            </div>
+          ) : !refOpen ? (
+            <button onClick={() => setRefOpen(true)} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 18px" }}>
+              Pedir reembolso
+            </button>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={fieldLabel} htmlFor="ref-reason">Motivo</label>
+                <select
+                  id="ref-reason"
+                  value={refReason}
+                  onChange={(e) => setRefReason(e.target.value)}
+                  style={{ ...inp(), width: "100%", cursor: "pointer" }}
+                >
+                  <option value="arrependimento">Desistência (até 7 dias)</option>
+                  <option value="nao_atendeu">Não atendeu ao que eu esperava</option>
+                  <option value="dificuldade">Dificuldade de usar</option>
+                  <option value="cobranca_indevida">Cobrança que eu não reconheço</option>
+                  <option value="outro">Outro motivo</option>
+                </select>
+              </div>
+              <div>
+                <label style={fieldLabel} htmlFor="ref-msg">Quer contar o que aconteceu? (opcional)</label>
+                <textarea
+                  id="ref-msg"
+                  value={refMsg}
+                  onChange={(e) => setRefMsg(e.target.value)}
+                  maxLength={2000}
+                  rows={3}
+                  placeholder="Isso ajuda a gente a melhorar. Não é obrigatório."
+                  style={{ ...inp(), width: "100%", resize: "vertical", lineHeight: 1.5 }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button onClick={sendRefund} disabled={refBusy} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px" }}>
+                  {refBusy ? "Enviando…" : "Confirmar pedido"}
+                </button>
+                <button onClick={() => { setRefOpen(false); setRefMsg(""); }} disabled={refBusy} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 16px" }}>
+                  Cancelar
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: color.gray500, lineHeight: 1.5 }}>
+                No cartão, o valor volta na fatura. No Pix, volta para a conta usada no pagamento. Suas propostas continuam salvas.
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>

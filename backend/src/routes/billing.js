@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { query } from "../db.js";
 import { mpConfigured, createPreference, createPreapproval, cancelPreapproval } from "../lib/mercadopago.js";
 import { PLAN_PRICES_BRL, PLAN_LABELS } from "../lib/plans.js";
+import { sendMail, refundEmailHtml, refundEmailText, refundAckHtml, refundAckText } from "../lib/mailer.js";
 import { env } from "../env.js";
 
 const r = Router();
@@ -108,6 +109,101 @@ r.post("/subscription/cancel", async (req, res, next) => {
     }
     await query("update users set subscription_kind='cancelled' where id=$1", [req.user.id]);
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ---------------------------------------------------------------------------
+// Pedido de reembolso, feito pelo próprio usuário dentro do app.
+//
+// Decreto 7.962/2013, art. 5, §1º: o direito de arrependimento tem que poder
+// ser exercido "pela mesma ferramenta utilizada para a contratação". Como a
+// pessoa assina aqui dentro, ela precisa poder pedir o reembolso aqui dentro.
+// O §4º do mesmo artigo exige confirmação imediata do recebimento — por isso
+// saem DOIS e-mails: um pro dono decidir e outro de confirmação pra pessoa.
+//
+// Este endpoint NÃO estorna nada e não mexe no acesso. Ele registra e avisa.
+// O estorno é feito no painel do Mercado Pago, e quando ele acontece o webhook
+// (refunded/charged_back) é quem encerra o período.
+// ---------------------------------------------------------------------------
+const refundSchema = z.object({
+  reason: z.enum(["arrependimento", "nao_atendeu", "dificuldade", "cobranca_indevida", "outro"]),
+  message: z.string().trim().max(2000).optional().default(""),
+});
+
+const DAY_MS = 86400000;
+
+r.post("/refund-request", async (req, res, next) => {
+  try {
+    const { reason, message } = refundSchema.parse(req.body);
+    const uid = req.user.id;
+
+    const [{ rows: urows }, { rows: prows }, { rows: crows }] = await Promise.all([
+      query("select name, email, plan from users where id=$1", [uid]),
+      query(`select id, plan, interval, amount, created_at from mp_payments
+              where user_id=$1 and status='approved' order by created_at desc limit 1`, [uid]),
+      query(`select count(*)::int as total,
+                    count(*) filter (where status <> 'draft')::int as enviadas,
+                    count(*) filter (where status = 'accepted')::int as aceitas
+               from proposals where user_id=$1`, [uid]),
+    ]);
+    const u = urows[0];
+    if (!u) return res.status(404).json({ error: "Conta não encontrada." });
+
+    // Um pedido aberto por vez: evita enxurrada de e-mail no clique repetido.
+    const { rows: dup } = await query(
+      "select id from refund_requests where user_id=$1 and status='aberto' and created_at > now()-interval '7 days' limit 1",
+      [uid]
+    );
+    if (dup.length) {
+      return res.status(409).json({ error: "Você já tem um pedido de reembolso em análise. Responderemos em até 5 dias." });
+    }
+
+    const pay = prows[0] || null;
+    const paidAt = pay?.created_at ? new Date(pay.created_at) : null;
+    // Art. 49 do CDC: 7 dias corridos contados da contratação. Dentro da janela,
+    // a devolução é obrigatória e integral — não é decisão comercial.
+    const withinRegret = !!paidAt && (Date.now() - paidAt.getTime()) <= 7 * DAY_MS;
+
+    await query(
+      `insert into refund_requests(user_id, payment_id, reason, message, plan, amount, paid_at, within_regret)
+       values($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [uid, pay?.id || null, reason, message, pay?.plan || u.plan || "", pay?.amount || 0, paidAt, withinRegret]
+    );
+
+    const fmtDate = (d) => (d ? d.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "");
+    const c = crows[0] || {};
+    const payload = {
+      reason, message, fromEmail: u.email, fromName: u.name,
+      planLabel: PLAN_LABELS[pay?.plan || u.plan] || (pay?.plan || u.plan || ""),
+      amountStr: pay ? `R$ ${Number(pay.amount).toFixed(2).replace(".", ",")}${pay.interval === "year" ? " (anual)" : ""}` : "sem pagamento registrado",
+      paidStr: fmtDate(paidAt),
+      withinRegret,
+      usedStr: `${c.total || 0} proposta(s) criada(s), ${c.enviadas || 0} enviada(s), ${c.aceitas || 0} aceita(s)`,
+      dateStr: fmtDate(new Date()),
+    };
+
+    // O e-mail pro dono é o que importa: se ele falhar, o pedido falha (a pessoa
+    // tenta de novo). O de confirmação é best-effort, não derruba a requisição.
+    await sendMail({
+      to: env.SMTP_USER || env.EMAIL_FROM,
+      subject: `[Manda] Pedido de reembolso de ${u.email}${withinRegret ? " (dentro dos 7 dias)" : ""}`,
+      html: refundEmailHtml(payload),
+      text: refundEmailText(payload),
+      replyTo: u.email || undefined,
+    });
+
+    try {
+      await sendMail({
+        to: u.email,
+        subject: "Recebemos seu pedido de reembolso",
+        html: refundAckHtml({ name: u.name, reason, dateStr: payload.dateStr, withinRegret }),
+        text: refundAckText({ name: u.name, reason, dateStr: payload.dateStr, withinRegret }),
+      });
+    } catch (e) {
+      console.error("[reembolso] confirmação pro usuário falhou:", e?.message);
+    }
+
+    res.status(201).json({ ok: true, withinRegret });
   } catch (e) { next(e); }
 });
 

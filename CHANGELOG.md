@@ -14,6 +14,80 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.6.0] — 2026-09-14
+
+### Alterado
+- **"Ticket médio" sai da Home, entra "Receita total".** O indicador principal
+  agora é o **valor acumulado dos contratos efetivamente fechados** (só propostas
+  com status `accepted`), não uma média por proposta. Continua respeitando a
+  moeda de exibição escolhida no painel (cada moeda é convertida com a cotação
+  atual antes de somar). O campo `valorMedio` segue na resposta da API para não
+  quebrar nada, mas não é mais exibido.
+- **Hierarquia dos KPIs da Home.** Os indicadores passam a ficar em dois grupos
+  nomeados, em vez de uma fileira solta de quatro:
+  - **Resultado** — Receita total (card em destaque, ocupando o dobro da
+    largura), Contratos fechados e Clientes.
+  - **Em andamento** — Em negociação, Propostas no mês, Taxa de aceitação e
+    Tempo até o aceite (que antes vivia escondido como legenda do ticket médio).
+  Nenhuma cor ou fonte nova: o destaque usa o mesmo tom já aplicado no card de
+  Insights. No mobile a grade cai para 2 colunas e depois 1, com o card de
+  destaque acompanhando.
+
+### Adicionado
+- KPIs novos em `GET /proposals/dashboard`: `receitaTotal`, `contratosFechados`,
+  `clientes` (carteira inteira) e `clientesFechados` (quantos já aceitaram).
+  Duas consultas viraram uma só, então o painel não ficou mais pesado.
+
+### Adicionado (conformidade)
+- **Pedido de reembolso dentro do app.** Novo bloco no fim de Configurações, com
+  motivo e mensagem opcional. Ao confirmar: grava em `refund_requests`
+  (migração `022`), manda um e-mail pro suporte com o contexto pra decidir
+  (plano, valor, data do pagamento, uso até aqui) e **marca em destaque se o
+  pedido está dentro dos 7 dias do art. 49 do CDC** — nesse caso a devolução é
+  obrigatória e integral, não é decisão comercial. A pessoa recebe confirmação
+  automática por e-mail na hora.
+  O motivo de existir: o Decreto 7.962/2013 (art. 5º, §1º) exige que o direito
+  de arrependimento possa ser exercido **pela mesma ferramenta usada para
+  contratar** — quem assina dentro do app tem que poder pedir dentro do app. O
+  §4º exige a confirmação imediata do recebimento, e o art. 4º, parágrafo único,
+  resposta em até 5 dias.
+  O endpoint **não estorna nada** e não mexe no acesso: o estorno segue sendo
+  feito no painel do Mercado Pago, e quem encerra o período é o webhook.
+
+### Alterado (Termos de Uso)
+- Seção 4 reescrita. Ela ainda afirmava que **"não há cobrança automática nem
+  renovação automática"**, o que virou mentira na v0.5.0 — um cliente cobrado
+  automaticamente teria os próprios Termos como prova contra o serviço. Agora
+  descreve as duas formas de contratar, como cancelar a recorrência sozinho, o
+  que acontece quando o pagamento não entra, e dois pontos novos: o direito dos
+  7 dias vale **mesmo se a pessoa já tiver usado** no intervalo (e não é afetado
+  pelo plano Gratuito), e o **plano anual passa a ter devolução proporcional aos
+  meses cheios não usufruídos** depois dos 7 dias. A regra anterior retinha o
+  ano inteiro, o que é o tipo de cláusula que vira chargeback e discussão de
+  abusividade.
+- FAQ do Suporte ajustado pelo mesmo motivo, e ganhou a pergunta "Como peço
+  reembolso?".
+
+### Corrigido
+- **Assinatura vencida parecia estar ativa.** Com o plano expirado, a tela ainda
+  exibia a barra de cota ("2 de 5 propostas usadas · Renova todo mês"), o selo
+  escuro do plano pago e "3 propostas restantes" na barra lateral — quem não
+  conhece o sistema concluía que ainda estava pagando. Agora, quando a conta
+  está aguardando pagamento:
+  - **Plano e uso** troca a barra de progresso por um aviso âmbar dizendo
+    "Plano X vencido em DD/MM/AAAA", explicando que a cota está pausada. O botão
+    vira "Reativar acesso".
+  - O **selo do plano** no topo de Configurações vira âmbar com "X · vencido",
+    em vez do selo escuro de plano pago.
+  - A **barra lateral** mostra "Assinatura vencida" no lugar da contagem de
+    propostas restantes.
+  - Com renovação automática ligada, some a frase "Renovação automática ativa,
+    você é cobrado sem precisar fazer nada" — que contradizia o aviso de vencido.
+    No lugar entra "A última cobrança automática não foi concluída". O botão de
+    cancelar continua disponível (é a única saída de quem não quer ser cobrado
+    de novo).
+  Só muda o que é exibido: o bloqueio real já era feito pelo backend.
+
 ## [0.5.0] — 2026-08-31
 
 ### Adicionado

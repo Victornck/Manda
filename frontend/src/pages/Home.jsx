@@ -51,9 +51,9 @@ function ago(iso) {
 }
 
 // Card base — mesmo desenho em toda a Home.
-function Card({ children, style, pad = 20 }) {
+function Card({ children, style, pad = 20, className }) {
   return (
-    <div style={{ background: color.white, border: `1px solid ${color.line2}`, borderRadius: 16, padding: pad, ...style }}>
+    <div className={className} style={{ background: color.white, border: `1px solid ${color.line2}`, borderRadius: 16, padding: pad, ...style }}>
       {children}
     </div>
   );
@@ -172,6 +172,29 @@ function Kpi({ label, value, hint, delta }) {
   );
 }
 
+// KPI de destaque — o indicador financeiro principal (Receita total). Mesmo
+// desenho dos outros cards, só que maior e no tom de destaque já usado nos
+// Insights (nenhuma cor nova).
+function HeroKpi({ label, value, hint }) {
+  return (
+    <Card
+      className="hm-kpi-hero"
+      style={{ background: color.accentTint, border: `1px solid ${color.accentLine}`, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}
+    >
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: color.accentInk, marginBottom: 10 }}>{label}</div>
+      <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: "clamp(28px, 4.6vw, 38px)", letterSpacing: "-0.03em", lineHeight: 1, color: color.ink, wordBreak: "break-word" }}>
+        {value}
+      </div>
+      {hint && <div style={{ fontSize: 12.5, color: color.gray600, marginTop: 9 }}>{hint}</div>}
+    </Card>
+  );
+}
+
+// Rótulo de grupo — separa "o que já fechou" do "o que está em andamento".
+function GroupTitle({ children }) {
+  return <div className="hm-grouptitle">{children}</div>;
+}
+
 function Section({ title, action, children }) {
   return (
     <Card>
@@ -240,7 +263,11 @@ export default function Home({ user, onNewProposal, onNavigate, onboarding }) {
     <div className="hm-wrap">
       <style>{`
         .hm-wrap { padding: 26px 24px 40px; max-width: 1200px; }
-        .hm-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+        .hm-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; align-items: stretch; }
+        .hm-kpi-hero { grid-column: span 2; }
+        .hm-grouptitle { font-size: 11.5px; font-weight: 700; letter-spacing: .085em; text-transform: uppercase; color: ${color.gray400}; margin: 0 0 9px 2px; }
+        .hm-group { margin-bottom: 18px; }
+        .hm-group:last-of-type { margin-bottom: 22px; }
         .hm-cols { display: grid; grid-template-columns: 1.7fr 1fr; gap: 16px; align-items: start; }
         .hm-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
         .hm-chip { font-size: 12.5px; font-weight: 600; padding: 6px 11px; border-radius: 999px; border: 1px solid ${color.line2}; background: ${color.white}; color: ${color.gray500}; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }
@@ -258,8 +285,8 @@ export default function Home({ user, onNewProposal, onNavigate, onboarding }) {
         .hm-cursel svg { pointer-events: none; flex: none; }
         .hm-skel { background: ${color.surface}; border-radius: 12px; animation: hmpulse 1.3s ease-in-out infinite; }
         @keyframes hmpulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
-        @media (max-width: 980px) { .hm-cols { grid-template-columns: 1fr; } .hm-kpis { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 560px) { .hm-wrap { padding: 20px 16px 32px; } }
+        @media (max-width: 980px) { .hm-cols { grid-template-columns: 1fr; } .hm-kpis { grid-template-columns: repeat(2, 1fr); } .hm-kpi-hero { grid-column: span 2; } }
+        @media (max-width: 560px) { .hm-wrap { padding: 20px 16px 32px; } .hm-kpis { grid-template-columns: 1fr; } .hm-kpi-hero { grid-column: span 1; } }
       `}</style>
 
       {/* HEADER */}
@@ -288,7 +315,14 @@ export default function Home({ user, onNewProposal, onNavigate, onboarding }) {
 
       {loading ? (
         <>
-          <div className="hm-kpis">{[0, 1, 2, 3].map((i) => <div key={i} className="hm-skel" style={{ height: 92 }} />)}</div>
+          <div className="hm-kpis" style={{ marginBottom: 18 }}>
+            <div className="hm-kpi-hero hm-skel" style={{ height: 124 }} />
+            <div className="hm-skel" style={{ height: 124 }} />
+            <div className="hm-skel" style={{ height: 124 }} />
+          </div>
+          <div className="hm-kpis" style={{ marginBottom: 22 }}>
+            {[0, 1, 2, 3].map((i) => <div key={i} className="hm-skel" style={{ height: 92 }} />)}
+          </div>
           <div className="hm-cols">
             <div className="hm-skel" style={{ height: 320 }} />
             <div className="hm-skel" style={{ height: 320 }} />
@@ -308,7 +342,7 @@ export default function Home({ user, onNewProposal, onNavigate, onboarding }) {
           </div>
           <h2 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, margin: "0 0 8px" }}>Seu painel começa com a primeira proposta</h2>
           <p style={{ fontSize: 14.5, color: color.gray500, maxWidth: 420, margin: "0 auto 20px" }}>
-            Assim que você criar e enviar propostas, aqui você acompanha valores em negociação, taxa de aceitação, clientes que mais abrem e muito mais.
+            Assim que você criar e enviar propostas, aqui você acompanha a receita dos contratos fechados, o que está em negociação, sua taxa de aceitação e os clientes que mais abrem.
           </p>
           <button onClick={onNewProposal} style={{ fontSize: 14.5, fontWeight: 600, padding: "11px 20px", borderRadius: 10, border: "none", color: "#fff", background: color.accent, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Plus size={17} strokeWidth={2.4} />Criar primeira proposta
@@ -327,12 +361,45 @@ export default function Home({ user, onNewProposal, onNavigate, onboarding }) {
             {chartLoading && <span className="db-spin" style={{ display: "inline-block", width: 11, height: 11, border: `1.5px solid ${color.line}`, borderTopColor: color.gray400, borderRadius: "50%" }} />}
           </div>
 
-          {/* KPIs */}
-          <div className="hm-kpis">
-            <Kpi label="Em negociação" value={money(data.kpis.emNegociacao)} hint="Propostas enviadas e abertas" />
-            <Kpi label="Propostas no mês" value={data.kpis.criadasMes} delta={data.kpis.criadasMes - data.kpis.criadasMesAnt} hint="vs. mês anterior" />
-            <Kpi label="Taxa de aceitação" value={`${data.kpis.taxaAceitacao}%`} hint="Do total já enviado" />
-            <Kpi label="Ticket médio" value={money(data.kpis.valorMedio)} hint={`${data.kpis.clientesAtivos} cliente(s) ativo(s) · ${data.kpis.tempoMedioAceite || 0}d p/ aceitar`} />
+          {/* KPIs — grupo 1: o que já fechou (resultado consolidado) */}
+          <div className="hm-group">
+            <GroupTitle>Resultado</GroupTitle>
+            <div className="hm-kpis">
+              <HeroKpi
+                label="Receita total"
+                value={money(data.kpis.receitaTotal)}
+                hint={
+                  data.kpis.contratosFechados > 0
+                    ? `Somando ${data.kpis.contratosFechados} contrato${data.kpis.contratosFechados > 1 ? "s" : ""} fechado${data.kpis.contratosFechados > 1 ? "s" : ""}.`
+                    : "Aparece aqui assim que a primeira proposta for aceita."
+                }
+              />
+              <Kpi
+                label="Contratos fechados"
+                value={data.kpis.contratosFechados}
+                hint="Propostas aceitas até hoje"
+              />
+              <Kpi
+                label="Clientes"
+                value={data.kpis.clientes}
+                hint={data.kpis.clientesFechados > 0 ? `${data.kpis.clientesFechados} já fechou com você` : "Na sua carteira"}
+              />
+            </div>
+          </div>
+
+          {/* KPIs — grupo 2: o que ainda está em jogo */}
+          <div className="hm-group">
+            <GroupTitle>Em andamento</GroupTitle>
+            <div className="hm-kpis">
+              <Kpi label="Em negociação" value={money(data.kpis.emNegociacao)} hint="Enviadas, aguardando resposta" />
+              <Kpi label="Propostas no mês" value={data.kpis.criadasMes} delta={data.kpis.criadasMes - data.kpis.criadasMesAnt} hint="vs. mês anterior" />
+              <Kpi label="Taxa de aceitação" value={`${data.kpis.taxaAceitacao}%`} hint="Do total já enviado" />
+              <Kpi
+                label="Tempo até o aceite"
+                value={data.kpis.tempoMedioAceite > 0 ? `${data.kpis.tempoMedioAceite} d` : "—"}
+                hint="Média do envio ao aceite"
+              />
+            </div>
           </div>
 
           <div className="hm-cols">
