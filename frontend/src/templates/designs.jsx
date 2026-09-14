@@ -824,11 +824,14 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
 
 const EST_THEMES = ["claro", "escuro"];
 
-function EstSec({ label, children, line, soft }) {
+function EstSec({ n, label, children, line, soft }) {
   return (<>
     <Break />
     <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 40, paddingTop: 30, marginTop: 30, borderTop: `1px solid ${line}` }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: soft, paddingTop: 4 }}>{label}</div>
+      <div style={{ paddingTop: 4 }}>
+        {n && <div style={{ fontFamily: font.heading, fontSize: 12, fontWeight: 700, color: soft, marginBottom: 6, fontVariantNumeric: "tabular-nums" }}>{n}</div>}
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: soft }}>{label}</div>
+      </div>
       <div style={{ minWidth: 0 }}>{children}</div>
     </div>
   </>);
@@ -838,47 +841,99 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
   const m = model(doc);
   const T = themeOf(doc, EST_THEMES);
   const A = accentUse("full", accent, T);
-  const capaInk = btnText(accent);
   const metaCapa = pairs(["Início", m.start], ["Entrega", m.end], ["Validade", m.validity]);
   const conds = pairs(["Pagamento", m.payment], ["Revisões", m.revisions]);
   const tot = splitMoney(m.total, m.currency);
   const ghost = T.dark ? mix(T.bg, T.ink, 0.22) : wash(accent, 0.62);
 
+  /* SUMÁRIO — fonte única das seções. A capa lista o que vem dentro e o miolo
+     usa a mesma numeração, então o índice não é enfeite: é navegação, e amarra
+     capa e páginas internas num sistema só. Só entra seção que existe de fato. */
+  const secs = [];
+  if (has(m.scope)) secs.push(["scope", "Sobre o projeto"]);
+  if (m.items.length) secs.push(["items", "Entregas"]);
+  if (m.items.length) secs.push(["total", "Investimento"]);
+  if (conds.length) secs.push(["conds", "Condições"]);
+  if (has(m.bio)) secs.push(["bio", "Estúdio"]);
+  const nOf = (k) => {
+    const i = secs.findIndex((x) => x[0] === k);
+    return i < 0 ? "" : String(i + 1).padStart(2, "0");
+  };
+
+  /* A capa aceita FOTO. Um estúdio de design, branding ou audiovisual tem
+     imagem do próprio trabalho — e é isso que ele manda para o cliente. Sem
+     foto, a capa se sustenta pela composição (sumário + título), nunca por um
+     retângulo de cor chapada com texto no pé. */
+  const hasCover = !!m.cover;
+  const capaInk = hasCover ? "#FFFFFF" : btnText(accent);
+  const rule = capaInk === "#FFFFFF" ? "rgba(255,255,255,.28)" : "rgba(0,0,0,.18)";
+  const capaBg = hasCover
+    ? { backgroundImage: `url(${m.cover}), linear-gradient(170deg, ${darken(accent, 0.25)} 0%, ${darken(accent, 0.62)} 100%)`, backgroundSize: "cover", backgroundPosition: m.coverPos }
+    : { background: accent };
+
   return (
     <Sheet bg={T.bg} ink={T.ink} print={print}>
 
       {/* ── PÁGINA 1: CAPA ─────────────────────────────────────────────── */}
-      {/* O título é ancorado EMBAIXO, com o vazio todo acima dele. Dividir o
-          espaço em dois vazios iguais deixava o título boiando no meio e a capa
-          parecia inacabada. */}
-      <div style={{ boxSizing: "border-box", background: accent, color: capaInk, padding: "56px 56px 44px", minHeight: print ? PAGE_H : (metaCapa.length ? 660 : 540), display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <Wordmark doc={doc} h={26} ink={capaInk} />
-            <span style={{ fontSize: 14, fontWeight: 600 }}>{m.brand || "Seu estúdio"}</span>
-          </div>
-          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", opacity: 0.75 }}>Proposta</span>
-        </div>
+      <div style={{ position: "relative", boxSizing: "border-box", color: capaInk, ...capaBg,
+        minHeight: print ? PAGE_H : 660, padding: "56px 56px 44px", display: "flex", flexDirection: "column" }}>
 
-        <div style={{ flex: 1, minHeight: 120 }} />
-
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.75, marginBottom: 18 }}>
-          Para <Ed onEdit={onEdit} field="client">{m.client || "cliente"}</Ed>
-        </div>
-        <h2 style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 62, lineHeight: 0.98, letterSpacing: "-0.045em", margin: "0 0 52px", maxWidth: 620 }}>
-          <Ed onEdit={onEdit} field="title">{m.title || "Título da proposta"}</Ed>
-        </h2>
-
-        {metaCapa.length > 0 && (
-          <div style={{ display: "flex", gap: 44, paddingTop: 24, borderTop: `1px solid ${capaInk === "#FFFFFF" ? "rgba(255,255,255,.28)" : "rgba(0,0,0,.18)"}` }}>
-            {metaCapa.map(([k, v]) => (
-              <div key={k}>
-                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.7 }}>{k}</div>
-                <div style={{ fontSize: 15, fontWeight: 600, marginTop: 6 }}>{v}</div>
-              </div>
-            ))}
+        {/* Véu só quando há foto: sem ele o título branco some numa imagem clara. */}
+        {hasCover && (
+          <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.42) 0%, rgba(0,0,0,0.16) 34%, rgba(0,0,0,0.52) 74%, rgba(0,0,0,0.82) 100%)" }} />
+        )}
+        {!hasCover && onEdit && (
+          <div onClick={() => onEdit("cover")} role="button" tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit("cover"); } }}
+            style={{ position: "absolute", right: 56, bottom: 44, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.6, border: `1px dashed ${rule}`, borderRadius: 6, padding: "8px 12px", cursor: "pointer", zIndex: 2 }}>
+            Adicionar foto de capa
           </div>
         )}
+
+        <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 32 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <Wordmark doc={doc} h={26} ink={capaInk} />
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{m.brand || "Seu estúdio"}</span>
+            </div>
+
+            {/* Sem foto, o sumário ocupa o alto da capa. Com foto, a imagem já
+                preenche e o texto pequeno por cima dela só sujaria. */}
+            {!hasCover && secs.length > 0 ? (
+              <div style={{ textAlign: "right", flex: "none", minWidth: 190 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", opacity: 0.6, marginBottom: 14 }}>Nesta proposta</div>
+                {secs.map(([k, label], i) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "flex-end", alignItems: "baseline", gap: 10, padding: "5px 0", borderTop: i ? `1px solid ${rule}` : "none" }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, opacity: 0.92 }}>{label}</span>
+                    <span style={{ fontFamily: font.heading, fontSize: 11, fontWeight: 700, opacity: 0.55, fontVariantNumeric: "tabular-nums", minWidth: 16 }}>{String(i + 1).padStart(2, "0")}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", opacity: 0.75 }}>Proposta</span>
+            )}
+          </div>
+
+          <div style={{ flex: 1, minHeight: 90 }} />
+
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.8, marginBottom: 18 }}>
+            Para <Ed onEdit={onEdit} field="client">{m.client || "cliente"}</Ed>
+          </div>
+          <h2 style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 62, lineHeight: 0.98, letterSpacing: "-0.045em", margin: "0 0 52px", maxWidth: 620, textShadow: hasCover ? "0 2px 24px rgba(0,0,0,.45)" : "none" }}>
+            <Ed onEdit={onEdit} field="title">{m.title || "Título da proposta"}</Ed>
+          </h2>
+
+          {metaCapa.length > 0 && (
+            <div style={{ display: "flex", gap: 44, paddingTop: 24, borderTop: `1px solid ${rule}` }}>
+              {metaCapa.map(([k, v]) => (
+                <div key={k}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.72 }}>{k}</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, marginTop: 6 }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
       <Break hard />
 
@@ -886,7 +941,10 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
       <div style={{ padding: "54px 56px 48px" }}>
         {has(m.scope) && (
           <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 40 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: T.soft, paddingTop: 4 }}>Sobre o projeto</div>
+            <div style={{ paddingTop: 4 }}>
+              {nOf("scope") && <div style={{ fontFamily: font.heading, fontSize: 12, fontWeight: 700, color: T.soft, marginBottom: 6, fontVariantNumeric: "tabular-nums" }}>{nOf("scope")}</div>}
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: T.soft }}>Sobre o projeto</div>
+            </div>
             <p style={{ fontSize: 17, lineHeight: 1.62, color: T.ink, margin: 0, maxWidth: 480, letterSpacing: "-0.005em" }}>
               <Ed onEdit={onEdit} field="scope">{m.scope}</Ed>
             </p>
@@ -895,7 +953,7 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
 
         {m.items.length > 0 && (<>
           <Break />
-          <EstSec label="Entregas" line={T.line} soft={T.soft}>
+          <EstSec n={nOf("items")} label="Entregas" line={T.line} soft={T.soft}>
             {/* BLOCOS DE SERVIÇO — numeral gigante como elemento gráfico */}
             {m.items.map((it, i) => (
               <React.Fragment key={i}>
@@ -917,7 +975,10 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
 
           {/* total como protagonista */}
           <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 40, marginTop: 34 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: T.soft, paddingTop: 20 }}>Investimento</div>
+            <div style={{ paddingTop: 20 }}>
+              {nOf("total") && <div style={{ fontFamily: font.heading, fontSize: 12, fontWeight: 700, color: T.soft, marginBottom: 6, fontVariantNumeric: "tabular-nums" }}>{nOf("total")}</div>}
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: T.soft }}>Investimento</div>
+            </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
               <span style={{ fontFamily: font.heading, fontSize: 24, fontWeight: 700, color: A.head }}>{tot.sym}</span>
               <span style={{ fontFamily: font.heading, fontSize: 60, fontWeight: 900, lineHeight: 1, letterSpacing: "-0.05em", color: A.head, fontVariantNumeric: "tabular-nums" }}>{tot.num}</span>
@@ -926,7 +987,7 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
         </>)}
 
         {conds.length > 0 && (
-          <EstSec label="Condições" line={T.line} soft={T.soft}>
+          <EstSec n={nOf("conds")} label="Condições" line={T.line} soft={T.soft}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28 }}>
               {conds.map(([k, v]) => (
                 <div key={k}>
@@ -939,7 +1000,7 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
         )}
 
         {has(m.bio) && (
-          <EstSec label="Estúdio" line={T.line} soft={T.soft}>
+          <EstSec n={nOf("bio")} label="Estúdio" line={T.line} soft={T.soft}>
             <p style={{ fontSize: 15, lineHeight: 1.7, color: T.sub, margin: 0, maxWidth: 480 }}><Ed onEdit={onEdit} field="bio">{m.bio}</Ed></p>
           </EstSec>
         )}
@@ -1490,7 +1551,7 @@ export const DESIGNS = [
     fields: { end: true, validity: true, payment: false, revisions: false } },
 
   // RECONSTRUÍDO: era uma barra lateral escura de painel; virou capa de estúdio.
-  { id: "studio", name: "Estúdio", tag: "Capa criativa", cat: "criativo", accent: "#A4664F", Comp: Estudio,
+  { id: "studio", name: "Estúdio", tag: "Capa criativa", cat: "criativo", accent: "#A4664F", Comp: Estudio, cover: true,
     themes: ["claro", "escuro"], accentPolicy: "full", fields: F_ALL, novo: true },
 
   { id: "poster", name: "Pôster", tag: "Tipografia grande", cat: "criativo", accent: "#4E4757", Comp: Poster,
@@ -1609,7 +1670,7 @@ export const SAMPLE_BY_ID = {
     scope: "Cobertura da cerimônia e da festa, com álbum digital e 300 fotos tratadas.",
     items: [{ desc: "Cobertura (8h)", value: "2800" }, { desc: "Tratamento de 300 fotos", value: "1200" }, { desc: "Álbum digital", value: "600" }],
     start: "12 de outubro", end: "2 de novembro", payment: "30% reserva, 70% na entrega", validity: "20 dias",
-    bio: "Fotógrafo de casamentos há 6 anos.", logo: null, cover: COVER_CAPA, coverPos: "50,64",
+    bio: "Fotógrafo de casamentos há 6 anos.", logo: null, cover: COVER_CAPA,
   },
   dossie: {
     client: "Banda Eclipse", company: "Selo Meia-Noite", title: "Produção de videoclipe",

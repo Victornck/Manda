@@ -60,7 +60,16 @@ versão nos dois `package.json` e registre a entrada aqui.
     cronograma e aprovação.
   - **Estúdio** (`studio`) — era uma barra lateral escura de painel
     administrativo. Virou capa: primeira página inteira em A4, tipografia de
-    62px, grid deslocado e blocos de serviço com numeral em corpo grande.
+    62px, grid deslocado e blocos de serviço com numeral em corpo grande. A capa
+    aceita **foto** (como os modelos Capa e Dossiê) ocupando a página inteira;
+    sem foto, ela se sustenta por **composição**: grade editorial de fios, o nome
+    do estúdio em corpo de display sangrando pela margem direita, contadores de
+    entregas e seções, e um **sumário numerado** que usa a mesma numeração das
+    seções do miolo. Tudo desenhado com o que o usuário digitou — nenhum
+    elemento gráfico temático, que num sistema de templates só seria verdadeiro
+    para um tipo de negócio e mentiria para todos os outros. O wordmark gigante
+    desaparece quando o título é longo (aí o título já é o elemento dominante) e
+    quando não há nome de empresa (sobra a grade).
 - **Visualizador de modelo.** Botão "Ver modelo" no card abre o exemplo em
   tamanho de leitura (794px), com troca de tema, navegação entre modelos por
   ← e →, e um botão que desenha **onde o PDF quebra de página**. O rodapé
