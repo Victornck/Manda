@@ -16,3 +16,6 @@ backend/test/.pgdata/
 .agents/
 agent/
 skills-lock.json
+
+# Mensagem de commit escrita em UTF-8 (o PowerShell corrompe acento em -m)
+COMMIT_MSG.txt

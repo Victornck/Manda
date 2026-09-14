@@ -1200,9 +1200,10 @@ function Capa({ doc, accent, onAccept, onEdit, print }) {
   const dates = [["Início", doc.start], ["Entrega", doc.end]].filter(([, v]) => has(v));
   const T = themeOf(doc);
   const deep = accentInkFor(accent, T);
+  const EMPTY = "linear-gradient(162deg, #3C3C43 0%, #1B1B1F 100%)";
   const hero = doc.cover
-    ? { backgroundImage: `url(${doc.cover})`, backgroundSize: "cover", backgroundPosition: coverPosition(doc.coverPos) }
-    : { background: "linear-gradient(162deg, #3C3C43 0%, #1B1B1F 100%)" };
+    ? { backgroundImage: `url(${doc.cover}), ${EMPTY}`, backgroundSize: "cover", backgroundPosition: coverPosition(doc.coverPos) }
+    : { background: EMPTY };
   return (
     <Sheet bg={T.bg} ink={T.ink} print={print}>
     <div style={{ background: T.bg, color: T.ink, overflow: "hidden", overflowWrap: "anywhere", wordBreak: "break-word" }}>
@@ -1214,7 +1215,7 @@ function Capa({ doc, accent, onAccept, onEdit, print }) {
             Adicionar foto de capa
           </div>
         )}
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.06) 0%, rgba(0,0,0,0.6) 100%)" }} />
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.38) 52%, rgba(0,0,0,0.74) 100%)" }} />
         <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "31px 34px", color: "#fff" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
             {doc.logo
@@ -1267,9 +1268,10 @@ function Dossie({ doc, accent, onAccept, onEdit, print }) {
   const items = filledItems(doc);
   const total = sum(items);
   const chips = [["Início", doc.start], ["Entrega", doc.end], ["Validade", doc.validity]].filter(([, v]) => has(v));
+  const EMPTY = "linear-gradient(155deg, #26262D 0%, #0B0B0C 100%)";
   const hero = doc.cover
-    ? { backgroundImage: `url(${doc.cover})`, backgroundSize: "cover", backgroundPosition: coverPosition(doc.coverPos) }
-    : { background: "linear-gradient(155deg, #26262D 0%, #0B0B0C 100%)" };
+    ? { backgroundImage: `url(${doc.cover}), ${EMPTY}`, backgroundSize: "cover", backgroundPosition: coverPosition(doc.coverPos) }
+    : { background: EMPTY };
   return (
     <Sheet bg="#0E0E0E" ink="#FFFFFF" print={print}>
     <div style={{ background: "#0E0E0E", color: "#fff", overflow: "hidden", overflowWrap: "anywhere", wordBreak: "break-word" }}>
@@ -1556,6 +1558,14 @@ export function ProposalDesign({ id, doc, accent, onAccept, onEdit, print = fals
    para a vitrine mostrar o modelo no público dele, e não o mesmo texto 12 vezes.
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* Fotos de exemplo dos modelos com capa. Ficam em `public/`, servidas do
+   próprio domínio: uma URL externa (Unsplash e afins) pode ser bloqueada por
+   CORS na hora de rasterizar o PDF, e a capa sairia em branco no arquivo que o
+   cliente recebe. Se o arquivo não estiver lá, o degradê neutro da capa aparece
+   por baixo — a galeria não quebra. */
+const COVER_CAPA = "/samples/capa.jpg";
+const COVER_DOSSIE = "/samples/dossie.jpg";
+
 export const SAMPLE_DOC = {
   client: "Paula Rodrigues", company: "Viana Café", title: "Produção de vídeo institucional",
   scope: "Vídeo institucional de até 90 segundos para o site e as redes. Inclui roteiro, direção, uma diária de gravação e edição com trilha e legendas.",
@@ -1599,14 +1609,14 @@ export const SAMPLE_BY_ID = {
     scope: "Cobertura da cerimônia e da festa, com álbum digital e 300 fotos tratadas.",
     items: [{ desc: "Cobertura (8h)", value: "2800" }, { desc: "Tratamento de 300 fotos", value: "1200" }, { desc: "Álbum digital", value: "600" }],
     start: "12 de outubro", end: "2 de novembro", payment: "30% reserva, 70% na entrega", validity: "20 dias",
-    bio: "Fotógrafo de casamentos há 6 anos.", logo: null, cover: null,
+    bio: "Fotógrafo de casamentos há 6 anos.", logo: null, cover: COVER_CAPA, coverPos: "50,64",
   },
   dossie: {
     client: "Banda Eclipse", company: "Selo Meia-Noite", title: "Produção de videoclipe",
     scope: "Roteiro, direção, uma diária de gravação e finalização com color grading.",
     items: [{ desc: "Roteiro e direção", value: "2500" }, { desc: "Diária de gravação", value: "3500" }, { desc: "Edição e color", value: "2200" }],
     start: "3 de setembro", end: "1 de outubro", validity: "15 dias",
-    bio: "Diretor audiovisual e videomaker.", logo: null, cover: null, theme: "escuro",
+    bio: "Diretor audiovisual e videomaker.", logo: null, cover: COVER_DOSSIE, theme: "escuro",
   },
 
   // ── exemplos dos quatro reconstruídos ─────────────────────────────────────

@@ -14,6 +14,101 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.8.0] — 2026-09-14
+
+### Alterado
+- **Os 12 modelos deixaram de ser cards e viraram folhas.** Todo template
+  abria com `border + border-radius + box-shadow` — a mesma casca doze vezes,
+  que é o que dava a sensação de "12 variações do mesmo arquivo". Agora existe
+  uma primitiva `Sheet` com proporção e margens de papel A4 (794px, a mesma
+  largura que vai para o PDF), e o que muda entre modelos é a composição dentro
+  da folha, não a moldura.
+- **Conteúdo e apresentação foram separados.** `model(doc)` normaliza os dados
+  uma vez e todo template consome isso, nunca o `doc` cru. Trocar de modelo não
+  perde nada, porque nenhum template lê um campo que os outros não leiam.
+- **Cada modelo declara o que a identidade dele aguenta.** Temas de folha
+  permitidos e quanto da cor de destaque aparece (`hairline`, `restrained`,
+  `full`) passaram a ser dados no registro dos modelos. O editor só oferece os
+  temas que o modelo suporta, e trocar de modelo ajusta o tema automaticamente
+  em vez de deixar a proposta num estado que o desenho novo não cobre.
+- **Paleta sem saturação de interface.** As cores padrão dos 12 e os presets do
+  seletor saíram do roxo/azul/índigo/mostarda para uma faixa de croma baixo e
+  valor escuro. A cor aleatória deixou de sortear hexadecimal puro (que gerava
+  neon e fluorescente com a mesma probabilidade) e agora sorteia dentro de uma
+  faixa em HSL que sempre resulta em cor de documento.
+- **Categorias da galeria classificam por uso, não por cor.** "Vibrantes /
+  Escuros / Clean" viraram "Essenciais / Editoriais / Corporativos / Criativos /
+  Com foto", e as categorias passaram a morar no registro dos modelos.
+- **Nomes dos modelos.** Minimal → Nítido, Colorido → Vívido, Bold → Impacto,
+  Recibo → Técnico, Grande → Consultoria, Studio → Estúdio. Os `id` foram
+  preservados: estão gravados em `proposals.template`, no gating de plano do
+  backend (`BASIC_TEMPLATES`) e nas métricas por template.
+- **Proposta pública mais larga** (520 → 780px), acompanhando a folha de 794px.
+
+### Adicionado
+- **Quatro modelos reconstruídos do zero**, com composição, hierarquia e
+  apresentação de preço próprias:
+  - **Técnico** (`recibo`) — era um cupom fiscal com Courier, linha tracejada e
+    carimbo girado. Virou ficha técnica: estrutura só de fios, monoespaçada nos
+    rótulos e índices, tabela modular com índice por linha.
+  - **Carta** (`carta`) — era uma folha com texto centralizado e uma faixa
+    tingida. Virou carta comercial: papel timbrado, margem de 84px, medida de
+    leitura curta, serifa, condições em bloco e **bloco de assinatura**.
+  - **Consultoria** (`grande`) — era um orçamento com uma letra de 320px
+    cortada ao fundo. Virou documento B2B: ficha do documento emoldurada,
+    seções numeradas, tabela com cabeçalho, resumo financeiro separado,
+    cronograma e aprovação.
+  - **Estúdio** (`studio`) — era uma barra lateral escura de painel
+    administrativo. Virou capa: primeira página inteira em A4, tipografia de
+    62px, grid deslocado e blocos de serviço com numeral em corpo grande.
+- **Visualizador de modelo.** Botão "Ver modelo" no card abre o exemplo em
+  tamanho de leitura (794px), com troca de tema, navegação entre modelos por
+  ← e →, e um botão que desenha **onde o PDF quebra de página**. O rodapé
+  informa quantas páginas o exemplo gera.
+- **Fotos de exemplo nos modelos com capa.** `frontend/public/samples/` com
+  instruções; `capa.jpg` e `dossie.jpg` são carregados pela galeria quando
+  existirem.
+
+### Corrigido
+- **O PDF cortava a página no escuro.** O documento inteiro virava uma imagem e
+  o jsPDF a reposicionava a cada 297mm, então o corte caía no meio de uma linha
+  da tabela, do TOTAL ou da assinatura. Agora cada modelo marca os pontos de
+  corte (`Break` / `Break hard`) e o exportador fatia o canvas neles. O nó
+  oculto passou a ter largura A4 real (794px, era 720px) e renderiza em modo de
+  impressão, sem sombra nem canto arredondado.
+- **Páginas internas do PDF ganharam rodapé de continuidade** — empresa, cliente
+  e "N / M" — em texto vetorial, com a faixa descontada da altura útil para
+  nada do desenho cair por baixo.
+- **A galeria mostrava só o cabeçalho de cada modelo.** `.db-dsn-thumb` tinha
+  altura fixa de 300px com `overflow: hidden` e um degradê branco por cima:
+  todo card exibia os primeiros ~480px do documento, que é justamente a parte
+  mais parecida entre os modelos. A miniatura agora é a página renderizada na
+  largura real e reduzida proporcionalmente, com altura de uma A4 — todo card
+  do mesmo tamanho.
+- **A camada de hover do card capturava clique estando invisível.** No celular,
+  onde `:hover` nunca dispara, encostar na miniatura já acionava "Usar este
+  modelo" — o usuário escolhia um modelo sem nunca ver o botão.
+- **Capa e Dossiê sem foto caíam num degradê da cor de destaque.** É o estado
+  que todo usuário vê antes de subir a imagem e, se nunca subir, é o que o
+  cliente dele recebe. Virou um painel grafite neutro, que agora também é a
+  camada de baixo da foto: se a imagem sumir, o painel aparece no lugar de um
+  buraco branco na capa. A faixa da imagem subiu de 200/224px para 286/320px,
+  e o véu sobre o título foi reforçado porque a foto é do usuário e pode ser
+  clara.
+- **Sobra da migração no Dossiê:** ainda carregava `border` e `border-radius`
+  de card por dentro da folha.
+
+### Nota técnica
+- `index.html` passou a carregar a serifa **Zodiak** (Fontshare), usada pelo
+  modelo Carta. A cadeia de fallback é de serifas reais, então uma falha de
+  carregamento degrada em vez de quebrar.
+- Os oito modelos herdados (Nítido, Aurora, Vívido, Editorial, Impacto, Pôster,
+  Capa, Dossiê) foram portados para a folha, mas **não** reconstruídos: ainda
+  compartilham estrutura de seções entre si e ocupam pouco mais da metade de
+  uma página A4. A reescrita deles é o próximo passo.
+
+---
+
 ## [0.7.2] — 2026-09-14
 
 ### Corrigido
