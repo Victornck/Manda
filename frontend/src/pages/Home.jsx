@@ -172,20 +172,20 @@ function Kpi({ label, value, hint, delta }) {
   );
 }
 
-// KPI de destaque — o indicador financeiro principal (Receita total). Mesmo
-// desenho dos outros cards, só que maior e no tom de destaque já usado nos
-// Insights (nenhuma cor nova).
+// KPI de destaque — o indicador financeiro principal (Receita total). Card
+// branco igual aos outros: o destaque vem do tamanho e do peso da fonte, não
+// de cor. (Satoshi carrega 400/500/700/900; 800 não existe, por isso 900.)
 function HeroKpi({ label, value, hint }) {
   return (
     <Card
       className="hm-kpi-hero"
-      style={{ background: color.accentTint, border: `1px solid ${color.accentLine}`, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}
+      style={{ minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}
     >
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: color.accentInk, marginBottom: 10 }}>{label}</div>
-      <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: "clamp(28px, 4.6vw, 38px)", letterSpacing: "-0.03em", lineHeight: 1, color: color.ink, wordBreak: "break-word" }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: color.gray600, marginBottom: 10 }}>{label}</div>
+      <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: "clamp(30px, 4.8vw, 40px)", letterSpacing: "-0.035em", lineHeight: 1, color: color.ink, wordBreak: "break-word" }}>
         {value}
       </div>
-      {hint && <div style={{ fontSize: 12.5, color: color.gray600, marginTop: 9 }}>{hint}</div>}
+      {hint && <div style={{ fontSize: 12.5, color: color.gray500, marginTop: 9 }}>{hint}</div>}
     </Card>
   );
 }

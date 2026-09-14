@@ -14,6 +14,57 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.7.1] — 2026-09-14
+
+### Alterado
+- **"Nova proposta" abre a galeria, não o formulário.** Na 0.7.0 o botão ainda
+  caía direto na etapa 2, com os modelos amontoados como 12 chips dentro do
+  formulário — ou seja, escolhia-se o modelo *dentro* do formulário, que é o
+  oposto do fluxo em etapas. Agora `newProposal` cria a proposta em memória
+  (doc em branco + id de rascunho) e abre a **Etapa 1 — Escolha um modelo**, em
+  tela cheia, com os cards grandes, prévia, nome, categoria e filtros que já
+  existiam. Vale para todos os pontos de entrada: sidebar, Home, lista vazia,
+  tutorial e a calculadora (que leva os itens calculados junto).
+- **Grade de 12 modelos sai do formulário.** No lugar, uma linha discreta:
+  "Modelo atual: Minimalista" + botão "Trocar modelo".
+- **Etapa 3 de verdade.** O botão da barra virou "Revisar e concluir" e abre um
+  painel com cliente, empresa, título, modelo, nº de itens e valor total, com
+  "Voltar e editar" ou "Concluir proposta". Avisa quando o valor está zerado.
+  Não é só cosmético: concluir consome uma proposta da cota do plano e antes
+  não havia nenhuma confirmação — um clique errado gastava cota sem volta.
+- A galeria continua sendo **um único componente** (`DesignGallery`), usado
+  tanto como aba do menu quanto como etapa 1. O que muda é só o cabeçalho, o
+  selo "Em uso" e o aviso de dados preservados, via props.
+
+## [0.7.0] — 2026-09-14
+
+### Alterado (fluxo de criação em etapas)
+- **Trocar de modelo não apaga mais a proposta.** Era o bug central: clicar em
+  "Usar" na galeria chamava `startWithDesign`, que fazia
+  `setDoc({ ...BLANK_DOC, template })` e zerava tudo. Quem preenchia cliente,
+  itens, valores e logo e voltava pra trocar o desenho perdia o trabalho
+  inteiro. Agora existe o estado `tplSwap`: ir do editor para Modelos marca que
+  é uma **troca de desenho**, e escolher outro modelo altera exclusivamente
+  `doc.template`. Todo o resto do `doc` fica intacto.
+  A separação que o fluxo exige já existia no estado (`doc` guarda dados e
+  aparência juntos), então nada foi duplicado — só passou a existir um caminho
+  que mexe apenas na parte visual.
+- **Barra inferior virou a navegação do fluxo.** No editor: "← Modelos" à
+  esquerda, a trilha *Modelo › Editando proposta › Concluir* no meio e o resumo
+  do valor + "Concluir proposta" à direita. Abaixo de 1120px a trilha vira
+  "Etapa 2 de 3"; no mobile ela ocupa a primeira linha inteira da barra. Some
+  quando a proposta já foi enviada (só leitura).
+- **Galeria ganhou contexto.** Vindo do editor, ela mostra "Etapa 1 de 3 ·
+  Trocando o modelo", uma faixa avisando que nada será perdido (com o nome do
+  cliente), marca o modelo **Em uso**, troca "Usar" por "Aplicar" e oferece duas
+  saídas explícitas: *Voltar para a edição* e *Começar do zero* — que é como a
+  pessoa cria uma proposta nova sem ambiguidade.
+- Editor ganhou "Etapa 2 de 3" no topo e um link "Ver galeria" ao lado dos chips
+  de modelo, ligando o atalho inline (que já preservava os dados) à galeria.
+- `startWithDesign` passou a respeitar assinatura vencida e a moeda da conta,
+  que ele ignorava — entrar por Modelos burlava o bloqueio que "Nova proposta"
+  já fazia.
+
 ## [0.6.0] — 2026-09-14
 
 ### Alterado
@@ -25,8 +76,9 @@ versão nos dois `package.json` e registre a entrada aqui.
   quebrar nada, mas não é mais exibido.
 - **Hierarquia dos KPIs da Home.** Os indicadores passam a ficar em dois grupos
   nomeados, em vez de uma fileira solta de quatro:
-  - **Resultado** — Receita total (card em destaque, ocupando o dobro da
-    largura), Contratos fechados e Clientes.
+  - **Resultado** — Receita total (card branco como os outros, ocupando o dobro
+    da largura; o destaque vem do número maior e em peso 900), Contratos
+    fechados e Clientes.
   - **Em andamento** — Em negociação, Propostas no mês, Taxa de aceitação e
     Tempo até o aceite (que antes vivia escondido como legenda do ticket médio).
   Nenhuma cor ou fonte nova: o destaque usa o mesmo tom já aplicado no card de

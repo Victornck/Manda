@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, Image as ImageIcon,
+  Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, ArrowRight, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
   Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
   Copy, Send, GripVertical, Home as HomeIcon, Menu, Pin, PinOff, Move,
@@ -182,6 +182,16 @@ export default function Dashboard({ go }) {
   const [draftId, setDraftId] = useState(null);
   const pristineRef = useRef("");  // snapshot do doc ao abrir; só salva rascunho se mudar
   const [editorFrom, setEditorFrom] = useState("list"); // aba de onde o editor foi aberto
+  // true = a galeria de modelos está sendo usada como ETAPA 1 de uma proposta
+  // em andamento — seja porque a pessoa acabou de clicar em "Nova proposta"
+  // (doc em branco), seja porque voltou do editor pra trocar o desenho (doc já
+  // preenchido). Nos dois casos escolher um modelo só define doc.template e
+  // segue pra etapa 2: nada do que foi digitado é descartado.
+  // false = ela entrou em Modelos pelo menu lateral, sem fluxo ativo.
+  const [tplPick, setTplPick] = useState(false);
+  // Etapa 3: confere o que vai ser enviado antes de concluir. Existe porque
+  // concluir consome uma proposta da cota do plano e não dava pra voltar atrás.
+  const [review, setReview] = useState(false);
   const [isCopy, setIsCopy] = useState(false); // editor aberto a partir de uma duplicação
   const [dragItem, setDragItem] = useState(null); // índice do item sendo arrastado
   const [overItem, setOverItem] = useState(null); // índice sob o cursor durante o arraste
@@ -603,10 +613,9 @@ export default function Dashboard({ go }) {
     doc.payment || doc.revisions || doc.validity || doc.bio || doc.items.some((it) => it.desc || it.value);
   const canFinish = doc.client.trim() !== "" && doc.title.trim() !== "";
 
-  // Templates travados por plano (espelha a regra do backend). Básico só tem
-  // minimal e bold; Pro/Business e admin têm todos. Admin entra como business.
-  const planTier = user?.role === "admin" ? "business" : (user?.plan || "free");
-  const tplLocked = (id) => ["free", "basic"].includes(planTier) && !BASIC_TPL_IDS.includes(id);
+  // Nome amigável do modelo em uso, mostrado no editor (etapa 2). O bloqueio de
+  // modelo por plano vive na galeria (DesignGallery), que é onde se escolhe.
+  const currentTplName = DESIGNS.find((d) => d.id === (doc.template || "minimal"))?.name || "Minimalista";
 
   // Corpo enviado à API (formato do proposalSchema do backend).
   const toApiBody = () => ({
@@ -630,6 +639,10 @@ export default function Dashboard({ go }) {
     updatedAt: Date.now(),
   });
 
+  // "Nova proposta" abre a ETAPA 1 (galeria de modelos), nunca o formulário
+  // direto. A proposta já nasce aqui (doc em branco + id de rascunho), então o
+  // estado atravessa etapa 1 ↔ 2 sem reiniciar. Escolher o modelo é só o
+  // primeiro campo a ser preenchido, e ele é preenchido numa tela própria.
   const newProposal = () => {
     // Assinatura vencida: só leitura até renovar (o backend também barra).
     if (isSuspended(user)) { setShowPlans(true); return; }
@@ -644,7 +657,9 @@ export default function Dashboard({ go }) {
     setFlowError("");
     setFlow("editing");
     setIsCopy(false);
-    setView("editor");
+    setReview(false);
+    setTplPick(true);
+    setView("templates");
   };
   // Abre uma proposta nova já com os itens vindos da Calculadora.
   const startProposalWithItem = (desc, value, list) => {
@@ -659,7 +674,11 @@ export default function Dashboard({ go }) {
     setFlowError("");
     setFlow("editing");
     setIsCopy(false);
-    setView("editor");
+    setReview(false);
+    // Mesmo vindo da calculadora, a proposta é nova: começa na etapa 1. Os itens
+    // já calculados viajam no doc e aparecem preenchidos na etapa 2.
+    setTplPick(true);
+    setView("templates");
   };
   const openRow = async (r) => {
     // A lista traz só o resumo; ao abrir uma proposta do servidor, busca o
@@ -687,6 +706,8 @@ export default function Dashboard({ go }) {
     setEditorFrom("list");
     setFlowError("");
     setFlow("editing");
+    setReview(false);
+    setTplPick(false);
     setView("editor");
   };
   const onRowKey = (r) => (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(r); } };
@@ -699,11 +720,22 @@ export default function Dashboard({ go }) {
       upsertProposal(buildLocalDraft());
       await refreshRows();
     }
+    // Indo do editor pra Modelos: é a etapa 1 da proposta atual (trocar o
+    // desenho), não uma proposta nova. Qualquer outro destino encerra o fluxo.
+    if (v === "templates") {
+      const editing = view === "editor" && flow !== "done" && !!draftId && isLocalId(draftId);
+      setTplPick(editing);
+    } else {
+      setTplPick(false);
+    }
+    setReview(false);
     setFlowError("");
     setFlow("editing");
     setView(v);
   };
   const exitEditor = () => navTo(editorFrom);
+  // Botão "Modelos" da barra de etapas do editor.
+  const goTemplates = () => navTo("templates");
 
   // Limpar todos os campos da proposta (mantém o modelo e as cores escolhidas).
   // Dois cliques pra confirmar, já que apaga tudo que foi digitado.
@@ -728,10 +760,14 @@ export default function Dashboard({ go }) {
     setTimeout(() => el.focus({ preventScroll: true }), 120);
   };
 
+  // Começa uma proposta EM BRANCO já com um modelo. Usado só quando a pessoa
+  // entra em Modelos pelo menu lateral, sem fluxo de criação ativo — nesse caso
+  // clicar em "Usar" é o próprio "Nova proposta com este modelo".
   const startWithDesign = (id) => {
+    if (isSuspended(user)) { setShowPlans(true); return; }
     let bio = "";
     try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
-    const d = { ...BLANK_DOC, template: id, bio };
+    const d = { ...BLANK_DOC, template: id, bio, currency: user?.currency || DEFAULT_CURRENCY };
     setDoc(d);
     pristineRef.current = JSON.stringify(d); // escolheu um template em branco: idem
     setDraftId(newId());
@@ -740,8 +776,30 @@ export default function Dashboard({ go }) {
     setFlowError("");
     setFlow("editing");
     setIsCopy(false);
+    setReview(false);
+    setTplPick(false);
     setView("editor");
   };
+
+  // Clique em "Usar este modelo" na galeria.
+  //
+  //  a) Fluxo ativo (tplPick): a galeria é a ETAPA 1. Define apenas
+  //     doc.template e avança pra etapa 2. Todo o resto do doc segue intacto —
+  //     cliente, empresa, título, itens, valores, textos, logo e cores. Vale
+  //     tanto pra proposta recém-criada (doc em branco) quanto pra quem voltou
+  //     do editor só pra trocar o desenho.
+  //  b) Sem fluxo ativo: veio do menu lateral, então abre uma proposta nova.
+  const useDesign = (id) => {
+    if (!tplPick) { startWithDesign(id); return; }
+    setDoc((d) => ({ ...d, template: id }));
+    setTplPick(false);
+    setFlowError("");
+    setFlow("editing");
+    setView("editor");
+  };
+
+  // Volta da etapa 1 pra etapa 2 sem trocar o modelo nem mexer em nada.
+  const backToEditor = () => { setTplPick(false); setReview(false); setFlowError(""); setFlow("editing"); setView("editor"); };
 
   // Upload de imagem (logo ou capa) com limite de 2 MB.
   const MAX_IMG = 2 * 1024 * 1024;
@@ -1059,6 +1117,23 @@ export default function Dashboard({ go }) {
         .db-finish{ font-size:15px; padding:12px 22px; border-radius:11px; box-shadow:0 8px 18px -8px rgba(217,119,87,0.55); }
         .db-finish:disabled{ box-shadow:none; }
         .db-foot-err{ flex-basis:100%; font-size:13px; color:#B4443C; font-weight:600; margin-top:2px; }
+
+        /* Navegação do fluxo em etapas, à esquerda da barra inferior. */
+        .db-foot-steps{ display:flex; align-items:center; gap:14px; min-width:0; }
+        .db-step-back{ display:inline-flex; align-items:center; gap:6px; flex:none; font-family:${font.body}; font-size:13.5px; font-weight:600; color:${color.gray700}; background:#fff; border:1px solid ${color.gray200}; border-radius:10px; padding:9px 14px 9px 11px; cursor:pointer; transition:border-color .15s ease, background .15s ease, color .15s ease; }
+        .db-step-back:hover{ border-color:${color.gray300}; background:${color.surface3}; color:${color.ink}; }
+        .db-step-back:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
+        .db-trail{ display:inline-flex; align-items:center; gap:9px; min-width:0; }
+        .db-trail-i{ font-size:12.5px; font-weight:600; color:${color.gray400}; white-space:nowrap; }
+        .db-trail-i.done{ color:${color.gray500}; }
+        .db-trail-i.on{ color:${color.ink}; background:${color.surface3}; border:1px solid ${color.line2}; border-radius:999px; padding:4px 11px; }
+        .db-trail-sep{ width:16px; height:1px; background:${color.gray300}; flex:none; }
+        .db-trail-mini{ display:none; font-size:12px; font-weight:600; color:${color.gray500}; white-space:nowrap; }
+        /* Telas estreitas (mas ainda desktop): a trilha vira só "Etapa 2 de 3". */
+        @media (max-width:1120px){
+          .db-trail{ display:none; }
+          .db-trail-mini{ display:inline; }
+        }
         .db-onb{ background:#fff; border:1px solid ${color.line2}; border-radius:16px; padding:20px 22px; margin-bottom:22px; box-shadow:0 12px 34px -22px rgba(20,20,30,0.25); animation:dbUp .4s ease both; }
         .db-onb-done{ background:linear-gradient(180deg, ${color.accentTint} 0%, #fff 70%); }
         .db-onb-trophy{ width:44px; height:44px; flex:none; border-radius:50%; background:#EAF5EE; color:#2E7D51; display:flex; align-items:center; justify-content:center; }
@@ -1295,6 +1370,9 @@ export default function Dashboard({ go }) {
           .db-upload{ width:100% !important; }
           /* Barra inferior: botão largo e padding respeitando a safe-area do iPhone. */
           .db-footbar{ padding:12px 16px calc(14px + env(safe-area-inset-bottom)) !important; gap:12px !important; }
+          /* Etapas ocupam a primeira linha inteira: "← Modelos" na esquerda e
+             "Etapa 2 de 3" na direita. A trilha completa não cabe aqui. */
+          .db-foot-steps{ width:100%; justify-content:space-between; gap:10px; }
           .db-foot-actions{ width:100%; }
           .db-foot-actions .db-btn{ flex:1; }
           .db-finish{ width:100%; justify-content:center; }
@@ -1549,7 +1627,18 @@ export default function Dashboard({ go }) {
             )}
           </div>
         ) : view === "templates" ? (
-          <DesignGallery onUse={startWithDesign} plan={user?.role === "admin" ? "business" : user?.plan} onUpgrade={() => setShowPlans(true)} scope={user?.email} />
+          <DesignGallery
+            onUse={useDesign}
+            plan={user?.role === "admin" ? "business" : user?.plan}
+            onUpgrade={() => setShowPlans(true)}
+            scope={user?.email}
+            picking={tplPick}
+            hasData={tplPick && hasContent}
+            current={doc.template}
+            swapLabel={doc.client || doc.title || ""}
+            onBackToEditor={backToEditor}
+            onCancelFlow={() => navTo(editorFrom === "templates" ? "list" : editorFrom)}
+          />
         ) : view === "calc" ? (
           planHasFeature(user, FEATURES.CALCULATOR)
             ? <CalculatorPanel onNewProposal={(desc, value, list) => startProposalWithItem(desc, value, list)} scope={user?.email} onBack={() => navTo("home")} />
@@ -1567,7 +1656,7 @@ export default function Dashboard({ go }) {
             {/* action bar */}
             <div className="db-edit-top" style={{ flex: "none", minHeight: 60, background: color.white, borderBottom: `1px solid ${color.line2}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 20px", flexWrap: "wrap" }}>
               <button onClick={exitEditor} className="db-btn" style={{ fontSize: 14, fontWeight: 500, color: color.gray600, background: "none", padding: "6px 8px" }}>
-                <ArrowLeft size={17} strokeWidth={2.2} />{{ templates: "Templates", calc: "Calculadora" }[editorFrom] || "Propostas"}
+                <ArrowLeft size={17} strokeWidth={2.2} />{{ templates: "Modelos", calc: "Calculadora" }[editorFrom] || "Propostas"}
               </button>
               <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 13, color: locked ? "#8A5A1A" : color.gray400, marginRight: 6, display: "flex", alignItems: "center", gap: 6 }}>{locked ? <><Lock size={13} strokeWidth={2.2} />Enviada, somente leitura</> : <><span style={{ width: 7, height: 7, borderRadius: "50%", background: hasContent ? "#22C55E" : color.gray300 }} />{hasContent ? "Rascunho salvo ao sair" : "Rascunho"}</>}</span>
@@ -1593,6 +1682,7 @@ export default function Dashboard({ go }) {
                 <div style={{ maxWidth: 440, margin: "0 auto", display: "flex", flexDirection: "column", gap: 26, pointerEvents: locked ? "none" : "auto", opacity: locked ? 0.6 : 1 }}>
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                     <div>
+                      {!locked && <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: ".085em", textTransform: "uppercase", color: color.gray400, marginBottom: 6 }}>Etapa 2 de 3</div>}
                       <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 4 }}>Monte sua proposta</div>
                       <div style={{ fontSize: "13.5px", color: color.gray500 }}>Preencha os campos e veja a proposta tomando forma à direita.</div>
                     </div>
@@ -1603,20 +1693,24 @@ export default function Dashboard({ go }) {
                     )}
                   </div>
 
+                  {/* O modelo já foi escolhido na etapa 1. Aqui fica só o
+                      indicador do que está em uso e o caminho de volta — a
+                      grade com os 12 modelos poluía o formulário e desfazia a
+                      ideia de etapas. */}
                   <div>
                     <div style={sectionLabel}>Modelo da proposta</div>
-                    <div className="db-tpl-grid" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {DESIGNS.map((d) => {
-                        const on = (doc.template || "minimal") === d.id;
-                        const locked = tplLocked(d.id);
-                        return (
-                          <button key={d.id} onClick={() => (locked ? setShowPlans(true) : setDoc((cur) => ({ ...cur, template: d.id })))} className="db-btn"
-                            title={locked ? "Disponível no Pro. Clique para ver os planos." : undefined}
-                            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "13px", fontWeight: 600, padding: "8px 13px", borderRadius: 9, border: `1px solid ${on ? color.ink : color.gray200}`, background: on ? color.ink : "#fff", color: on ? "#fff" : locked ? color.gray400 : color.ink900 }}>
-                            {d.name}{locked && <Lock size={12} strokeWidth={2.2} />}
-                          </button>
-                        );
-                      })}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", background: color.surface3, border: `1px solid ${color.line2}`, borderRadius: 11, padding: "11px 13px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                        <LayoutGrid size={15} strokeWidth={2.1} color={color.gray400} style={{ flex: "none" }} />
+                        <span style={{ fontSize: "13.5px", color: color.gray600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          Modelo atual: <strong style={{ fontWeight: 600, color: color.ink }}>{currentTplName}</strong>
+                        </span>
+                      </div>
+                      {!locked && (
+                        <button onClick={goTemplates} className="db-btn db-btn-ghost" style={{ flex: "none", fontSize: "13px", padding: "8px 13px" }}>
+                          Trocar modelo
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="db-upl-row" style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
@@ -1872,8 +1966,25 @@ export default function Dashboard({ go }) {
 
             {showCalc && <PriceCalculator onClose={() => setShowCalc(false)} onApply={applyPrice} scope={user?.email} />}
 
-            {/* barra inferior */}
+            {/* barra inferior — é também a navegação do fluxo em etapas:
+                ← Modelos · Editando proposta · Concluir proposta */}
             <div className="db-footbar">
+              {!locked && (
+                <div className="db-foot-steps">
+                  <button onClick={goTemplates} className="db-step-back">
+                    <ArrowLeft size={15} strokeWidth={2.2} />Modelos
+                  </button>
+                  <span className="db-trail" aria-hidden="true">
+                    <span className="db-trail-i done">Modelo</span>
+                    <span className="db-trail-sep" />
+                    <span className={review ? "db-trail-i done" : "db-trail-i on"}>Montar proposta</span>
+                    <span className="db-trail-sep" />
+                    <span className={review ? "db-trail-i on" : "db-trail-i"}>Revisar</span>
+                  </span>
+                  <span className="db-trail-mini" aria-hidden="true">Etapa {review ? 3 : 2} de 3</span>
+                </div>
+              )}
+
               <div className="db-foot-summary">
                 <span className="db-foot-cap">Você vai cobrar</span>
                 <span className="db-foot-line">
@@ -1889,8 +2000,8 @@ export default function Dashboard({ go }) {
                     <button onClick={downloadPdf} disabled={pdfBusy} className="db-btn db-btn-dark db-finish" style={{ fontSize: 14, padding: "11px 18px" }}><Download size={15} strokeWidth={2.2} />{pdfBusy ? "Gerando…" : "Baixar PDF"}</button>
                   </>
                 ) : (
-                  <button onClick={finish} disabled={!canFinish || sending} className="db-btn db-btn-accent db-finish">
-                    <Check size={17} strokeWidth={2.6} />{sending ? "Concluindo…" : "Concluir proposta"}
+                  <button onClick={() => setReview(true)} disabled={!canFinish || sending} className="db-btn db-btn-accent db-finish">
+                    {sending ? "Concluindo…" : <>Revisar e concluir<ArrowRight size={17} strokeWidth={2.6} /></>}
                   </button>
                 )}
               </div>
@@ -1905,6 +2016,52 @@ export default function Dashboard({ go }) {
       {view === "editor" && (
         <div ref={pdfRef} aria-hidden="true" style={{ position: "fixed", left: -99999, top: 0, width: 720, background: "#fff", padding: 24, pointerEvents: "none", zIndex: -1 }}>
           <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} />
+        </div>
+      )}
+
+      {/* ETAPA 3 — revisar antes de concluir. Reaproveita o overlay do flow de
+          conclusão. Existe porque concluir consome uma proposta da cota e antes
+          não havia nenhuma confirmação: um clique errado gastava cota. */}
+      {view === "editor" && flow === "editing" && review && !locked && (
+        <div className="db-flow" onClick={() => setReview(false)}>
+          <div className="db-flow-card" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setReview(false)} aria-label="Fechar" className="db-btn" style={{ position: "absolute", top: 12, right: 12, background: "none", color: color.gray400, padding: 4 }}><X size={20} strokeWidth={2} /></button>
+            <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: ".085em", textTransform: "uppercase", color: color.gray400, marginBottom: 7 }}>Etapa 3 de 3</div>
+            <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 4 }}>Confira antes de concluir</div>
+            <div style={{ fontSize: "13.5px", color: color.gray500, marginBottom: 18 }}>Depois de concluir, a proposta é enviada e não pode mais ser editada.</div>
+
+            <div style={{ border: `1px solid ${color.line2}`, borderRadius: 12, overflow: "hidden", marginBottom: 16 }}>
+              {[
+                ["Cliente", doc.client || "—"],
+                ["Empresa", doc.company || "—"],
+                ["Título", doc.title || "—"],
+                ["Modelo", currentTplName],
+                ["Itens", `${itemCount} ${itemCount === 1 ? "item" : "itens"}`],
+                ["Valor total", formatMoney(total, doc.currency)],
+              ].map(([k, v], i) => (
+                <div key={k} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 14, padding: "10px 13px", borderTop: i ? `1px solid ${color.line3}` : "none" }}>
+                  <span style={{ fontSize: "12.5px", color: color.gray500, flex: "none" }}>{k}</span>
+                  <span style={{ fontSize: "13.5px", fontWeight: 600, color: color.ink, textAlign: "right", minWidth: 0, overflowWrap: "anywhere" }}>{v}</span>
+                </div>
+              ))}
+            </div>
+
+            {total === 0 && (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 9, background: "#FEF3E2", border: "1px solid #F5D9A8", color: "#8A5A1A", borderRadius: 11, padding: "11px 13px", fontSize: "12.5px", lineHeight: 1.5, marginBottom: 14 }}>
+                <AlertTriangle size={14} strokeWidth={2.2} style={{ flex: "none", marginTop: 1 }} />
+                Esta proposta está sem valor. Dá pra concluir assim mesmo, mas confira se era isso que você queria.
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button onClick={() => setReview(false)} className="db-btn db-btn-ghost" style={{ flex: 1, fontSize: 14, padding: "12px 0", justifyContent: "center" }}>
+                <ArrowLeft size={15} strokeWidth={2.2} />Voltar e editar
+              </button>
+              <button onClick={() => { setReview(false); finish(); }} disabled={sending} className="db-btn db-btn-accent" style={{ flex: 1, fontSize: 14, padding: "12px 0", justifyContent: "center", borderRadius: 11 }}>
+                <Check size={16} strokeWidth={2.6} />Concluir proposta
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2897,7 +3054,14 @@ const TPL_CATS = [
 ];
 const BASIC_TPL_IDS = ["minimal", "bold"]; // espelha o plano Básico do backend
 
-function DesignGallery({ onUse, plan, onUpgrade, scope }) {
+// Galeria de modelos. É o MESMO componente em dois papéis, sem duplicar nada:
+//
+//  - aba "Templates" do menu: vitrine. Clicar em "Usar" abre uma proposta nova.
+//  - ETAPA 1 do fluxo de criação (`picking`): a proposta já existe em memória e
+//    escolher um modelo só define o desenho dela. Aqui a tela muda o cabeçalho
+//    pra "Etapa 1 de 3", marca o modelo em uso e — se já houver dados digitados
+//    (`hasData`) — avisa que nada será perdido e oferece voltar pra edição.
+function DesignGallery({ onUse, plan, onUpgrade, scope, picking = false, hasData = false, current = "", swapLabel = "", onBackToEditor, onCancelFlow }) {
   const [cat, setCat] = useState("todos");
   const list = cat === "todos" ? DESIGNS : DESIGNS.filter((d) => d.cat === cat);
   const showPro = plan === "basic" || plan === "free" || !plan;
@@ -2923,9 +3087,49 @@ function DesignGallery({ onUse, plan, onUpgrade, scope }) {
   return (
     <div className="db-pad">
       <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>Modelos de proposta</h1>
-        <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>Cada modelo é um design diferente. Escolha um e personalize a cor, a logo e os textos depois.</p>
+        {picking && (
+          <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: ".085em", textTransform: "uppercase", color: color.gray400, marginBottom: 7 }}>
+            Etapa 1 de 3
+          </div>
+        )}
+        <h1 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, letterSpacing: "-0.02em", margin: "0 0 4px" }}>
+          {picking ? "Escolha um modelo" : "Modelos de proposta"}
+        </h1>
+        <p style={{ fontSize: "14.5px", color: color.gray500, margin: 0 }}>
+          {picking
+            ? "Este é o desenho da sua proposta. Os textos, valores e a sua marca você preenche na próxima etapa."
+            : "Cada modelo é um design diferente. Escolha um e personalize a cor, a logo e os textos depois."}
+        </p>
       </div>
+
+      {/* Já existe conteúdo digitado: deixa explícito que nada se perde. */}
+      {picking && hasData && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap", background: color.surface3, border: `1px solid ${color.line2}`, borderRadius: 13, padding: "13px 16px", marginBottom: 18 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minWidth: 0, flex: 1 }}>
+            <Check size={16} strokeWidth={2.4} color="#2E7D51" style={{ flex: "none", marginTop: 2 }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: "13.5px", fontWeight: 600, color: color.ink }}>
+                Tudo que você já preencheu está guardado{swapLabel ? ` (${swapLabel})` : ""}.
+              </div>
+              <div style={{ fontSize: "12.5px", color: color.gray500, marginTop: 2 }}>
+                Cliente, itens, valores, textos, logo e cores continuam iguais. Só o desenho muda.
+              </div>
+            </div>
+          </div>
+          <button onClick={onBackToEditor} className="db-btn db-btn-ghost" style={{ flex: "none", fontSize: "13.5px", padding: "9px 15px" }}>
+            <ArrowLeft size={14} strokeWidth={2.2} />Voltar para a edição
+          </button>
+        </div>
+      )}
+
+      {/* Proposta nova, ainda em branco: a única saída é desistir da criação. */}
+      {picking && !hasData && (
+        <div style={{ marginBottom: 18 }}>
+          <button onClick={onCancelFlow} className="db-btn" style={{ fontSize: "13.5px", fontWeight: 600, color: color.gray500, background: "none", padding: "6px 2px" }}>
+            <ArrowLeft size={14} strokeWidth={2.2} />Cancelar criação
+          </button>
+        </div>
+      )}
 
       <div className="db-dsn-chips" role="tablist" aria-label="Filtrar modelos por estilo">
         {TPL_CATS.map(([id, label]) => {
@@ -2946,11 +3150,14 @@ function DesignGallery({ onUse, plan, onUpgrade, scope }) {
                 <ProposalDesign id={d.id} doc={sampleFor(d.id)} accent={d.accent} />
               </div>
               <div className="db-dsn-badges">
+                {picking && hasData && d.id === current && <span className="db-dsn-badge" style={{ background: color.ink, color: "#fff" }}>Em uso</span>}
                 {d.novo && !seen.has(d.id) && <span className="db-dsn-badge novo">Novo</span>}
                 {isLocked(d.id) && <span className="db-dsn-badge pro"><Lock size={11} strokeWidth={2.4} style={{ marginRight: 4, verticalAlign: "-1px" }} />Pro</span>}
               </div>
               <div className="db-dsn-hover">
-                <button onClick={() => pick(d.id)} className="db-btn db-dsn-cta">{isLocked(d.id) ? "Desbloquear no Pro" : "Usar este modelo"}</button>
+                <button onClick={() => pick(d.id)} className="db-btn db-dsn-cta">
+                  {isLocked(d.id) ? "Desbloquear no Pro" : hasData && d.id === current ? "Manter este modelo" : "Usar este modelo"}
+                </button>
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px" }}>
@@ -2958,7 +3165,9 @@ function DesignGallery({ onUse, plan, onUpgrade, scope }) {
                 <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 15 }}>{d.name}</div>
                 <div style={{ fontSize: 12, color: color.gray400 }}>{d.tag}</div>
               </div>
-              <button onClick={() => pick(d.id)} className="db-btn db-btn-dark" style={{ fontSize: "13.5px", padding: "9px 16px", display: "inline-flex", alignItems: "center", gap: 6 }}>{isLocked(d.id) ? <><Lock size={13} strokeWidth={2.2} />Pro</> : "Usar"}</button>
+              <button onClick={() => pick(d.id)} className="db-btn db-btn-dark" style={{ fontSize: "13.5px", padding: "9px 16px", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {isLocked(d.id) ? <><Lock size={13} strokeWidth={2.2} />Pro</> : hasData && d.id === current ? "Manter" : "Usar"}
+              </button>
             </div>
           </div>
         ))}
