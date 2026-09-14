@@ -75,7 +75,7 @@ export default function PublicProposal() {
 
   return (
     <div style={{ minHeight: "100vh", background: color.surface2, fontFamily: font.body, color: color.ink, padding: "clamp(24px,5vw,56px) 20px" }}>
-      <div style={{ maxWidth: 520, margin: "0 auto" }}>
+      <div style={{ maxWidth: 780, margin: "0 auto" }}>
         {accepted && (
           <div style={{ display: "flex", alignItems: "center", gap: 12, background: "#EAF5EE", border: "1px solid #C9E7D5", color: "#2E7D51", borderRadius: 14, padding: "16px 18px", marginBottom: 18, animation: "mandaFadeUp .3s ease both" }}>
             <span style={{ width: 34, height: 34, flex: "none", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Check size={18} strokeWidth={3} /></span>

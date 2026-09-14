@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, ArrowRight, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
-  Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronDown,
+  Bell, Eye, EyeOff, Clock, Lock, Calendar, RotateCcw, Download, Calculator, Sparkles, LifeBuoy, ChevronRight, ChevronLeft, ChevronDown,
   Copy, Send, GripVertical, Home as HomeIcon, Menu, Pin, PinOff, Move,
 } from "lucide-react";
 import { font, color, statusColors, avatarPalette, initials, shadow } from "../theme.js";
@@ -11,7 +11,7 @@ import HomePage from "./Home.jsx";
 import { api, setToken } from "../lib/api.js";
 import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
 import { loadNotifs, mergeNotifs, getSeen, getReadSet, markRead, removeNotifs } from "../lib/notifs.js";
-import { DESIGNS, ProposalDesign, sampleFor, templateFields } from "../templates/designs.jsx";
+import { DESIGNS, TEMPLATE_CATS, ProposalDesign, PageThumb, PAGE_W, sampleFor, templateFields, templateThemes, safeTheme, templateHas } from "../templates/designs.jsx";
 import CodeInput from "../components/CodeInput.jsx";
 import SupportChat, { SupportPage } from "../components/SupportChat.jsx";
 import { PRICE_TABLE, COMPLEXITY, URGENCY, suggest, fmtBRL, DEFAULT_CONSUMO, PROJECT_DIFFICULTY } from "../lib/pricing.js";
@@ -41,7 +41,21 @@ const MAX_ITEMS = 20;
 const STATUS_OPTIONS = ["Rascunho", "Enviada", "Visualizada", "Aceita", "Recusada"];
 
 // Cores de atalho — o usuário também pode escolher QUALQUER cor no seletor.
-const PRESET_COLORS = ["#D97757", "#E0A100", "#C6407E", "#9B2C3A", "#6C48B0", "#4F46E5", "#3A5BB5", "#0E7C86", "#2E7D51", "#0A0A0A"];
+// Cor aleatória, mas sempre dentro da faixa que funciona num documento.
+function randomDocColor() {
+  const h = Math.random() * 360;
+  const s = 0.16 + Math.random() * 0.22;
+  const l = 0.26 + Math.random() * 0.14;
+  const a = s * Math.min(l, 1 - l);
+  const ch = (n) => {
+    const k = (n + h / 30) % 12;
+    const v = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+    return Math.round(255 * v).toString(16).padStart(2, "0");
+  };
+  return ("#" + ch(0) + ch(8) + ch(4)).toUpperCase();
+}
+
+const PRESET_COLORS = ["#1B1B1E", "#3C4F52", "#45566E", "#3F5548", "#5A5F52", "#7A6244", "#A4664F", "#8C4A45", "#6A5470", "#4E4757"];
 
 // Limites de caracteres por campo (sempre <= aos do backend, para não falhar no salvamento).
 const LIMITS = {
@@ -556,20 +570,7 @@ export default function Dashboard({ go }) {
     if (!pdfRef.current || pdfBusy) return;
     setPdfBusy(true);
     try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
-      const canvas = await html2canvas(pdfRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
-      const img = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pw = pdf.internal.pageSize.getWidth();
-      const ph = pdf.internal.pageSize.getHeight();
-      const imgH = (canvas.height * pw) / canvas.width;
-      let left = imgH;
-      let pos = 0;
-      pdf.addImage(img, "PNG", 0, pos, pw, imgH);
-      left -= ph;
-      while (left > 0) { pos -= ph; pdf.addPage(); pdf.addImage(img, "PNG", 0, pos, pw, imgH); left -= ph; }
-      const name = String(doc.client || doc.title || "proposta").replace(/[^\w\s-]/g, "").trim().slice(0, 40) || "proposta";
-      pdf.save(`proposta-${name}.pdf`);
+      await exportProposalPdf(pdfRef.current, pdfFileName(doc), pdfFoot(doc));
       pushToast("PDF gerado.", "success");
     } catch {
       pushToast("Não foi possível gerar o PDF. Rode: npm install html2canvas jspdf", "info");
@@ -767,7 +768,7 @@ export default function Dashboard({ go }) {
     if (isSuspended(user)) { setShowPlans(true); return; }
     let bio = "";
     try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
-    const d = { ...BLANK_DOC, template: id, bio, currency: user?.currency || DEFAULT_CURRENCY };
+    const d = { ...BLANK_DOC, template: id, theme: safeTheme(id, BLANK_DOC.theme), bio, currency: user?.currency || DEFAULT_CURRENCY };
     setDoc(d);
     pristineRef.current = JSON.stringify(d); // escolheu um template em branco: idem
     setDraftId(newId());
@@ -791,7 +792,9 @@ export default function Dashboard({ go }) {
   //  b) Sem fluxo ativo: veio do menu lateral, então abre uma proposta nova.
   const useDesign = (id) => {
     if (!tplPick) { startWithDesign(id); return; }
-    setDoc((d) => ({ ...d, template: id }));
+    // O conteúdo segue intacto (é o contrato da etapa 1); só o tema é ajustado
+    // quando o modelo novo não suporta o que estava escolhido.
+    setDoc((d) => ({ ...d, template: id, theme: safeTheme(id, d.theme || "claro") }));
     setTplPick(false);
     setFlowError("");
     setFlow("editing");
@@ -1171,14 +1174,48 @@ export default function Dashboard({ go }) {
         .db-dsn-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:22px; }
         .db-dsn-card{ border:1px solid ${color.line2}; border-radius:14px; overflow:hidden; background:#fff; transition:box-shadow .16s ease, transform .16s ease, border-color .16s ease; }
         @media (hover:hover) and (pointer:fine){ .db-dsn-card:hover{ box-shadow:0 20px 44px -20px rgba(20,20,30,0.3); transform:translateY(-4px); border-color:${color.gray200}; } }
-        .db-dsn-thumb{ position:relative; height:300px; overflow:hidden; background:${color.surface2}; border-bottom:1px solid ${color.line2}; }
-        .db-dsn-thumb::after{ content:""; position:absolute; left:0; right:0; bottom:0; height:56px; background:linear-gradient(180deg, rgba(245,245,247,0) 0%, ${color.surface2} 96%); pointer-events:none; }
+        /* A miniatura tem sempre a altura de UMA página A4, então todo card fica
+           do mesmo tamanho — sem linhas desalinhadas na grade. O antigo degradê
+           de baixo existia para disfarçar um corte a 300px; agora o corte cai no
+           fim da página 1, que é onde o PDF corta de verdade. */
+        .db-dsn-thumb{ position:relative; overflow:hidden; background:${color.surface2}; border-bottom:1px solid ${color.line2}; }
         .db-dsn-badges{ position:absolute; top:12px; left:12px; z-index:2; display:flex; gap:6px; }
         .db-dsn-badge{ font-size:10.5px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; border-radius:999px; padding:4px 9px; }
         .db-dsn-badge.novo{ color:#fff; background:${color.accent}; box-shadow:0 6px 14px -6px ${color.accent}99; }
         .db-dsn-badge.pro{ color:${color.ink900}; background:#fff; border:1px solid ${color.gray200}; }
-        .db-dsn-hover{ position:absolute; inset:0; z-index:3; display:flex; align-items:center; justify-content:center; background:rgba(14,14,16,0.32); opacity:0; transition:opacity .18s ease; }
-        .db-dsn-card:hover .db-dsn-hover{ opacity:1; }
+        /* pointer-events:none enquanto invisível: no toque o hover nunca dispara,
+           e sem isso a camada continuava capturando o clique — encostar na
+           miniatura escolhia o modelo sem o usuário ver o botão. No toque, quem
+           serve é o par de botões do rodapé do card. */
+        .db-dsn-hover{ position:absolute; inset:0; z-index:3; display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap; padding:14px; background:rgba(14,14,16,0.34); opacity:0; pointer-events:none; transition:opacity .18s ease; }
+        .db-dsn-cta.ghost{ color:#fff; background:rgba(255,255,255,0.14); border:1px solid rgba(255,255,255,0.6); box-shadow:none; }
+        .db-dsn-cta.ghost:hover{ background:rgba(255,255,255,0.26); }
+        .db-dsn-see{ width:36px; height:36px; flex:none; border-radius:9px; border:1px solid ${color.gray200}; background:#fff; color:${color.gray500}; display:inline-flex; align-items:center; justify-content:center; }
+        .db-dsn-see:hover{ color:${color.ink}; border-color:${color.gray300}; background:${color.surface3}; }
+
+        /* Visualizador de modelo — o exemplo em tamanho de leitura, com troca de
+           tema e as quebras de página do PDF. */
+        .db-tpv{ position:fixed; inset:0; z-index:340; background:rgba(10,10,12,0.64); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; padding:24px; animation:dbFade .18s ease both; }
+        .db-tpv-box{ width:100%; max-width:920px; height:min(94vh,1040px); background:#fff; border-radius:18px; box-shadow:0 40px 90px -30px rgba(0,0,0,0.55); display:flex; flex-direction:column; overflow:hidden; }
+        .db-tpv-top{ display:flex; align-items:center; gap:10px; padding:11px 12px 11px 14px; border-bottom:1px solid ${color.line2}; flex:none; }
+        .db-tpv-body{ flex:1; overflow:auto; background:${color.surface}; padding:26px 26px 34px; }
+        .db-tpv-foot{ display:flex; align-items:center; justify-content:space-between; gap:14px; padding:11px 14px; border-top:1px solid ${color.line2}; flex:none; }
+        .db-tpv-nav{ width:34px; height:34px; flex:none; border-radius:9px; border:1px solid ${color.gray200}; background:#fff; color:${color.gray600}; display:inline-flex; align-items:center; justify-content:center; }
+        .db-tpv-nav:hover:not(:disabled){ background:${color.surface3}; color:${color.ink}; }
+        .db-tpv-nav:disabled{ opacity:.35; cursor:default; }
+        .db-tpv-chip{ font-size:12.5px; font-weight:600; padding:6px 11px; border-radius:8px; border:1px solid ${color.gray200}; background:#fff; color:${color.gray600}; }
+        .db-tpv-chip:hover:not(:disabled){ color:${color.ink}; }
+        .db-tpv-chip:disabled{ opacity:.4; cursor:default; }
+        .db-tpv-chip.on{ border-color:${color.ink}; color:${color.ink}; background:${color.surface3}; }
+        .db-tpv-cut{ position:absolute; left:-10px; right:-10px; border-top:1px dashed ${color.gray400}; pointer-events:none; z-index:4; }
+        .db-tpv-cut span{ position:absolute; right:0; top:4px; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:${color.gray400}; background:${color.surface}; padding:0 6px; }
+        @media (max-width:720px){
+          .db-tpv{ padding:0; }
+          .db-tpv-box{ height:100dvh; max-width:none; border-radius:0; }
+          .db-tpv-body{ padding:12px 12px 24px; }
+          .db-tpv-hide{ display:none !important; }
+        }
+        @media (hover:hover) and (pointer:fine){ .db-dsn-card:hover .db-dsn-hover{ opacity:1; pointer-events:auto; } }
         .db-dsn-cta{ font-size:14px; font-weight:700; color:${color.ink900}; background:#fff; padding:12px 20px; border-radius:11px; box-shadow:0 14px 34px -12px rgba(0,0,0,0.45); }
         .db-dsn-cta:hover{ background:${color.surface3}; }
         .db-dsn-chips{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:22px; }
@@ -1764,7 +1801,7 @@ export default function Dashboard({ go }) {
                         })}
                       </div>
                       <span className="db-tip" data-tip="Surpreenda-me" style={{ display: "flex" }}>
-                        <button className="db-dice" aria-label="Cor aleatória" onClick={() => setDoc((d) => ({ ...d, accent: "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "0").toUpperCase() }))}>
+                        <button className="db-dice" aria-label="Cor aleatória" onClick={() => setDoc((d) => ({ ...d, accent: randomDocColor() }))}>
                           <Sparkles size={15} strokeWidth={2} />
                         </button>
                       </span>
@@ -1796,7 +1833,12 @@ export default function Dashboard({ go }) {
                   <div>
                     <div style={sectionLabel}>Tema de fundo</div>
                     <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                      {[["claro", "Claro", "#FFFFFF", "#3A3A3E"], ["creme", "Creme", "#FBF8F2", "#4E4433"], ["escuro", "Escuro", "#171719", "#C4C4CB"]].map(([id, label, bg, ink]) => {
+                      {[["claro", "Claro", "#FFFFFF", "#3A3A3E"], ["creme", "Creme", "#FBF8F2", "#4E4433"], ["escuro", "Escuro", "#171719", "#C4C4CB"]]
+                        // Cada modelo declara os temas que a identidade dele suporta.
+                        // Oferecer os três em todos era o que transformava 12 modelos
+                        // em 36 combinações sem personalidade definida.
+                        .filter(([id]) => templateThemes(doc.template || "minimal").includes(id))
+                        .map(([id, label, bg, ink]) => {
                         const on = (doc.theme || "claro") === id;
                         return (
                           <button key={id} onClick={() => setDoc((d) => ({ ...d, theme: id }))} className={on ? "db-theme on" : "db-theme"} aria-pressed={on}>
@@ -1816,7 +1858,7 @@ export default function Dashboard({ go }) {
                     <div style={{ fontSize: "11.5px", color: color.gray400, marginTop: 10 }}>A prévia muda com a sua cor. O destaque continua no título e nos realces.</div>
                   </div>
 
-                  {doc.template === "grande" && (
+                  {templateHas(doc.template, "watermark") && (
                     <div>
                       <div style={sectionLabel}>Marca d'água</div>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -2014,8 +2056,8 @@ export default function Dashboard({ go }) {
 
       {/* Cópia oculta da proposta, só para gerar o PDF (mesmo design do cliente) */}
       {view === "editor" && (
-        <div ref={pdfRef} aria-hidden="true" style={{ position: "fixed", left: -99999, top: 0, width: 720, background: "#fff", padding: 24, pointerEvents: "none", zIndex: -1 }}>
-          <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} />
+        <div ref={pdfRef} aria-hidden="true" style={{ position: "fixed", left: -99999, top: 0, width: PAGE_W, background: "#fff", pointerEvents: "none", zIndex: -1 }}>
+          <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} print />
         </div>
       )}
 
@@ -3044,14 +3086,117 @@ function NoResults({ onClear }) {
   );
 }
 
-const TPL_CATS = [
-  ["todos", "Todos"],
-  ["clean", "Clean"],
-  ["vibrante", "Vibrantes"],
-  ["foto", "Com foto"],
-  ["escuro", "Escuros"],
-  ["criativo", "Criativos"],
-];
+// As categorias moram no registro de modelos — classificam POR USO
+// ("Editoriais", "Corporativos"), não pela cor da pintura.
+const TPL_CATS = TEMPLATE_CATS;
+
+/* ══════════════════════════════════════════════════════════════════════════
+   EXPORTAÇÃO DE PDF
+   ---------------------------------------------------------------------------
+   Antes: o documento inteiro virava UMA imagem e o jsPDF a reposicionava a cada
+   297mm. O corte caía onde caísse — no meio de uma linha da tabela, no meio do
+   TOTAL, no meio da assinatura — porque nada dizia onde era seguro cortar.
+
+   Agora: cada modelo marca os pontos de corte com `<Break/>` (preferencial) e
+   `<Break hard/>` (força página nova, usado depois de uma capa). Aqui esses
+   marcadores são lidos e o canvas é fatiado neles. O desenho continua sendo
+   rasterizado — trocar isso exigiria reescrever o exportador inteiro —, mas a
+   quebra de página deixa de ser aleatória.
+   ══════════════════════════════════════════════════════════════════════════ */
+// Onde a A4 corta — cálculo puro de DOM, sem rasterizar nada. Serve ao
+// exportador e também ao modal de visualização, que desenha estas mesmas linhas
+// para o usuário ver a paginação antes de baixar. Funciona com a folha em escala
+// (transform), porque todas as medidas saem do mesmo getBoundingClientRect.
+function planPageCuts(node) {
+  const box = node.getBoundingClientRect();
+  const docW = box.width || 1;
+  const docH = box.height;
+  const A4 = 297 / 210;
+
+  const marks = Array.from(node.querySelectorAll("[data-pdf-break]"))
+    .map((el) => ({ y: el.getBoundingClientRect().top - box.top, hard: el.getAttribute("data-pdf-break") === "hard" }))
+    .filter((m) => m.y > 24)
+    .sort((a, b) => a.y - b.y);
+
+  // Documento de mais de uma página ganha rodapé de continuidade, e a faixa dele
+  // é descontada da altura útil: nada do desenho cai por baixo do rodapé.
+  const fullH = docW * A4;
+  const multi = docH > fullH + 2;
+  const pageH = multi ? docW * ((297 - 11) / 210) : fullH;
+
+  const cuts = [];
+  let top = 0;
+  while (top < docH - 2 && cuts.length < 40) {
+    let bottom = Math.min(top + pageH, docH);
+    if (bottom < docH - 2) {
+      // Quebra dura manda: é uma capa terminando.
+      const hard = marks.find((m) => m.hard && m.y > top + 40 && m.y <= bottom);
+      if (hard) {
+        bottom = hard.y;
+      } else {
+        // Senão, o último corte preferencial que ainda deixa a página cheia o
+        // bastante (evita página com duas linhas).
+        const soft = marks.filter((m) => m.y > top + pageH * 0.4 && m.y <= bottom).pop();
+        if (soft) bottom = soft.y;
+      }
+    }
+    cuts.push([top, bottom]);
+    top = bottom;
+  }
+
+  // Página órfã (um resto de duas linhas) é absorvida pela seguinte, desde que
+  // a soma ainda caiba numa A4.
+  for (let i = cuts.length - 2; i >= 0; i -= 1) {
+    const h = cuts[i][1] - cuts[i][0];
+    if (h < pageH * 0.1 && cuts[i + 1][1] - cuts[i][0] <= pageH + 1) {
+      cuts[i][1] = cuts[i + 1][1];
+      cuts.splice(i + 1, 1);
+    }
+  }
+  return { cuts, docH, docW, pageH, multi };
+}
+
+async function exportProposalPdf(node, filename, foot = "") {
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+  const { cuts, docW, multi } = planPageCuts(node);
+
+  const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+  const px = canvas.width / docW;              // px do canvas por px do documento
+
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pw = pdf.internal.pageSize.getWidth();
+  const ph = pdf.internal.pageSize.getHeight();
+
+  // Recorta o canvas e monta as páginas.
+  cuts.forEach(([a, b], i) => {
+    const sliceH = Math.max(1, Math.round((b - a) * px));
+    const cut = document.createElement("canvas");
+    cut.width = canvas.width;
+    cut.height = sliceH;
+    const ctx = cut.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, cut.width, cut.height);
+    ctx.drawImage(canvas, 0, Math.round(a * px), canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+    if (i > 0) pdf.addPage();
+    pdf.addImage(cut.toDataURL("image/png"), "PNG", 0, 0, pw, (sliceH / px) * (pw / docW));
+    if (multi) {
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(150);
+      if (foot) pdf.text(foot, 14, ph - 5.5);
+      pdf.text(`${i + 1} / ${cuts.length}`, pw - 14, ph - 5.5, { align: "right" });
+    }
+  });
+  pdf.save(filename);
+}
+
+// Linha de rodapé das páginas internas: quem envia e para quem.
+const pdfFoot = (row) => [row && row.company, row && row.client ? `Proposta para ${row.client}` : ""].filter(Boolean).join("  ·  ");
+
+const pdfFileName = (row) => {
+  const name = String((row && (row.client || row.title)) || "proposta").replace(/[^\w\s-]/g, "").trim().slice(0, 40) || "proposta";
+  return `proposta-${name}.pdf`;
+};
+
 const BASIC_TPL_IDS = ["minimal", "bold"]; // espelha o plano Básico do backend
 
 // Galeria de modelos. É o MESMO componente em dois papéis, sem duplicar nada:
@@ -3061,8 +3206,138 @@ const BASIC_TPL_IDS = ["minimal", "bold"]; // espelha o plano Básico do backend
 //    escolher um modelo só define o desenho dela. Aqui a tela muda o cabeçalho
 //    pra "Etapa 1 de 3", marca o modelo em uso e — se já houver dados digitados
 //    (`hasData`) — avisa que nada será perdido e oferece voltar pra edição.
+
+/* ══════════════════════════════════════════════════════════════════════════
+   VISUALIZADOR DE MODELO
+   ---------------------------------------------------------------------------
+   A miniatura do card mostra a página inteira, mas em ~280px de largura: dá
+   para ver a COMPOSIÇÃO, não para ler o documento. Aqui o exemplo abre em
+   tamanho de leitura (794px, a mesma largura do PDF), com:
+     · troca de tema, limitada aos que o modelo aceita;
+     · as quebras de página reais do PDF, desenhadas por cima;
+     · navegação entre modelos com ← e →, para comparar sem fechar e reabrir.
+   ══════════════════════════════════════════════════════════════════════════ */
+function TemplatePreview({ id, list, onClose, onGo, onUse, locked, current, hasData }) {
+  const idx = Math.max(0, list.findIndex((x) => x.id === id));
+  const d = list[idx] || list[0];
+  const themes = templateThemes(d.id);
+  const [theme, setTheme] = useState(themes[0]);
+  const [showCuts, setShowCuts] = useState(false);
+  const [cuts, setCuts] = useState([]);
+  const [k, setK] = useState(1);
+  const [h, setH] = useState(0);
+  const box = useRef(null);
+  const inner = useRef(null);
+
+  // Modelo novo, tema novo: nunca herda um tema que o modelo seguinte não aceita.
+  useEffect(() => { setTheme(templateThemes(d.id)[0]); }, [d.id]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "ArrowLeft" && idx > 0) onGo(list[idx - 1].id);
+      if (e.key === "ArrowRight" && idx < list.length - 1) onGo(list[idx + 1].id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [idx, list, onClose, onGo]);
+
+  // Escala a folha para caber na largura disponível (nunca amplia além de 1:1).
+  useEffect(() => {
+    const measure = () => {
+      const bw = box.current ? box.current.clientWidth : PAGE_W;
+      setK(Math.min(1, bw / PAGE_W));
+      if (inner.current) setH(inner.current.offsetHeight);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const ro = new ResizeObserver(measure);
+    if (box.current) ro.observe(box.current);
+    if (inner.current) ro.observe(inner.current);
+    return () => ro.disconnect();
+  }, [d.id, theme]);
+
+  // Quantas páginas o PDF terá — mesmo cálculo do exportador. Fica sempre
+  // ligado (é matemática de DOM, não custa nada) porque o número aparece no
+  // rodapé; o botão "Páginas" só liga as linhas por cima do documento.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (inner.current) { try { setCuts(planPageCuts(inner.current).cuts); } catch { setCuts([]); } }
+    }, 80);
+    return () => clearTimeout(t);
+  }, [d.id, theme, k, h]);
+
+  const doc = { ...sampleFor(d.id), theme };
+  const useLabel = locked ? "Desbloquear no Pro" : (hasData && d.id === current ? "Manter este modelo" : "Usar este modelo");
+
+  return (
+    <div className="db-tpv" onClick={onClose}>
+      <div className="db-tpv-box" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`Modelo ${d.name}`}>
+
+        <div className="db-tpv-top">
+          <button className="db-btn db-tpv-nav" onClick={() => onGo(list[idx - 1].id)} disabled={idx === 0} aria-label="Modelo anterior"><ChevronLeft size={17} strokeWidth={2.2} /></button>
+          <button className="db-btn db-tpv-nav" onClick={() => onGo(list[idx + 1].id)} disabled={idx >= list.length - 1} aria-label="Próximo modelo"><ChevronRight size={17} strokeWidth={2.2} /></button>
+          <div style={{ minWidth: 0, marginLeft: 4 }}>
+            <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 16, letterSpacing: "-0.01em", lineHeight: 1.2 }}>{d.name}</div>
+            <div style={{ fontSize: 12, color: color.gray400 }}>{d.tag} · {idx + 1} de {list.length}</div>
+          </div>
+
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            {themes.length > 1 && (
+              <div className="db-tpv-hide" style={{ display: "flex", gap: 6 }}>
+                {themes.map((t) => (
+                  <button key={t} onClick={() => setTheme(t)} className={theme === t ? "db-btn db-tpv-chip on" : "db-btn db-tpv-chip"} aria-pressed={theme === t}>
+                    {t === "claro" ? "Claro" : t === "creme" ? "Creme" : "Escuro"}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button onClick={() => setShowCuts((v) => !v)} disabled={cuts.length < 2}
+              className={showCuts && cuts.length > 1 ? "db-btn db-tpv-chip on" : "db-btn db-tpv-chip"}
+              aria-pressed={showCuts} title={cuts.length < 2 ? "Este exemplo cabe em uma página" : "Mostrar onde o PDF quebra de página"}>
+              Quebras
+            </button>
+            <button onClick={onClose} aria-label="Fechar" className="db-btn" style={{ background: "none", color: color.gray400, padding: 5 }}><X size={19} strokeWidth={2} /></button>
+          </div>
+        </div>
+
+        <div className="db-tpv-body">
+          <div ref={box} style={{ maxWidth: PAGE_W, margin: "0 auto" }}>
+            {/* `print` ligado de propósito: é assim que o documento sai no PDF —
+                capa ocupando a página A4 inteira, sem sombra nem canto arredondado.
+                Sem isso, as guias de quebra mentiriam sobre a paginação real.
+                A sombra de papel vai no invólucro, não na folha. */}
+            <div style={{ position: "relative", height: Math.round(h * k) || undefined, boxShadow: "0 1px 2px rgba(24,24,27,.06), 0 18px 46px -22px rgba(24,24,27,.30)" }}>
+              <div ref={inner} style={{ width: PAGE_W, transform: `scale(${k})`, transformOrigin: "top left", position: "absolute", top: 0, left: 0 }}>
+                <ProposalDesign id={d.id} doc={doc} accent={d.accent} print />
+              </div>
+              {showCuts && cuts.slice(0, -1).map(([, b], i) => (
+                <div key={i} className="db-tpv-cut" style={{ top: Math.round(b) }}><span>Página {i + 2}</span></div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="db-tpv-foot">
+          <span style={{ fontSize: "12.5px", color: color.gray400, lineHeight: 1.45, minWidth: 0 }}>
+            <span className="db-tpv-hide">Exemplo ilustrativo — os textos, valores, a sua logo e a cor você define depois.<br /></span>
+            {cuts.length > 0 && <>No PDF, {cuts.length} {cuts.length === 1 ? "página" : "páginas"}.</>}
+          </span>
+          <button onClick={() => onUse(d.id)} className="db-btn db-btn-dark" style={{ flex: "none", fontSize: 14, fontWeight: 600, padding: "11px 18px", display: "inline-flex", alignItems: "center", gap: 7 }}>
+            {locked && <Lock size={14} strokeWidth={2.2} />}{useLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DesignGallery({ onUse, plan, onUpgrade, scope, picking = false, hasData = false, current = "", swapLabel = "", onBackToEditor, onCancelFlow }) {
   const [cat, setCat] = useState("todos");
+  const [preview, setPreview] = useState("");   // id do modelo aberto em tamanho de leitura
   const list = cat === "todos" ? DESIGNS : DESIGNS.filter((d) => d.cat === cat);
   const showPro = plan === "basic" || plan === "free" || !plan;
   const isLocked = (id) => showPro && !BASIC_TPL_IDS.includes(id);
@@ -3142,12 +3417,32 @@ function DesignGallery({ onUse, plan, onUpgrade, scope, picking = false, hasData
         })}
       </div>
 
+      {preview && (
+        <TemplatePreview
+          id={preview}
+          list={list}
+          current={current}
+          hasData={hasData}
+          locked={isLocked(preview)}
+          onGo={setPreview}
+          onClose={() => setPreview("")}
+          onUse={(id) => { setPreview(""); pick(id); }}
+        />
+      )}
+
       <div className="db-dsn-grid">
         {list.map((d, i) => (
           <div key={d.id} className="db-dsn-card" style={{ animation: `dbUp .4s ${i * 0.05}s ease both` }}>
             <div className="db-dsn-thumb">
-              <div style={{ position: "absolute", top: 0, left: "50%", width: 460, transform: "translateX(-50%) scale(0.62)", transformOrigin: "top center", pointerEvents: "none" }}>
-                <ProposalDesign id={d.id} doc={sampleFor(d.id)} accent={d.accent} />
+              {/* Antes a miniatura era o documento em escala 0.62 dentro de uma
+                  caixa de 300px com overflow hidden: todo card mostrava só o
+                  CABEÇALHO, que é justamente a parte mais parecida entre os
+                  modelos. `PageThumb` renderiza a folha na largura real e reduz
+                  proporcionalmente — a miniatura vira o documento, não o topo dele. */}
+              <div style={{ pointerEvents: "none" }}>
+                <PageThumb>
+                  <ProposalDesign id={d.id} doc={sampleFor(d.id)} accent={d.accent} print />
+                </PageThumb>
               </div>
               <div className="db-dsn-badges">
                 {picking && hasData && d.id === current && <span className="db-dsn-badge" style={{ background: color.ink, color: "#fff" }}>Em uso</span>}
@@ -3155,6 +3450,9 @@ function DesignGallery({ onUse, plan, onUpgrade, scope, picking = false, hasData
                 {isLocked(d.id) && <span className="db-dsn-badge pro"><Lock size={11} strokeWidth={2.4} style={{ marginRight: 4, verticalAlign: "-1px" }} />Pro</span>}
               </div>
               <div className="db-dsn-hover">
+                <button onClick={() => setPreview(d.id)} className="db-btn db-dsn-cta ghost">
+                  <Eye size={15} strokeWidth={2.2} style={{ marginRight: 6, verticalAlign: "-2px" }} />Ver modelo
+                </button>
                 <button onClick={() => pick(d.id)} className="db-btn db-dsn-cta">
                   {isLocked(d.id) ? "Desbloquear no Pro" : hasData && d.id === current ? "Manter este modelo" : "Usar este modelo"}
                 </button>
@@ -3165,9 +3463,15 @@ function DesignGallery({ onUse, plan, onUpgrade, scope, picking = false, hasData
                 <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 15 }}>{d.name}</div>
                 <div style={{ fontSize: 12, color: color.gray400 }}>{d.tag}</div>
               </div>
-              <button onClick={() => pick(d.id)} className="db-btn db-btn-dark" style={{ fontSize: "13.5px", padding: "9px 16px", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                {isLocked(d.id) ? <><Lock size={13} strokeWidth={2.2} />Pro</> : hasData && d.id === current ? "Manter" : "Usar"}
-              </button>
+              {/* No celular não existe hover: o acesso ao exemplo precisa estar aqui. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
+                <button onClick={() => setPreview(d.id)} className="db-btn db-dsn-see" aria-label={`Ver o modelo ${d.name}`} title="Ver modelo">
+                  <Eye size={15} strokeWidth={2.2} />
+                </button>
+                <button onClick={() => pick(d.id)} className="db-btn db-btn-dark" style={{ fontSize: "13.5px", padding: "9px 16px", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  {isLocked(d.id) ? <><Lock size={13} strokeWidth={2.2} />Pro</> : hasData && d.id === current ? "Manter" : "Usar"}
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -3267,19 +3571,7 @@ function ClientsPanel({ rows, onRefresh, suspended = false }) {
     try {
       await new Promise((ok) => setTimeout(ok, 80)); // deixa o React montar a cópia oculta
       if (!cliPdfRef.current) return;
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
-      const canvas = await html2canvas(cliPdfRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
-      const img = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pw = pdf.internal.pageSize.getWidth();
-      const ph = pdf.internal.pageSize.getHeight();
-      const imgH = (canvas.height * pw) / canvas.width;
-      let left = imgH, pos = 0;
-      pdf.addImage(img, "PNG", 0, pos, pw, imgH);
-      left -= ph;
-      while (left > 0) { pos -= ph; pdf.addPage(); pdf.addImage(img, "PNG", 0, pos, pw, imgH); left -= ph; }
-      const name = String(r.client || r.title || "proposta").replace(/[^\w\s-]/g, "").trim().slice(0, 40) || "proposta";
-      pdf.save(`proposta-${name}.pdf`);
+      await exportProposalPdf(cliPdfRef.current, pdfFileName(r), pdfFoot(r));
     } catch { /* geração falhou: sem quebra, o usuário tenta de novo */ }
     finally { setPdfBusyId(null); setPdfRow(null); }
   };
@@ -3438,8 +3730,8 @@ function ClientsPanel({ rows, onRefresh, suspended = false }) {
 
       {/* Cópia oculta da proposta escolhida, só para gerar o PDF */}
       {pdfRow && (
-        <div ref={cliPdfRef} aria-hidden="true" style={{ position: "fixed", left: -99999, top: 0, width: 720, background: "#fff", padding: 24, pointerEvents: "none", zIndex: -1 }}>
-          <ProposalDesign id={pdfRow.template} doc={pdfRow} accent={pdfRow.accent} />
+        <div ref={cliPdfRef} aria-hidden="true" style={{ position: "fixed", left: -99999, top: 0, width: PAGE_W, background: "#fff", pointerEvents: "none", zIndex: -1 }}>
+          <ProposalDesign id={pdfRow.template} doc={pdfRow} accent={pdfRow.accent} print />
         </div>
       )}
     </div>

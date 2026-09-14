@@ -1,0 +1,45 @@
+FOTOS DE EXEMPLO DOS MODELOS COM CAPA
+=====================================
+
+O que colocar aqui
+------------------
+  capa.jpg     -> modelo "Capa"   (exemplo: cobertura de casamento)
+  dossie.jpg   -> modelo "Dossiê" (exemplo: produção de videoclipe)
+
+Os nomes precisam ser exatamente esses. São os arquivos que a galeria de
+modelos carrega em /samples/capa.jpg e /samples/dossie.jpg.
+
+Especificação
+-------------
+  Formato .......... JPEG
+  Tamanho .......... 1600 x 900 px (16:9) ou maior, sempre na horizontal
+  Peso ............. até 300 KB — é carregado 12 vezes na tela de modelos
+  Enquadramento .... o assunto principal no terço SUPERIOR da imagem
+
+  Por que o terço superior: o título e o nome do cliente são escritos sobre
+  a parte de baixo da foto, com um véu escuro por cima. Rosto ou assunto
+  embaixo fica coberto.
+
+Onde baixar
+-----------
+  unsplash.com  ou  pexels.com
+  Ambos têm licença livre para uso comercial e não exigem atribuição.
+  Confira a licença da foto específica antes de usar.
+
+  Busca sugerida para capa.jpg ..... "wedding ceremony", "couple portrait"
+  Busca sugerida para dossie.jpg ... "concert stage", "film set", "studio light"
+
+  Para o Dossiê funcionam bem fotos escuras e de baixo contraste: o modelo
+  inteiro é preto e a foto se funde com a folha.
+
+Se o arquivo não estiver aqui
+-----------------------------
+  Nada quebra. A capa cai num painel grafite neutro, que é o mesmo estado
+  que o usuário vê antes de subir a foto dele.
+
+Depois de colocar os arquivos
+-----------------------------
+  npm run dev  ->  aba "Modelos"  ->  os cards Capa e Dossiê já mostram a foto.
+  Se o enquadramento ficar ruim, dá para ajustar sem trocar a imagem:
+  em src/templates/designs.jsx, no SAMPLE_BY_ID, acrescente coverPos: "50,30"
+  (x,y de 0 a 100 — 50,30 puxa o enquadramento para cima).
