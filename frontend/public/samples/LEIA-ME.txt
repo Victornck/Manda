@@ -3,43 +3,60 @@ FOTOS DE EXEMPLO DOS MODELOS COM CAPA
 
 O que colocar aqui
 ------------------
-  capa.jpg     -> modelo "Capa"   (exemplo: cobertura de casamento)
-  dossie.jpg   -> modelo "Dossiê" (exemplo: produção de videoclipe)
+  capa.jpg     -> modelo "Capa"    (casamento / retrato)          [JÁ ESTÁ AQUI]
+  dossie.jpg   -> modelo "Dossiê"  (palco / set de filmagem)      [JÁ ESTÁ AQUI]
+  studio.jpg   -> modelo "Estúdio" (mockup de identidade)         [FALTA]
 
 Os nomes precisam ser exatamente esses. São os arquivos que a galeria de
-modelos carrega em /samples/capa.jpg e /samples/dossie.jpg.
+modelos carrega em /samples/<nome>.jpg.
 
-Especificação
--------------
+O que procurar para studio.jpg
+------------------------------
+  Mockup de identidade visual sobre superfície: cartões de visita, papel
+  timbrado, envelope, embalagem, detalhe de impressão. Vista de cima ou
+  em ângulo baixo.
+
+  Busca ..... "branding mockup", "stationery mockup", "brand identity",
+              "business card mockup", "print design"
+
+  Evite ..... mockup de tela de celular ou notebook (vira proposta de app,
+              não de direção de arte) e qualquer coisa com rosto de pessoa.
+
+Especificação (as três fotos)
+-----------------------------
   Formato .......... JPEG
-  Tamanho .......... 1600 x 900 px (16:9) ou maior, sempre na horizontal
-  Peso ............. até 300 KB — é carregado 12 vezes na tela de modelos
-  Enquadramento .... o assunto principal no terço SUPERIOR da imagem
+  Tamanho .......... 1600 px de largura, horizontal
+  Peso ............. até 300 KB — é carregado na tela de modelos
+  Enquadramento .... assunto principal no terço SUPERIOR da imagem
 
   Por que o terço superior: o título e o nome do cliente são escritos sobre
-  a parte de baixo da foto, com um véu escuro por cima. Rosto ou assunto
-  embaixo fica coberto.
+  a parte de baixo da foto, com um véu escuro por cima.
+
+  Se a foto vier maior que isso, me manda que eu redimensiono e comprimo —
+  uma foto de câmera tem 20 MB e derruba o carregamento da galeria.
 
 Onde baixar
 -----------
   unsplash.com  ou  pexels.com
-  Ambos têm licença livre para uso comercial e não exigem atribuição.
-  Confira a licença da foto específica antes de usar.
-
-  Busca sugerida para capa.jpg ..... "wedding ceremony", "couple portrait"
-  Busca sugerida para dossie.jpg ... "concert stage", "film set", "studio light"
-
-  Para o Dossiê funcionam bem fotos escuras e de baixo contraste: o modelo
-  inteiro é preto e a foto se funde com a folha.
+  Licença livre para uso comercial, sem atribuição. Confira a licença da
+  foto específica antes de usar.
 
 Se o arquivo não estiver aqui
 -----------------------------
-  Nada quebra. A capa cai num painel grafite neutro, que é o mesmo estado
-  que o usuário vê antes de subir a foto dele.
+  Nada quebra, e cada modelo reage do jeito dele:
 
-Depois de colocar os arquivos
------------------------------
-  npm run dev  ->  aba "Modelos"  ->  os cards Capa e Dossiê já mostram a foto.
-  Se o enquadramento ficar ruim, dá para ajustar sem trocar a imagem:
-  em src/templates/designs.jsx, no SAMPLE_BY_ID, acrescente coverPos: "50,30"
-  (x,y de 0 a 100 — 50,30 puxa o enquadramento para cima).
+  Capa e Dossiê .... caem num painel grafite neutro.
+  Estúdio .......... cai na composição própria — grade editorial, o nome do
+                     estúdio em corpo grande sangrando pela margem, sumário
+                     numerado e contadores.
+
+  A troca é automática: a capa só é tratada como "com foto" se a imagem
+  REALMENTE carregar. Link morto ou arquivo apagado volta ao estado sem foto
+  em vez de deixar um retângulo vazio na proposta do cliente.
+
+Ajuste de enquadramento
+-----------------------
+  Sem trocar a imagem, em src/templates/designs.jsx, no SAMPLE_BY_ID:
+  coverPos: "50,64"   (x,y de 0 a 100 — y maior sobe o assunto)
+
+  Valores atuais:  capa 50,64   ·   studio 50,42   ·   dossie sem ajuste

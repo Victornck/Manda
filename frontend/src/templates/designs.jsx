@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { font, color } from "../theme.js";
 import { formatMoney } from "../lib/currency.js";
 
@@ -864,9 +864,21 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
      imagem do próprio trabalho — e é isso que ele manda para o cliente. Sem
      foto, a capa se sustenta pela composição (sumário + título), nunca por um
      retângulo de cor chapada com texto no pé. */
-  const hasCover = !!m.cover;
+  /* A capa só é considerada "com foto" se a imagem REALMENTE carregar. Antes
+     bastava o campo estar preenchido — então um arquivo que sumiu (link morto,
+     upload perdido, imagem ainda não publicada) deixava a capa num degradê vazio,
+     sem a foto E sem a composição. Começa otimista, para o PDF nunca rasterizar
+     o estado de espera, e cai para a composição só quando o onError dispara. */
+  const [coverOk, setCoverOk] = useState(true);
+  useEffect(() => { setCoverOk(true); }, [m.cover]);
+  const hasCover = !!m.cover && coverOk;
   const capaInk = hasCover ? "#FFFFFF" : btnText(accent);
   const rule = capaInk === "#FFFFFF" ? "rgba(255,255,255,.28)" : "rgba(0,0,0,.18)";
+  /* Nome do estúdio em UMA linha de display, sangrando pela borda direita —
+     é assim que capa de portfólio trata o wordmark. Duas linhas encostavam no
+     título e o corpo grande atrás de texto vira sujeira, não profundidade. */
+  const bigWord = (hasCover || m.title.length > 52) ? "" : String(m.brand || "").trim().slice(0, 22);
+
   const capaBg = hasCover
     ? { backgroundImage: `url(${m.cover}), linear-gradient(170deg, ${darken(accent, 0.25)} 0%, ${darken(accent, 0.62)} 100%)`, backgroundSize: "cover", backgroundPosition: m.coverPos }
     : { background: accent };
@@ -877,6 +889,39 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
       {/* ── PÁGINA 1: CAPA ─────────────────────────────────────────────── */}
       <div style={{ position: "relative", boxSizing: "border-box", color: capaInk, ...capaBg,
         minHeight: print ? PAGE_H : 660, padding: "56px 56px 44px", display: "flex", flexDirection: "column" }}>
+
+        {/* sonda de carregamento — invisível, só para saber se a foto existe */}
+        {!!m.cover && <img src={m.cover} alt="" aria-hidden="true" onError={() => setCoverOk(false)} style={{ display: "none" }} />}
+
+        {/* ── CAMADA GRÁFICA (só sem foto) ───────────────────────────────
+            Grade editorial de fios + o nome do estúdio em corpo de display,
+            sangrando pela borda direita. É "letra gigante cortada", mas com a
+            palavra do PRÓPRIO usuário: o que vai impresso ali é a marca dele,
+            não um enfeite que serve para um projeto e mente em todos os outros.
+            Sem nome de empresa, sobra a grade e o monograma — nunca um desenho
+            genérico. */}
+        {!hasCover && (
+          <div aria-hidden="true" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+            {/* grade: quatro fios verticais, o ritmo do documento exposto */}
+            {[0.2, 0.4, 0.6, 0.8].map((x) => (
+              <div key={x} style={{ position: "absolute", top: 0, height: bigWord ? "58%" : "46%", left: `${x * 100}%`, width: 1, background: rule, opacity: 0.5 }} />
+            ))}
+            <div style={{ position: "absolute", left: 0, right: 0, top: "31%", height: 1, background: rule, opacity: 0.55 }} />
+
+            {/* wordmark em escala de capa, cortado pela margem */}
+            {bigWord ? (
+              <div style={{ position: "absolute", left: 56, top: "34%", opacity: 0.15, fontFamily: font.heading, fontWeight: 900, fontSize: 124, lineHeight: 0.86, letterSpacing: "-0.065em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                {bigWord}
+              </div>
+            ) : null}
+
+            {/* âncora de leitura: quantas entregas e o ano, em microtipografia */}
+            <div style={{ position: "absolute", left: 56, top: "31%", marginTop: -26, display: "flex", gap: 26, fontSize: 10, fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.6 }}>
+              {m.items.length > 0 && <span>{String(m.items.length).padStart(2, "0")} entregas</span>}
+              {secs.length > 0 && <span>{String(secs.length).padStart(2, "0")} seções</span>}
+            </div>
+          </div>
+        )}
 
         {/* Véu só quando há foto: sem ele o título branco some numa imagem clara. */}
         {hasCover && (
@@ -1626,6 +1671,7 @@ export function ProposalDesign({ id, doc, accent, onAccept, onEdit, print = fals
    por baixo — a galeria não quebra. */
 const COVER_CAPA = "/samples/capa.jpg";
 const COVER_DOSSIE = "/samples/dossie.jpg";
+const COVER_STUDIO = "/samples/studio.jpg";
 
 export const SAMPLE_DOC = {
   client: "Paula Rodrigues", company: "Viana Café", title: "Produção de vídeo institucional",
@@ -1707,7 +1753,7 @@ export const SAMPLE_BY_ID = {
     scope: "Conceito de marca, sistema visual completo e direção de arte para a campanha de abertura, incluindo aplicações em fachada, embalagem e redes.",
     items: [{ desc: "Conceito e direção de arte", value: "4200" }, { desc: "Sistema visual completo", value: "5800" }, { desc: "Campanha de abertura", value: "3400" }],
     start: "3 de setembro", end: "1 de outubro", validity: "15 dias", payment: "50% na aprovação, 50% na entrega", revisions: "2 rodadas",
-    bio: "Estúdio de design e direção de arte em Fortaleza.", logo: null,
+    bio: "Estúdio de design e direção de arte em Fortaleza.", logo: null, cover: COVER_STUDIO, coverPos: "50,42",
   },
   aurora: {
     client: "Camila Rocha", company: "Camila Nutri", title: "Site e presença digital",
