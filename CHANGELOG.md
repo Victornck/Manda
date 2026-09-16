@@ -14,6 +14,35 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.8.2] — 2026-09-16
+
+### Corrigido
+- **O campo "Empresa" era impresso como se fosse o nome de quem envia.** No
+  formulário, "Empresa" fica na mesma linha de "Cliente" e é preenchida junto
+  com ele (o app até completa sozinho a partir do histórico daquele cliente):
+  é a empresa **do cliente**. Mas cinco modelos imprimiam esse valor ao lado do
+  logo do remetente, com "Seu estúdio" / "Seu escritório" de reserva. Na
+  prática: quem deixava o campo em branco mandava uma proposta assinada
+  "Seu estúdio"; quem preenchia mandava uma proposta assinada com o nome do
+  próprio cliente. O logo já identifica quem envia, então o texto ao lado dele
+  saiu, e a empresa do cliente passou a aparecer onde faz sentido — junto do
+  nome do cliente, que é como os outros sete modelos já faziam.
+- **Dois rodapés podiam imprimir "Manda" como remetente** da proposta, quando o
+  campo estava vazio. Agora imprimem o tipo do documento ("Proposta técnica",
+  "Proposta comercial") e o destinatário.
+- **O rótulo fixo "PROPOSTA" saiu da capa do Estúdio.** Não tinha dado por trás
+  nem forma de remover, e repetia o que a capa já diz. O bloco de assinatura da
+  Carta e da Consultoria também deixou de inventar um nome para a contratada: a
+  linha fica em branco para assinatura à mão, com o papel de cada parte embaixo.
+
+### Observação
+- O app ainda **não tem campo para o nome de quem envia** a proposta. A
+  identidade do remetente é só o logo (e a bio, quando preenchida). Enquanto
+  esse campo não existir, quem não subir logo manda um documento sem nome
+  próprio no cabeçalho.
+
+---
+
 ## [0.8.1] — 2026-09-16
 
 ### Corrigido

@@ -194,7 +194,11 @@ export function model(doc) {
   const total = sum(items);
   return {
     // marca / remetente
-    brand: has(d.company) ? d.company : "",
+    // ATENÇÃO: `company` no formulário é a EMPRESA DO CLIENTE (fica na mesma
+    // linha do campo "Cliente" e é preenchida junto com ele). Não é o nome de
+    // quem envia. O remetente aparece pelo logo (doc.logo) — o app ainda não
+    // tem campo para o nome de quem manda.
+    clientCo: has(d.company) ? d.company : "",
     logo: d.logo || null,
     bio: has(d.bio) ? d.bio : "",
     // destinatário
@@ -413,7 +417,6 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
         <div className="pd-g" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24, paddingBottom: 20, borderBottom: `1px solid ${T.ink}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
             <Wordmark doc={doc} h={22} ink={T.ink} />
-            <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.005em", color: T.ink }}>{m.brand || "Seu estúdio"}</span>
           </div>
           <div style={{ textAlign: "right", flex: "none" }}>
             <div style={{ ...lbl, color: A.head }}>Proposta técnica</div>
@@ -506,8 +509,8 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 34, paddingTop: 14, borderTop: `1px solid ${T.line}`, ...lbl }}>
-          <span>{m.brand || "Manda"}</span>
-          <span>{m.client ? `Para ${m.client}` : ""}</span>
+          <span>Proposta técnica</span>
+          <span>{m.client ? `Para ${m.client}${m.clientCo ? ` · ${m.clientCo}` : ""}` : ""}</span>
         </div>
       </div>
     </Sheet>
@@ -560,7 +563,6 @@ function Carta({ doc, accent, onAccept, onEdit, print }) {
         <div className="pd-g" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 24 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
             <Wordmark doc={doc} h={26} ink={T.ink} />
-            <span style={{ fontFamily: serif, fontSize: 18, fontWeight: 700, letterSpacing: "-0.01em", color: T.ink }}>{m.brand || "Seu escritório"}</span>
           </div>
           <span style={{ ...cap, flex: "none" }}>Proposta comercial</span>
         </div>
@@ -573,6 +575,7 @@ function Carta({ doc, accent, onAccept, onEdit, print }) {
             <div style={{ fontFamily: serif, fontSize: 17, fontWeight: 700, color: T.ink, marginTop: 6, lineHeight: 1.3 }}>
               <Ed onEdit={onEdit} field="client">{m.client || "Cliente"}</Ed>
             </div>
+            {!!m.clientCo && <div style={{ fontSize: 13.5, color: T.sub, marginTop: 3 }}>{m.clientCo}</div>}
           </div>
           {has(m.validity) && (
             <div style={{ textAlign: "right", flex: "none" }}>
@@ -644,11 +647,11 @@ function Carta({ doc, accent, onAccept, onEdit, print }) {
         {/* ASSINATURA — o que faltava para isto ser uma carta e não um panfleto */}
         <Break />
         <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 46, marginTop: 44 }}>
-          {[[m.brand || "Responsável", "Pela contratada"], [m.client || "Cliente", "De acordo — contratante"]].map(([nome, papel], i) => (
+          {[["", "Pela contratada"], [m.client || "Cliente", "De acordo — contratante"]].map(([nome, papel], i) => (
             <div key={i}>
               <div style={{ height: 40 }} />
               <div style={{ borderTop: `1px solid ${T.ink}`, paddingTop: 9 }}>
-                <div style={{ fontFamily: serif, fontSize: 14.5, fontWeight: 700, color: T.ink, lineHeight: 1.3 }}>{nome}</div>
+                <div style={{ fontFamily: serif, fontSize: 14.5, fontWeight: 700, color: T.ink, lineHeight: 1.3 }}>{nome || "\u00A0"}</div>
                 <div style={{ fontSize: 11.5, color: T.soft, marginTop: 3 }}>{papel}</div>
               </div>
             </div>
@@ -704,7 +707,7 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
   // vazio = inicial automática. Agora contida no cabeçalho, com contraste baixo.
   const wm = doc.watermark === "off" ? ""
     : (has(doc.watermark) ? String(doc.watermark).trim().charAt(0).toUpperCase()
-      : ((m.brand || m.client || "M").trim().charAt(0) || "M").toUpperCase());
+      : ((m.clientCo || m.client || "M").trim().charAt(0) || "M").toUpperCase());
 
   // Numeração automática das seções — só conta as que existem.
   let n = 0;
@@ -725,8 +728,7 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
               <Mono doc={doc} size={38} radius={8} bg={T.ink} fg={T.bg} />
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em", color: T.ink }}>{m.brand || "Seu estúdio"}</div>
-                <div style={{ ...lbl, marginTop: 3 }}>Proposta comercial</div>
+                <div style={{ ...lbl }}>Proposta comercial</div>
               </div>
             </div>
             <h2 className="pd-d3" style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 32, lineHeight: 1.12, letterSpacing: "-0.028em", margin: 0, color: m.title ? T.ink : T.soft, maxWidth: 430 }}>
@@ -835,11 +837,11 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
         {/* APROVAÇÃO */}
         <ConsSec n={next()} title="Aprovação" c={A.head} line={T.ink}>
           <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, marginBottom: 26 }}>
-            {[[m.brand || "Responsável", "Contratada"], [m.client || "Cliente", "Contratante"]].map(([nome, papel], i) => (
+            {[["", "Contratada"], [m.client || "Cliente", "Contratante"]].map(([nome, papel], i) => (
               <div key={i}>
                 <div style={{ height: 40 }} />
                 <div style={{ borderTop: `1px solid ${T.ink}`, paddingTop: 8 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: T.ink }}>{nome}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: T.ink }}>{nome || "\u00A0"}</div>
                   <div style={{ ...lbl, marginTop: 4 }}>{papel}</div>
                 </div>
               </div>
@@ -854,8 +856,8 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
         </ConsSec>
 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 26, paddingTop: 13, borderTop: `1px solid ${T.line}`, ...lbl }}>
-          <span>{m.brand || "Manda"}</span>
-          <span>Proposta comercial{m.client ? ` · ${m.client}` : ""}</span>
+          <span>Proposta comercial</span>
+          <span>{m.client ? `Para ${m.client}${m.clientCo ? ` · ${m.clientCo}` : ""}` : ""}</span>
         </div>
       </div>
     </Sheet>
@@ -931,7 +933,7 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
   /* Nome do estúdio em UMA linha de display, sangrando pela borda direita —
      é assim que capa de portfólio trata o wordmark. Duas linhas encostavam no
      título e o corpo grande atrás de texto vira sujeira, não profundidade. */
-  const bigWord = (hasCover || m.title.length > 52) ? "" : String(m.brand || "").trim().slice(0, 22);
+  const bigWord = (hasCover || m.title.length > 52) ? "" : String(m.clientCo || "").trim().slice(0, 22);
 
   const capaBg = hasCover
     ? { backgroundImage: `url(${m.cover}), linear-gradient(170deg, ${darken(accent, 0.25)} 0%, ${darken(accent, 0.62)} 100%)`, backgroundSize: "cover", backgroundPosition: m.coverPos }
@@ -997,7 +999,6 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
           <div className="pd-g" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 32 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <Wordmark doc={doc} h={26} ink={capaInk} />
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{m.brand || "Seu estúdio"}</span>
             </div>
 
             {/* Sem foto, o sumário ocupa o alto da capa. Com foto, a imagem já
@@ -1012,15 +1013,13 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
                   </div>
                 ))}
               </div>
-            ) : (
-              <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", opacity: 0.75 }}>Proposta</span>
-            )}
+            ) : null}
           </div>
 
           <div style={{ flex: 1, minHeight: 90 }} />
 
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.8, marginBottom: 18 }}>
-            Para <Ed onEdit={onEdit} field="client">{m.client || "cliente"}</Ed>
+            Para <Ed onEdit={onEdit} field="client">{m.client || "cliente"}</Ed>{m.clientCo ? ` · ${m.clientCo}` : ""}
           </div>
           <h2 className="pd-d2" style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 62, lineHeight: 0.98, letterSpacing: "-0.045em", margin: "0 0 52px", maxWidth: 620, textShadow: hasCover ? "0 2px 24px rgba(0,0,0,.45)" : "none" }}>
             <Ed onEdit={onEdit} field="title">{m.title || "Título da proposta"}</Ed>
@@ -1252,7 +1251,6 @@ function Editorial({ doc, accent, onAccept, onEdit, print }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <Mono doc={doc} size={30} radius={7} bg={deep} fg={btnText(deep)} />
-          <span style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em", color: deep }}>{doc.company || "Seu estúdio"}</span>
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: deep }}>Proposta</div>
