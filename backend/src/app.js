@@ -88,22 +88,58 @@ app.use("/uploads", express.static(uploadsDir, {
 // dist, então isso fica inativo e o front continua no Vite (porta 5173).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "../../frontend/dist");
-if (fs.existsSync(path.join(distDir, "index.html"))) {
-  app.use(express.static(distDir));
-  // Lê o index.html uma vez na subida. Como é um SPA, TODAS as rotas devolvem o
-  // mesmo HTML — mas a canônica precisa apontar cada URL pra si mesma, senão o
-  // Google vê /precos, /privacidade etc. como "alternativas" da home (canônica
-  // fixa) e não indexa. Aqui injetamos a canônica e a og:url corretas por rota.
-  const indexHtml = fs.readFileSync(path.join(distDir, "index.html"), "utf8");
+const indexPath = path.join(distDir, "index.html");
+if (fs.existsSync(indexPath)) {
+  // Os arquivos de /assets têm hash no nome, então podem ser cacheados para
+  // sempre. O index.html NUNCA pode: é ele que diz qual hash é o atual, e um
+  // index velho no cache aponta para um bundle que já não existe.
+  app.use(express.static(distDir, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".html")) res.setHeader("Cache-Control", "no-cache");
+      else if (filePath.includes(`${path.sep}assets${path.sep}`)) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    },
+  }));
+
+  // O index.html é relido sempre que o arquivo muda no disco.
+  //
+  // Antes ele era lido UMA VEZ na subida do processo e guardado numa constante.
+  // Como `npm run build` troca o hash dos bundles mas NÃO reinicia o Node, todo
+  // deploy de frontend deixava este fallback servindo o HTML da versão anterior,
+  // apontando para um /assets/index-<hash velho>.js que o build acabara de
+  // apagar. O Express respondia esse pedido com o próprio index.html (200 +
+  // text/html), o navegador recusava o módulo por MIME, o React não montava e
+  // TODA rota que não fosse "/" ficava na tela de "o app não terminou de
+  // carregar" — enquanto "/" funcionava, porque `express.static` lê do disco.
+  //
+  // `statSync` por requisição é irrelevante (o SO cacheia o inode) e elimina a
+  // dependência de lembrar do `pm2 restart` depois de cada build.
+  let cachedIndex = { mtimeMs: 0, html: "" };
+  const readIndex = () => {
+    try {
+      const { mtimeMs } = fs.statSync(indexPath);
+      if (mtimeMs !== cachedIndex.mtimeMs) {
+        cachedIndex = { mtimeMs, html: fs.readFileSync(indexPath, "utf8") };
+      }
+    } catch {
+      // build sendo substituído neste instante: usa a última cópia boa
+    }
+    return cachedIndex.html;
+  };
+  readIndex();
+
   // Fallback de SPA: qualquer rota que NÃO seja /api nem /health devolve o
   // index.html, para o React Router cuidar das rotas no cliente (/app, /precos,
   // /p/:token, etc.). O 404 de /api segue para o notFound.
+  //
+  // A canônica precisa apontar cada URL pra si mesma, senão o Google vê /precos,
+  // /privacidade etc. como "alternativas" da home (canônica fixa) e não indexa.
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api") || req.path === "/health") return next();
     const url = "https://mandaproposta.com" + (req.path === "/" ? "/" : req.path.replace(/\/+$/, ""));
-    const html = indexHtml
+    const html = readIndex()
       .replace('href="https://mandaproposta.com/"', `href="${url}"`)
       .replace('content="https://mandaproposta.com/"', `content="${url}"`);
+    res.setHeader("Cache-Control", "no-cache");
     res.type("html").send(html);
   });
   console.log("[web] servindo o front a partir de", distDir);

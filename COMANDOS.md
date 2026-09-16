@@ -32,8 +32,14 @@ ssh root@179.198.105.127
 
 Se mudou **so o frontend** (telas, textos, estilos):
 ```
-cd /opt/manda && git pull && cd frontend && npm run build
+cd /opt/manda && git pull && cd frontend && npm run build && pm2 restart manda
 ```
+> O `pm2 restart` faz parte do deploy de frontend tambem. O backend serve o
+> index.html do build, e ate a versao 0.8.1 ele lia esse arquivo uma unica vez,
+> na subida do processo. Sem reiniciar, TODA rota que nao fosse "/" continuava
+> apontando para o bundle da versao anterior e mostrava "O app nao terminou de
+> carregar". A 0.8.1 corrigiu isso (o arquivo e relido quando muda), mas manter
+> o restart no comando nao custa nada e cobre qualquer cache futuro.
 
 Se mudou o **backend** (rotas, .env, lógica de servidor):
 ```
