@@ -14,6 +14,41 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.8.1] — 2026-09-16
+
+### Corrigido
+- **A proposta aberta no celular não exige mais virar o aparelho.** Os 12
+  modelos eram escritos em cima da folha A4 de 794px: grades de duas e três
+  colunas, larguras fixas de 150 a 300px e margens de até 84px. Num aparelho
+  de 390px isso não cabia — a coluna de texto sobrava com menos de 90px e
+  palavras quebravam no meio ("Criaçã / o"), quando não abria com rolagem
+  lateral. Agora a folha carrega uma folha de estilo própria, injetada uma
+  única vez, que abaixo de 720px empilha as grades, solta as larguras fixas,
+  reduz as margens e derruba os tamanhos de display; abaixo de 420px aperta
+  mais um passo. Cada elemento recebe a classe de refluxo derivada do próprio
+  estilo na montagem do arquivo, então nenhum modelo ficou de fora e nada
+  precisa ser marcado à mão quando um modelo novo entrar.
+- **O desenho de tela e o PDF continuam intactos.** O corte é por largura de
+  janela (`@media`), não por largura de container, de propósito: a miniatura da
+  galeria e o nó escondido que o exportador fotografa têm 794px numa janela
+  larga, então continuam recebendo a composição de desktop. Verificado nos 12:
+  folha de 794px na tela, folha de 390px sem estouro no celular.
+- **O link público parou de cair em "O app não terminou de carregar".** O
+  backend lia o `index.html` uma vez na subida e guardava a string em memória.
+  Depois de um deploy do front, ele continuava servindo o HTML antigo, que
+  apontava para um bundle que não existia mais — todo link de proposta abria
+  no aviso de falha até alguém reiniciar o processo. Agora o HTML é relido
+  quando o `mtime` do arquivo muda, com a última cópia boa como reserva para o
+  instante em que o build está sendo substituído. Os assets de `/assets/`
+  passaram a ir com cache imutável e o HTML com `no-cache`, que é o par certo
+  para nome de arquivo com hash.
+
+### Alterado
+- **A proposta pública ficou mais larga** (520px → 780px), que é a largura em
+  que a folha respira sem virar uma coluna estreita no meio da tela.
+
+---
+
 ## [0.8.0] — 2026-09-14
 
 ### Alterado

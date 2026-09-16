@@ -30,7 +30,61 @@ export const useSheet = () => useContext(SheetCtx);
    Mede a própria largura e informa aos filhos se está apertada (`compact`),
    para o template reorganizar colunas em vez de encolher a tipografia. Em modo
    `print` some a sombra e o arredondamento — papel não tem sombra dentro do PDF. */
+
+/* ── Folha no celular ────────────────────────────────────────────────────────
+   O documento é desenhado numa folha de 794px. Num telefone em pé sobram ~390px
+   — e uma grade de "150px de rótulo + 1fr de texto" deixa 90px para o parágrafo,
+   que é onde a palavra "Criação" quebra em "Criaçã / o". O usuário virava o
+   aparelho de lado para conseguir ler.
+
+   Estas regras reorganizam a folha abaixo de 720px. São MEDIA queries, não
+   container queries, de propósito: a miniatura da galeria e o nó oculto do PDF
+   renderizam a 794px dentro de uma janela larga, então continuam com o layout
+   completo. Só o telefone de verdade reflui.
+
+   As classes são aplicadas automaticamente na montagem do arquivo (build), a
+   partir do próprio estilo de cada elemento — não dependem de alguém lembrar de
+   marcar cada div. */
+const PD_MOBILE_CSS = `
+@media (max-width: 720px) {
+  [data-sheet] .pd-pad { padding-left: 22px !important; padding-right: 22px !important; }
+  [data-sheet] .pd-g { display: block !important; }
+  [data-sheet] .pd-g > * { display: block !important; }
+  [data-sheet] .pd-g > * + * { margin-top: 12px !important; }
+  [data-sheet] .pd-g2 { grid-template-columns: 1fr 1fr !important; }
+  [data-sheet] .pd-t { grid-template-columns: 26px minmax(0,1fr) auto !important; column-gap: 9px !important; }
+  [data-sheet] .pd-w100 { width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
+  [data-sheet] .pd-d1 { font-size: 52px !important; letter-spacing: -0.04em !important; }
+  [data-sheet] .pd-d2 { font-size: 31px !important; }
+  [data-sheet] .pd-d3 { font-size: 22px !important; }
+  [data-sheet] .pd-wrap { flex-wrap: wrap !important; gap: 14px 20px !important; }
+  [data-sheet] .pd-cover { min-height: 430px !important; padding-top: 30px !important; padding-bottom: 30px !important; }
+  [data-sheet] .pd-hide { display: none !important; }
+}
+@media (max-width: 420px) {
+  [data-sheet] .pd-pad { padding-left: 16px !important; padding-right: 16px !important; }
+  [data-sheet] .pd-g2 { grid-template-columns: 1fr !important; }
+  [data-sheet] .pd-d1 { font-size: 40px !important; }
+  [data-sheet] .pd-d2 { font-size: 26px !important; }
+}
+`;
+
+// Injeta uma vez por página, no <head>, em vez de repetir uma <style> por folha.
+let pdCssDone = false;
+function usePdMobileCss() {
+  useLayoutEffect(() => {
+    if (pdCssDone || typeof document === "undefined") return;
+    if (document.getElementById("pd-mobile-css")) { pdCssDone = true; return; }
+    const el = document.createElement("style");
+    el.id = "pd-mobile-css";
+    el.textContent = PD_MOBILE_CSS;
+    document.head.appendChild(el);
+    pdCssDone = true;
+  }, []);
+}
+
 export function Sheet({ children, bg = "#FFFFFF", ink = "#18181B", print = false, style }) {
+  usePdMobileCss();
   const ref = useRef(null);
   const [w, setW] = useState(PAGE_W);
   useLayoutEffect(() => {
@@ -353,10 +407,10 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
 
   return (
     <Sheet bg={T.bg} ink={T.ink} print={print}>
-      <div style={{ padding: "54px 60px 46px" }}>
+      <div className="pd-pad" style={{ padding: "54px 60px 46px" }}>
 
         {/* cabeçalho: marca à esquerda, identificação do documento à direita */}
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24, paddingBottom: 20, borderBottom: `1px solid ${T.ink}` }}>
+        <div className="pd-g" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24, paddingBottom: 20, borderBottom: `1px solid ${T.ink}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
             <Wordmark doc={doc} h={22} ink={T.ink} />
             <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.005em", color: T.ink }}>{m.brand || "Seu estúdio"}</span>
@@ -369,7 +423,7 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
 
         {/* faixa de metadados — células divididas por fio vertical */}
         {meta.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${meta.length}, 1fr)`, borderBottom: `1px solid ${T.line}` }}>
+          <div className="pd-g2" style={{ display: "grid", gridTemplateColumns: `repeat(${meta.length}, 1fr)`, borderBottom: `1px solid ${T.line}` }}>
             {meta.map(([k, v], i) => (
               <div key={k} style={{ padding: "16px 18px 16px 0", borderLeft: i ? `1px solid ${T.line}` : "none", paddingLeft: i ? 18 : 0 }}>
                 <div style={lbl}>{k}</div>
@@ -382,7 +436,7 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
         )}
 
         {/* título — sóbrio de propósito: documentação técnica não grita */}
-        <h2 style={{ fontFamily: font.heading, fontWeight: 600, fontSize: 30, lineHeight: 1.18, letterSpacing: "-0.022em", margin: "32px 0 0", color: m.title ? T.ink : T.soft, maxWidth: "88%" }}>
+        <h2 className="pd-d3" style={{ fontFamily: font.heading, fontWeight: 600, fontSize: 30, lineHeight: 1.18, letterSpacing: "-0.022em", margin: "32px 0 0", color: m.title ? T.ink : T.soft, maxWidth: "88%" }}>
           <Ed onEdit={onEdit} field="title">{m.title || "Título da proposta"}</Ed>
         </h2>
 
@@ -398,7 +452,7 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
           <TecRule label="Investimento" c={A.head} line={T.line} />
 
           {/* TABELA MODULAR: índice, descrição, valor. Só fios horizontais. */}
-          <div style={{ display: "grid", gridTemplateColumns: "34px 1fr 150px", columnGap: 10, padding: "0 0 9px" }}>
+          <div className="pd-t" style={{ display: "grid", gridTemplateColumns: "34px 1fr 150px", columnGap: 10, padding: "0 0 9px" }}>
             <span style={lbl}>#</span>
             <span style={lbl}>Descrição</span>
             <span style={{ ...lbl, textAlign: "right" }}>Valor</span>
@@ -406,14 +460,14 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
           {m.items.map((it, i) => (
             <React.Fragment key={i}>
             {i > 0 && <Break />}
-            <div style={{ display: "grid", gridTemplateColumns: "34px 1fr 150px", columnGap: 10, alignItems: "baseline", padding: "13px 0", borderTop: `1px solid ${T.line}` }}>
+            <div className="pd-t" style={{ display: "grid", gridTemplateColumns: "34px 1fr 150px", columnGap: 10, alignItems: "baseline", padding: "13px 0", borderTop: `1px solid ${T.line}` }}>
               <span style={{ ...num, fontSize: 11.5, fontWeight: 600, color: A.head }}>{String(i + 1).padStart(2, "0")}</span>
               <span style={{ fontSize: 13.5, lineHeight: 1.5, color: T.ink }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span>
               <span style={{ ...num, fontSize: 13.5, fontWeight: 600, color: has(it.value) ? T.ink : T.soft, textAlign: "right" }}>{money(it.value, m.currency) || "—"}</span>
             </div>
             </React.Fragment>
           ))}
-          <div style={{ display: "grid", gridTemplateColumns: "34px 1fr 150px", columnGap: 10, alignItems: "baseline", padding: "16px 0 0", borderTop: `1.5px solid ${A.line}`, marginTop: 2 }}>
+          <div className="pd-t" style={{ display: "grid", gridTemplateColumns: "34px 1fr 150px", columnGap: 10, alignItems: "baseline", padding: "16px 0 0", borderTop: `1.5px solid ${A.line}`, marginTop: 2 }}>
             <span />
             <span style={{ ...lbl, color: A.head, alignSelf: "center" }}>Total</span>
             <span style={{ ...num, fontFamily: font.heading, fontSize: 25, fontWeight: 700, letterSpacing: "-0.02em", color: T.ink, textAlign: "right" }}>{fmt(m.total, m.currency)}</span>
@@ -423,7 +477,7 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
         {conds.length > 0 && (<>
           <Break />
           <TecRule label="Condições" c={A.head} line={T.line} top={44} />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 28, rowGap: 14 }}>
+          <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 28, rowGap: 14 }}>
             {conds.map(([k, v]) => (
               <div key={k}>
                 <div style={lbl}>{k}</div>
@@ -443,10 +497,10 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
             índices e no fio do total, que é onde ela informa alguma coisa. */}
         <TecRule label="Aprovação" c={A.head} line={T.line} top={34} />
         <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-          <button onClick={onAccept} style={{ flex: "none", fontFamily: mono, fontSize: 11.5, fontWeight: 600, letterSpacing: "0.16em", textTransform: "uppercase", color: T.ink, background: "transparent", border: `1.5px solid ${T.ink}`, borderRadius: 3, padding: "15px 30px", cursor: "pointer" }}>
+          <button className="pd-pad" onClick={onAccept} style={{ flex: "none", fontFamily: mono, fontSize: 11.5, fontWeight: 600, letterSpacing: "0.16em", textTransform: "uppercase", color: T.ink, background: "transparent", border: `1.5px solid ${T.ink}`, borderRadius: 3, padding: "15px 30px", cursor: "pointer" }}>
             Aceitar proposta
           </button>
-          <span style={{ fontSize: 12.5, color: T.soft, lineHeight: 1.55, flex: 1, minWidth: 220 }}>
+          <span className="pd-w100" style={{ fontSize: 12.5, color: T.soft, lineHeight: 1.55, flex: 1, minWidth: 220 }}>
             O aceite registra a data e vincula as condições descritas acima.
           </span>
         </div>
@@ -500,10 +554,10 @@ function Carta({ doc, accent, onAccept, onEdit, print }) {
     <Sheet bg={T.bg} ink={T.ink} print={print}>
       {/* fio de identidade no topo — o único lugar onde a cor escolhida aparece */}
       <div style={{ height: 3, background: A.line }} />
-      <div style={{ padding: "62px 84px 58px" }}>
+      <div className="pd-pad" style={{ padding: "62px 84px 58px" }}>
 
         {/* papel timbrado */}
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 24 }}>
+        <div className="pd-g" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 24 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
             <Wordmark doc={doc} h={26} ink={T.ink} />
             <span style={{ fontFamily: serif, fontSize: 18, fontWeight: 700, letterSpacing: "-0.01em", color: T.ink }}>{m.brand || "Seu escritório"}</span>
@@ -513,7 +567,7 @@ function Carta({ doc, accent, onAccept, onEdit, print }) {
         <div style={{ height: 1, background: T.ink, opacity: 0.85, margin: "18px 0 40px" }} />
 
         {/* destinatário + referência */}
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 32, marginBottom: 34 }}>
+        <div className="pd-g" style={{ display: "flex", justifyContent: "space-between", gap: 32, marginBottom: 34 }}>
           <div style={{ minWidth: 0 }}>
             <div style={cap}>Ao cuidado de</div>
             <div style={{ fontFamily: serif, fontSize: 17, fontWeight: 700, color: T.ink, marginTop: 6, lineHeight: 1.3 }}>
@@ -530,7 +584,7 @@ function Carta({ doc, accent, onAccept, onEdit, print }) {
 
         {/* referência + assunto */}
         <div style={{ ...cap, marginBottom: 10 }}>Referência</div>
-        <h2 style={{ fontFamily: serif, fontWeight: 700, fontSize: 31, lineHeight: 1.22, letterSpacing: "-0.012em", margin: 0, color: m.title ? T.ink : T.soft, maxWidth: 520 }}>
+        <h2 className="pd-d3" style={{ fontFamily: serif, fontWeight: 700, fontSize: 31, lineHeight: 1.22, letterSpacing: "-0.012em", margin: 0, color: m.title ? T.ink : T.soft, maxWidth: 520 }}>
           <Ed onEdit={onEdit} field="title">{m.title || "Título da proposta"}</Ed>
         </h2>
         <div style={{ width: 52, height: 2, background: A.line, margin: "22px 0 30px" }} />
@@ -559,9 +613,9 @@ function Carta({ doc, accent, onAccept, onEdit, print }) {
           ))}
 
           {/* total — fio simples acima, fio duplo abaixo (convenção contábil) */}
-          <div style={{ borderTop: `1px solid ${T.ink}`, marginTop: 16, paddingTop: 14, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 20 }}>
+          <div className="pd-g" style={{ borderTop: `1px solid ${T.ink}`, marginTop: 16, paddingTop: 14, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 20 }}>
             <span style={cap}>Investimento total</span>
-            <span style={{ fontFamily: serif, fontSize: 30, fontWeight: 700, color: T.ink, letterSpacing: "-0.015em", fontVariantNumeric: "tabular-nums" }}>{fmt(m.total, m.currency)}</span>
+            <span className="pd-d3" style={{ fontFamily: serif, fontSize: 30, fontWeight: 700, color: T.ink, letterSpacing: "-0.015em", fontVariantNumeric: "tabular-nums" }}>{fmt(m.total, m.currency)}</span>
           </div>
           <div style={{ borderTop: `1px solid ${T.ink}`, marginTop: 13, paddingTop: 3, borderBottom: `1px solid ${T.ink}`, height: 0 }} />
         </>)}
@@ -589,7 +643,7 @@ function Carta({ doc, accent, onAccept, onEdit, print }) {
 
         {/* ASSINATURA — o que faltava para isto ser uma carta e não um panfleto */}
         <Break />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 46, marginTop: 44 }}>
+        <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 46, marginTop: 44 }}>
           {[[m.brand || "Responsável", "Pela contratada"], [m.client || "Cliente", "De acordo — contratante"]].map(([nome, papel], i) => (
             <div key={i}>
               <div style={{ height: 40 }} />
@@ -664,9 +718,9 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
             lida como defeito de renderização. Aqui ela cabe inteira dentro do
             cabeçalho e fica no limite do perceptível. */}
         {wm && (
-          <div aria-hidden="true" style={{ position: "absolute", left: 40, bottom: -34, fontFamily: font.heading, fontWeight: 900, fontSize: 168, lineHeight: 1, color: T.dark ? "rgba(255,255,255,0.04)" : mix(T.panel, T.ink, 0.055), userSelect: "none" }}>{wm}</div>
+          <div className="pd-d1" aria-hidden="true" style={{ position: "absolute", left: 40, bottom: -34, fontFamily: font.heading, fontWeight: 900, fontSize: 168, lineHeight: 1, color: T.dark ? "rgba(255,255,255,0.04)" : mix(T.panel, T.ink, 0.055), userSelect: "none" }}>{wm}</div>
         )}
-        <div style={{ position: "relative", padding: "38px 56px 32px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 28 }}>
+        <div className="pd-pad pd-g" style={{ position: "relative", padding: "38px 56px 32px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 28 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
               <Mono doc={doc} size={38} radius={8} bg={T.ink} fg={T.bg} />
@@ -675,13 +729,13 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
                 <div style={{ ...lbl, marginTop: 3 }}>Proposta comercial</div>
               </div>
             </div>
-            <h2 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 32, lineHeight: 1.12, letterSpacing: "-0.028em", margin: 0, color: m.title ? T.ink : T.soft, maxWidth: 430 }}>
+            <h2 className="pd-d3" style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 32, lineHeight: 1.12, letterSpacing: "-0.028em", margin: 0, color: m.title ? T.ink : T.soft, maxWidth: 430 }}>
               <Ed onEdit={onEdit} field="title">{m.title || "Título da proposta"}</Ed>
             </h2>
           </div>
 
           {/* ficha do documento — moldura é convenção corporativa, e funciona */}
-          <div style={{ flex: "none", width: 232, border: `1px solid ${T.border}`, background: T.bg }}>
+          <div className="pd-w100" style={{ flex: "none", width: 232, border: `1px solid ${T.border}`, background: T.bg }}>
             {pairs(["Cliente", m.client], ["Início", m.start], ["Entrega", m.end], ["Validade", m.validity]).map(([k, v], i) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 14px", borderTop: i ? `1px solid ${T.line}` : "none" }}>
                 <span style={{ ...lbl, flex: "none", paddingTop: 2 }}>{k}</span>
@@ -694,7 +748,7 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
         </div>
       </div>
 
-      <div style={{ padding: "0 56px 48px" }}>
+      <div className="pd-pad" style={{ padding: "0 56px 48px" }}>
         {has(m.scope) && (
           <ConsSec first n={next()} title="Escopo do trabalho" c={A.head} line={T.ink}>
             <p style={{ fontSize: 14, lineHeight: 1.75, color: T.sub, margin: 0, maxWidth: 600 }}><Ed onEdit={onEdit} field="scope">{m.scope}</Ed></p>
@@ -705,13 +759,13 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
           <Break />
           <ConsSec n={next()} title="Investimento" c={A.head} line={T.ink}>
             {/* TABELA com cabeçalho — a estrutura que um cliente B2B espera ver */}
-            <div style={{ display: "grid", gridTemplateColumns: "38px 1fr 150px", background: T.panel, padding: "9px 14px", columnGap: 12 }}>
-              <span style={lbl}>Item</span><span style={lbl}>Descrição</span><span style={{ ...lbl, textAlign: "right" }}>Valor</span>
+            <div className="pd-t" style={{ display: "grid", gridTemplateColumns: "38px 1fr 150px", background: T.panel, padding: "9px 14px", columnGap: 12 }}>
+              <span style={lbl}>#</span><span style={lbl}>Descrição</span><span style={{ ...lbl, textAlign: "right" }}>Valor</span>
             </div>
             {m.items.map((it, i) => (
               <React.Fragment key={i}>
               {i > 0 && <Break />}
-              <div style={{ display: "grid", gridTemplateColumns: "38px 1fr 150px", columnGap: 12, alignItems: "baseline", padding: "13px 14px", borderBottom: `1px solid ${T.line}` }}>
+              <div className="pd-t" style={{ display: "grid", gridTemplateColumns: "38px 1fr 150px", columnGap: 12, alignItems: "baseline", padding: "13px 14px", borderBottom: `1px solid ${T.line}` }}>
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: T.soft, fontVariantNumeric: "tabular-nums" }}>{String(i + 1).padStart(2, "0")}</span>
                 <span style={{ fontSize: 13.5, lineHeight: 1.5, color: T.ink }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span>
                 <span style={{ fontSize: 13.5, fontWeight: 600, color: has(it.value) ? T.ink : T.soft, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{money(it.value, m.currency) || "—"}</span>
@@ -721,7 +775,7 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
 
             {/* RESUMO FINANCEIRO — separado da tabela, alinhado à direita */}
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
-              <div style={{ width: 300 }}>
+              <div className="pd-w100" style={{ width: 300 }}>
                 {/* Sem campo de desconto/imposto no modelo de dados, repetir
                     "Subtotal" igual ao total é ruído. Some quando não informa nada. */}
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 14px", fontSize: 13, color: T.sub, borderBottom: `1px solid ${T.line}` }}>
@@ -761,7 +815,7 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
         {conds.length > 0 && (<>
           <Break />
           <ConsSec n={next()} title="Condições comerciais" c={A.head} line={T.ink}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 30, rowGap: 15 }}>
+            <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 30, rowGap: 15 }}>
               {conds.map(([k, v]) => (
                 <div key={k} style={{ borderLeft: `2px solid ${T.border}`, paddingLeft: 13 }}>
                   <div style={lbl}>{k}</div>
@@ -780,7 +834,7 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
 
         {/* APROVAÇÃO */}
         <ConsSec n={next()} title="Aprovação" c={A.head} line={T.ink}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, marginBottom: 26 }}>
+          <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, marginBottom: 26 }}>
             {[[m.brand || "Responsável", "Contratada"], [m.client || "Cliente", "Contratante"]].map(([nome, papel], i) => (
               <div key={i}>
                 <div style={{ height: 40 }} />
@@ -827,7 +881,7 @@ const EST_THEMES = ["claro", "escuro"];
 function EstSec({ n, label, children, line, soft }) {
   return (<>
     <Break />
-    <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 40, paddingTop: 30, marginTop: 30, borderTop: `1px solid ${line}` }}>
+    <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 40, paddingTop: 30, marginTop: 30, borderTop: `1px solid ${line}` }}>
       <div style={{ paddingTop: 4 }}>
         {n && <div style={{ fontFamily: font.heading, fontSize: 12, fontWeight: 700, color: soft, marginBottom: 6, fontVariantNumeric: "tabular-nums" }}>{n}</div>}
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: soft }}>{label}</div>
@@ -887,7 +941,7 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
     <Sheet bg={T.bg} ink={T.ink} print={print}>
 
       {/* ── PÁGINA 1: CAPA ─────────────────────────────────────────────── */}
-      <div style={{ position: "relative", boxSizing: "border-box", color: capaInk, ...capaBg,
+      <div className="pd-pad pd-cover" style={{ position: "relative", boxSizing: "border-box", color: capaInk, ...capaBg,
         minHeight: print ? PAGE_H : 660, padding: "56px 56px 44px", display: "flex", flexDirection: "column" }}>
 
         {/* sonda de carregamento — invisível, só para saber se a foto existe */}
@@ -900,8 +954,12 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
             não um enfeite que serve para um projeto e mente em todos os outros.
             Sem nome de empresa, sobra a grade e o monograma — nunca um desenho
             genérico. */}
+        {/* A grade, o wordmark sangrado e os contadores são composição de uma
+            PÁGINA A4. Em 390px eles se sobrepõem ao sumário e ao título em vez
+            de compor — então somem no celular e ficam a marca, o sumário, o
+            título e as datas, que é o que a pessoa precisa ler. */}
         {!hasCover && (
-          <div aria-hidden="true" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+          <div aria-hidden="true" className="pd-hide" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
             {/* grade: quatro fios verticais, o ritmo do documento exposto */}
             {[0.2, 0.4, 0.6, 0.8].map((x) => (
               <div key={x} style={{ position: "absolute", top: 0, height: bigWord ? "58%" : "46%", left: `${x * 100}%`, width: 1, background: rule, opacity: 0.5 }} />
@@ -910,13 +968,13 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
 
             {/* wordmark em escala de capa, cortado pela margem */}
             {bigWord ? (
-              <div style={{ position: "absolute", left: 56, top: "34%", opacity: 0.15, fontFamily: font.heading, fontWeight: 900, fontSize: 124, lineHeight: 0.86, letterSpacing: "-0.065em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+              <div className="pd-d1" style={{ position: "absolute", left: 56, top: "34%", opacity: 0.15, fontFamily: font.heading, fontWeight: 900, fontSize: 124, lineHeight: 0.86, letterSpacing: "-0.065em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
                 {bigWord}
               </div>
             ) : null}
 
             {/* âncora de leitura: quantas entregas e o ano, em microtipografia */}
-            <div style={{ position: "absolute", left: 56, top: "31%", marginTop: -26, display: "flex", gap: 26, fontSize: 10, fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.6 }}>
+            <div className="pd-wrap" style={{ position: "absolute", left: 56, top: "31%", marginTop: -26, display: "flex", gap: 26, fontSize: 10, fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.6 }}>
               {m.items.length > 0 && <span>{String(m.items.length).padStart(2, "0")} entregas</span>}
               {secs.length > 0 && <span>{String(secs.length).padStart(2, "0")} seções</span>}
             </div>
@@ -936,7 +994,7 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
         )}
 
         <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 32 }}>
+          <div className="pd-g" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 32 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <Wordmark doc={doc} h={26} ink={capaInk} />
               <span style={{ fontSize: 14, fontWeight: 600 }}>{m.brand || "Seu estúdio"}</span>
@@ -945,7 +1003,7 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
             {/* Sem foto, o sumário ocupa o alto da capa. Com foto, a imagem já
                 preenche e o texto pequeno por cima dela só sujaria. */}
             {!hasCover && secs.length > 0 ? (
-              <div style={{ textAlign: "right", flex: "none", minWidth: 190 }}>
+              <div className="pd-w100" style={{ textAlign: "right", flex: "none", minWidth: 190 }}>
                 <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", opacity: 0.6, marginBottom: 14 }}>Nesta proposta</div>
                 {secs.map(([k, label], i) => (
                   <div key={k} style={{ display: "flex", justifyContent: "flex-end", alignItems: "baseline", gap: 10, padding: "5px 0", borderTop: i ? `1px solid ${rule}` : "none" }}>
@@ -964,12 +1022,12 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.8, marginBottom: 18 }}>
             Para <Ed onEdit={onEdit} field="client">{m.client || "cliente"}</Ed>
           </div>
-          <h2 style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 62, lineHeight: 0.98, letterSpacing: "-0.045em", margin: "0 0 52px", maxWidth: 620, textShadow: hasCover ? "0 2px 24px rgba(0,0,0,.45)" : "none" }}>
+          <h2 className="pd-d2" style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 62, lineHeight: 0.98, letterSpacing: "-0.045em", margin: "0 0 52px", maxWidth: 620, textShadow: hasCover ? "0 2px 24px rgba(0,0,0,.45)" : "none" }}>
             <Ed onEdit={onEdit} field="title">{m.title || "Título da proposta"}</Ed>
           </h2>
 
           {metaCapa.length > 0 && (
-            <div style={{ display: "flex", gap: 44, paddingTop: 24, borderTop: `1px solid ${rule}` }}>
+            <div className="pd-wrap" style={{ display: "flex", gap: 44, paddingTop: 24, borderTop: `1px solid ${rule}` }}>
               {metaCapa.map(([k, v]) => (
                 <div key={k}>
                   <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.72 }}>{k}</div>
@@ -983,9 +1041,9 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
       <Break hard />
 
       {/* ── PÁGINAS INTERNAS ───────────────────────────────────────────── */}
-      <div style={{ padding: "54px 56px 48px" }}>
+      <div className="pd-pad" style={{ padding: "54px 56px 48px" }}>
         {has(m.scope) && (
-          <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 40 }}>
+          <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 40 }}>
             <div style={{ paddingTop: 4 }}>
               {nOf("scope") && <div style={{ fontFamily: font.heading, fontSize: 12, fontWeight: 700, color: T.soft, marginBottom: 6, fontVariantNumeric: "tabular-nums" }}>{nOf("scope")}</div>}
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: T.soft }}>Sobre o projeto</div>
@@ -1003,8 +1061,8 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
             {m.items.map((it, i) => (
               <React.Fragment key={i}>
               {i > 0 && <Break />}
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 24, padding: "20px 0", borderBottom: i < m.items.length - 1 ? `1px solid ${T.line}` : "none" }}>
-                <span style={{ fontFamily: font.heading, fontSize: 46, fontWeight: 900, lineHeight: 0.82, letterSpacing: "-0.05em", color: ghost, flex: "none", width: 72 }}>
+              <div className="pd-wrap" style={{ display: "flex", alignItems: "flex-start", gap: 24, padding: "20px 0", borderBottom: i < m.items.length - 1 ? `1px solid ${T.line}` : "none" }}>
+                <span className="pd-d3" style={{ fontFamily: font.heading, fontSize: 46, fontWeight: 900, lineHeight: 0.82, letterSpacing: "-0.05em", color: ghost, flex: "none", width: 72 }}>
                   {String(i + 1).padStart(2, "0")}
                 </span>
                 <span style={{ flex: 1, fontSize: 19, fontWeight: 600, lineHeight: 1.35, letterSpacing: "-0.015em", color: T.ink, paddingTop: 4 }}>
@@ -1019,21 +1077,21 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
           </EstSec>
 
           {/* total como protagonista */}
-          <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 40, marginTop: 34 }}>
+          <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 40, marginTop: 34 }}>
             <div style={{ paddingTop: 20 }}>
               {nOf("total") && <div style={{ fontFamily: font.heading, fontSize: 12, fontWeight: 700, color: T.soft, marginBottom: 6, fontVariantNumeric: "tabular-nums" }}>{nOf("total")}</div>}
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: T.soft }}>Investimento</div>
             </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
               <span style={{ fontFamily: font.heading, fontSize: 24, fontWeight: 700, color: A.head }}>{tot.sym}</span>
-              <span style={{ fontFamily: font.heading, fontSize: 60, fontWeight: 900, lineHeight: 1, letterSpacing: "-0.05em", color: A.head, fontVariantNumeric: "tabular-nums" }}>{tot.num}</span>
+              <span className="pd-d2" style={{ fontFamily: font.heading, fontSize: 60, fontWeight: 900, lineHeight: 1, letterSpacing: "-0.05em", color: A.head, fontVariantNumeric: "tabular-nums" }}>{tot.num}</span>
             </div>
           </div>
         </>)}
 
         {conds.length > 0 && (
           <EstSec n={nOf("conds")} label="Condições" line={T.line} soft={T.soft}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28 }}>
+            <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28 }}>
               {conds.map(([k, v]) => (
                 <div key={k}>
                   <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: T.soft }}>{k}</div>
@@ -1072,7 +1130,7 @@ function Minimal({ doc, accent, onAccept, onEdit, print }) {
     <Sheet bg={T.bg} ink={T.ink} print={print}>
     <div style={{ background: T.bg, color: T.ink, overflow: "hidden", overflowWrap: "anywhere", wordBreak: "break-word" }}>
       <div style={{ height: 5, background: accent }} />
-      <div style={{ padding: "43px 48px 48px" }}>
+      <div className="pd-pad" style={{ padding: "43px 48px 48px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 26 }}>
           <Mono doc={doc} bg={deep} fg={btnText(deep)} />
           <div style={{ textAlign: "right" }}>
@@ -1104,7 +1162,7 @@ function Minimal({ doc, accent, onAccept, onEdit, print }) {
         </>)}
 
         {dates.length > 0 && (
-          <div style={{ display: "flex", gap: 24, marginBottom: 24 }}>
+          <div className="pd-wrap" style={{ display: "flex", gap: 24, marginBottom: 24 }}>
             {dates.map(([k, v]) => (
               <div key={k}><div style={{ fontSize: "11.5px", color: T.soft, marginBottom: 3 }}>{k}</div><div style={{ fontSize: 14, fontWeight: 600, color: T.ink }}>{v}</div></div>
             ))}
@@ -1134,15 +1192,15 @@ function Bold({ doc, accent, onAccept, onEdit, print }) {
   return (
     <Sheet bg={T.bg} ink={T.ink} print={print}>
     <div style={{ background: T.bg, color: T.ink, overflow: "hidden", overflowWrap: "anywhere", wordBreak: "break-word" }}>
-      <div style={{ background: accentFill(doc, accent), color: btnText(accent), padding: "37px 43px 40px" }}>
+      <div className="pd-pad" style={{ background: accentFill(doc, accent), color: btnText(accent), padding: "37px 43px 40px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           <Mono doc={doc} size={34} radius={9} bg="rgba(255,255,255,0.18)" />
           <div style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.85 }}>Proposta</div>
         </div>
         <div style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", opacity: 0.85, marginBottom: 8 }}>Para <Ed onEdit={onEdit} field="client">{doc.client || "cliente"}</Ed>{has(doc.company) ? ` · ${doc.company}` : ""}</div>
-        <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 30, lineHeight: 1.02, letterSpacing: "-0.03em" }}><Ed onEdit={onEdit} field="title">{doc.title || "Título da proposta"}</Ed></div>
+        <div className="pd-d3" style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 30, lineHeight: 1.02, letterSpacing: "-0.03em" }}><Ed onEdit={onEdit} field="title">{doc.title || "Título da proposta"}</Ed></div>
       </div>
-      <div style={{ padding: "34px 43px 43px" }}>
+      <div className="pd-pad" style={{ padding: "34px 43px 43px" }}>
         {has(doc.scope) && <p style={{ fontSize: 14, lineHeight: 1.6, color: T.sub, margin: "0 0 22px" }}><Ed onEdit={onEdit} field="scope">{doc.scope}</Ed></p>}
         {items.length > 0 && (<>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
@@ -1154,7 +1212,7 @@ function Bold({ doc, accent, onAccept, onEdit, print }) {
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 22 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: T.sub }}>Total</span>
-            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 34, letterSpacing: "-0.03em", color: accentInkFor(accent, T), fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
+            <span className="pd-d3" style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 34, letterSpacing: "-0.03em", color: accentInkFor(accent, T), fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
           </div>
         </>)}
         {chips.length > 0 && (
@@ -1190,7 +1248,7 @@ function Editorial({ doc, accent, onAccept, onEdit, print }) {
   return (
     <Sheet bg={T.bg} ink={T.ink} print={print}>
     <div style={{ background: T.bg, color: T.ink, overflow: "hidden", overflowWrap: "anywhere", wordBreak: "break-word" }}>
-      <div style={{ background: soft, padding: "34px 45px 31px", borderBottom: `1px solid ${hairFor(accent, T)}` }}>
+      <div className="pd-pad" style={{ background: soft, padding: "34px 45px 31px", borderBottom: `1px solid ${hairFor(accent, T)}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <Mono doc={doc} size={30} radius={7} bg={deep} fg={btnText(deep)} />
@@ -1203,8 +1261,8 @@ function Editorial({ doc, accent, onAccept, onEdit, print }) {
       </div>
       <h2 style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 27, lineHeight: 1.12, letterSpacing: "-0.02em", margin: "16px 0 0", color: doc.title ? deep : T.soft }}><Ed onEdit={onEdit} field="title">{doc.title || "Título da proposta"}</Ed></h2>
       </div>
-      <div style={{ padding: "31px 45px 45px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${meta.length}, 1fr)`, gap: 14, marginBottom: 20 }}>
+      <div className="pd-pad" style={{ padding: "31px 45px 45px" }}>
+      <div className="pd-g2" style={{ display: "grid", gridTemplateColumns: `repeat(${meta.length}, 1fr)`, gap: 14, marginBottom: 20 }}>
         {meta.map(([k, v]) => (
           <div key={k}><div style={{ fontSize: "10.5px", letterSpacing: "0.06em", textTransform: "uppercase", color: T.soft, marginBottom: 3 }}>{k}</div><div style={{ fontSize: "13.5px", fontWeight: 600, color: T.ink }}>{v}</div></div>
         ))}
@@ -1259,12 +1317,12 @@ function Colorido({ doc, accent, onAccept, onEdit, print }) {
   return (
     <Sheet bg={T.bg} ink={T.ink} print={print}>
     <div style={{ background: T.bg, color: T.ink, overflow: "hidden", overflowWrap: "anywhere", wordBreak: "break-word" }}>
-      <div style={{ background: headBg, color: btnText(accent), padding: "43px 43px 48px" }}>
+      <div className="pd-pad" style={{ background: headBg, color: btnText(accent), padding: "43px 43px 48px" }}>
         <Mono doc={doc} size={44} radius={12} bg="rgba(255,255,255,0.22)" />
         <div style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", opacity: 0.9, margin: "22px 0 6px" }}>Proposta para <Ed onEdit={onEdit} field="client">{doc.client || "cliente"}</Ed></div>
         <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 28, lineHeight: 1.04, letterSpacing: "-0.03em" }}><Ed onEdit={onEdit} field="title">{doc.title || "Título da proposta"}</Ed></div>
       </div>
-      <div style={{ padding: "34px 43px 43px" }}>
+      <div className="pd-pad" style={{ padding: "34px 43px 43px" }}>
         {has(doc.scope) && <p style={{ fontSize: 14, lineHeight: 1.6, color: T.sub, margin: "0 0 22px" }}><Ed onEdit={onEdit} field="scope">{doc.scope}</Ed></p>}
         {items.length > 0 && (
           <div style={{ background: soft, borderRadius: 14, padding: "23px 26px", marginBottom: 20 }}>
@@ -1322,7 +1380,7 @@ function Capa({ doc, accent, onAccept, onEdit, print }) {
           </div>
         )}
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.38) 52%, rgba(0,0,0,0.74) 100%)" }} />
-        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "31px 34px", color: "#fff" }}>
+        <div className="pd-pad" style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "31px 34px", color: "#fff" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
             {doc.logo
               ? <img src={doc.logo} alt="" style={{ width: 30, height: 30, borderRadius: 8, objectFit: "cover", display: "block" }} />
@@ -1332,7 +1390,7 @@ function Capa({ doc, accent, onAccept, onEdit, print }) {
           <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 25, lineHeight: 1.05, letterSpacing: "-0.02em", textShadow: "0 2px 12px rgba(0,0,0,0.35)" }}><Ed onEdit={onEdit} field="title">{doc.title || "Título da proposta"}</Ed></div>
         </div>
       </div>
-      <div style={{ padding: "34px 37px 37px" }}>
+      <div className="pd-pad" style={{ padding: "34px 37px 37px" }}>
         {has(doc.scope) && (<>
           <div style={kicker(deep)}>Escopo</div>
           <p style={{ fontSize: 14, lineHeight: 1.6, color: T.sub, margin: "0 0 22px" }}><Ed onEdit={onEdit} field="scope">{doc.scope}</Ed></p>
@@ -1352,7 +1410,7 @@ function Capa({ doc, accent, onAccept, onEdit, print }) {
           </div>
         </>)}
         {dates.length > 0 && (
-          <div style={{ display: "flex", gap: 24, marginBottom: 22 }}>
+          <div className="pd-wrap" style={{ display: "flex", gap: 24, marginBottom: 22 }}>
             {dates.map(([k, v]) => (<div key={k}><div style={{ fontSize: "11.5px", color: T.soft, marginBottom: 3 }}>{k}</div><div style={{ fontSize: 14, fontWeight: 600, color: T.ink }}>{v}</div></div>))}
           </div>
         )}
@@ -1390,12 +1448,12 @@ function Dossie({ doc, accent, onAccept, onEdit, print }) {
           </div>
         )}
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(14,14,14,0.96) 100%)" }} />
-        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "37px 37px" }}>
+        <div className="pd-pad" style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "37px 37px" }}>
           <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: onDark(accent), marginBottom: 10 }}>Proposta · <Ed onEdit={onEdit} field="client">{doc.client || "cliente"}</Ed></div>
           <div style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 27, lineHeight: 1.02, letterSpacing: "-0.01em", textTransform: "uppercase" }}><Ed onEdit={onEdit} field="title">{doc.title || "Título da proposta"}</Ed></div>
         </div>
       </div>
-      <div style={{ padding: "34px 37px 40px" }}>
+      <div className="pd-pad" style={{ padding: "34px 37px 40px" }}>
         {has(doc.scope) && <p style={{ fontSize: 14, lineHeight: 1.65, color: "#C9C9CE", margin: "0 0 22px" }}><Ed onEdit={onEdit} field="scope">{doc.scope}</Ed></p>}
         {items.length > 0 && (<>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
@@ -1407,7 +1465,7 @@ function Dossie({ doc, accent, onAccept, onEdit, print }) {
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 22, background: darken(accent, 0.72), border: `1px solid ${darken(accent, 0.5)}`, borderRadius: 10, padding: "17px 21px" }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "#B9B9C0" }}>Total</span>
-            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 32, letterSpacing: "-0.03em", color: onDark(accent), fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
+            <span className="pd-d3" style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 32, letterSpacing: "-0.03em", color: onDark(accent), fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
           </div>
         </>)}
         {chips.length > 0 && (
@@ -1439,8 +1497,8 @@ function Aurora({ doc, accent, onAccept, onEdit, print }) {
   const glass = T.dark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.72)";
   return (
     <Sheet bg={T.bg} ink={T.ink} print={print}>
-    <div style={{ position: "relative", background: `linear-gradient(165deg, ${accent}22 0%, ${T.bg} 42%, ${a2}18 100%)`, color: T.ink, padding: "43px 43px 40px", overflow: "hidden", overflowWrap: "anywhere", wordBreak: "break-word", boxShadow: "0 16px 48px -20px rgba(20,20,30,0.22)" }}>
-      <div style={{ position: "absolute", top: -70, right: -70, width: 200, height: 200, borderRadius: "50%", background: `radial-gradient(circle, ${a2}33 0%, transparent 70%)`, pointerEvents: "none" }} />
+    <div className="pd-pad" style={{ position: "relative", background: `linear-gradient(165deg, ${accent}22 0%, ${T.bg} 42%, ${a2}18 100%)`, color: T.ink, padding: "43px 43px 40px", overflow: "hidden", overflowWrap: "anywhere", wordBreak: "break-word", boxShadow: "0 16px 48px -20px rgba(20,20,30,0.22)" }}>
+      <div className="pd-w100" style={{ position: "absolute", top: -70, right: -70, width: 200, height: 200, borderRadius: "50%", background: `radial-gradient(circle, ${a2}33 0%, transparent 70%)`, pointerEvents: "none" }} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <Mono doc={doc} size={40} radius={13} bg={deep} fg={btnText(deep)} />
         <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: btnText(accent), background: accentFill(doc, accent), borderRadius: 999, padding: "9px 17px" }}>Proposta</span>
@@ -1493,18 +1551,18 @@ function Poster({ doc, accent, onAccept, onEdit, print }) {
   return (
     <Sheet bg={T.bg} ink={T.ink} print={print}>
     <div style={{ background: T.bg, color: T.ink, overflow: "hidden", overflowWrap: "anywhere", wordBreak: "break-word" }}>
-      <div style={{ position: "relative", background: coverBg, color: "#fff", padding: "48px 43px 45px", overflow: "hidden" }}>
-        <div aria-hidden="true" style={{ position: "absolute", right: -40, bottom: -60, width: 200, height: 200, borderRadius: "50%", background: "rgba(255,255,255,0.08)", pointerEvents: "none" }} />
+      <div className="pd-pad" style={{ position: "relative", background: coverBg, color: "#fff", padding: "48px 43px 45px", overflow: "hidden" }}>
+        <div className="pd-w100" aria-hidden="true" style={{ position: "absolute", right: -40, bottom: -60, width: 200, height: 200, borderRadius: "50%", background: "rgba(255,255,255,0.08)", pointerEvents: "none" }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
           <Mono doc={doc} size={32} radius={9} bg="rgba(255,255,255,0.2)" />
           <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", opacity: 0.9 }}>Proposta comercial</span>
         </div>
-        <div style={{ position: "relative", fontFamily: font.heading, fontWeight: 900, fontSize: 38, lineHeight: 0.98, letterSpacing: "-0.035em", textTransform: "uppercase", marginBottom: 16 }}><Ed onEdit={onEdit} field="title">{doc.title || "Título da proposta"}</Ed></div>
+        <div className="pd-d3" style={{ position: "relative", fontFamily: font.heading, fontWeight: 900, fontSize: 38, lineHeight: 0.98, letterSpacing: "-0.035em", textTransform: "uppercase", marginBottom: 16 }}><Ed onEdit={onEdit} field="title">{doc.title || "Título da proposta"}</Ed></div>
         <span style={{ position: "relative", display: "inline-block", fontSize: "13px", fontWeight: 700, letterSpacing: "0.02em", color: darken(accent, 0.2), background: "#fff", borderRadius: 999, padding: "10px 23px" }}>
           <Ed onEdit={onEdit} field="client">{doc.client || "Cliente"}</Ed>{has(doc.company) ? ` · ${doc.company}` : ""}
         </span>
       </div>
-      <div style={{ padding: "37px 43px 43px" }}>
+      <div className="pd-pad" style={{ padding: "37px 43px 43px" }}>
         {has(doc.scope) && <p style={{ fontSize: 14, lineHeight: 1.65, color: T.sub, margin: "0 0 22px" }}><Ed onEdit={onEdit} field="scope">{doc.scope}</Ed></p>}
         {items.length > 0 && (<>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
@@ -1516,7 +1574,7 @@ function Poster({ doc, accent, onAccept, onEdit, print }) {
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 22, background: panelFor(accent, T), borderRadius: 10, padding: "17px 21px" }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: deep }}>Total</span>
-            <span style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 30, letterSpacing: "-0.03em", color: deep, fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
+            <span className="pd-d3" style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 30, letterSpacing: "-0.03em", color: deep, fontVariantNumeric: "tabular-nums" }}>{fmt(total, doc.currency)}</span>
           </div>
         </>)}
         {dates.length > 0 && (
