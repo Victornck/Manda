@@ -14,6 +14,212 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.10.1] — 2026-09-22
+
+### Adicionado
+- **Filtros "Gratuitos" e "Premium" na galeria de modelos.** Ficam na mesma
+  barra, depois de um fio que separa os dois eixos: estilo (Essenciais,
+  Editoriais…) responde "que cara tem", plano responde "eu posso usar". Os dois
+  combinam, e as contagens se cruzam — com "Gratuitos" ligado, "Essenciais"
+  mostra 1, não 3. Clicar de novo no chip aceso desliga o filtro.
+- Categoria que fica sem nenhum modelo no plano escolhido vira não clicável, e
+  se isso acontecer com a categoria que já estava ativa ela volta para "Todos".
+  Sem isso dava para chegar numa grade vazia sem saber qual dos dois filtros
+  tinha causado.
+
+### Alterado
+- **A lista de modelos gratuitos deixou de existir em duplicata no front.** Era
+  `const BASIC_TPL_IDS = ["minimal", "bold"]` dentro do Dashboard, com um
+  comentário dizendo que "espelha o plano Básico do backend" — ou seja, uma
+  segunda fonte da verdade esperando divergir. Agora o registro dos modelos
+  marca `free: true` e o cadeado e o filtro leem dali. Quem decide quem pode
+  usar o quê continua sendo o servidor.
+- **Teste novo (`test/unit/plan-templates.test.js`)** que quebra se a galeria e
+  o `BASIC_TEMPLATES` do servidor discordarem sobre quais modelos são
+  gratuitos. Divergir significa, na prática, ou oferecer um modelo que o
+  servidor vai recusar na hora de salvar, ou esconder um que é grátis.
+  Verificado que ele falha quando a divergência é introduzida.
+
+---
+
+## [0.10.0] — 2026-09-22
+
+### Alterado
+- **A Carta deixou de ser uma carta e virou apresentação comercial.** Era papel
+  timbrado: serifada, "Ao cuidado de", prosa em medida curta, bom para advogado
+  e fraco para quem vende pacote de conteúdo — que é quem usa este app. O `id`
+  continua `carta` (banco, métricas e gating dependem dele); o que mudou é o
+  desenho.
+  Estrutura nova, na ordem: capa com manchete de duas linhas em caixa alta e
+  caixa-resumo com cliente de um lado e investimento com a data do outro;
+  "Quem apresenta"; tabela de serviços com cabeçalho sombreado e linhas
+  zebradas; "Investimento" em faixas, fechando com o valor total em faixa de
+  tinta cheia; "Condições"; e "Aprovação". Barra de tinta no topo e rodapé
+  corrido, como na referência.
+- **O bloco de assinatura foi preservado.** É o único dos 12 que tem um, e é o
+  que faz o documento valer como aceite no papel. Mudou de lugar: agora mora
+  dentro do bloco de aprovação, no encerramento.
+- **A tabela se adapta quando a coluna Quantidade está desligada.** A grade é
+  declarada num lugar só — três colunas com quantidade, duas sem — então
+  cabeçalho e linhas nunca saem de alinhamento e não sobra célula vazia.
+- **Ela deixou de se chamar Carta.** Agora é **Agência · Pacote de conteúdo**,
+  e saiu da prateleira "Editoriais" para "Corporativos" — não é mais um modelo
+  editorial serifado, é um documento comercial estruturado. O `id` segue
+  `carta`; nome, subnome e categoria são só vitrine.
+- **A capa do exemplo passou a ser branca**, não mais o papel creme. O creme
+  combinava com a carta timbrada; com a barra de tinta no topo e as faixas
+  cinza, o branco é o fundo certo. O tema creme continua disponível para quem
+  quiser escolher. A cor de destaque padrão do modelo saiu do marrom quente
+  (que existia para casar com o creme) para um cinza neutro.
+- **O exemplo da galeria deixou de ser uma proposta de advocacia.** Passou a ser
+  um pacote de conteúdo mensal, com a coluna de quantidade ligada — que é o que
+  o card precisa mostrar agora que o modelo se chama Agência. É só o exemplo da
+  vitrine; nenhuma proposta real foi tocada.
+- **A tipografia continua a do app** (Satoshi / General Sans), não a Arial da
+  referência. Uma fonte estranha só neste modelo pareceria erro de carregamento
+  ao lado dos outros onze, e o rasterizador do PDF já é sensível a fonte que não
+  carrega. O que veio da referência foi o tratamento: manchete pesada em caixa
+  alta, faixas cinza, barra no topo, rodapé corrido.
+
+### Adicionado
+- **Data de emissão na capa.** Já existia em `proposals.created_at` desde a
+  `001` e a rota do dono já a devolvia; faltava na vista pública, então o
+  cliente veria a capa sem data enquanto o dono via com. Uma linha em
+  `routes/public.js`. Nenhum campo novo, nenhum dado inventado.
+
+### Corrigido
+- **Criar proposta voltava "Erro interno do servidor".** Quando a coluna
+  `show_qty` entrou no `insert into proposals`, o nome da coluna e o valor
+  foram acrescentados, mas a lista de placeholders parou no `$25`: 26 colunas
+  para 25 expressões. O Postgres recusa a query inteira e a API devolve 500.
+  O `update` estava correto, então **editar** um rascunho funcionava e só
+  **criar** quebrava. Nunca chegou a produção — a 0.9.0 não foi publicada —
+  mas quebrava para quem rodasse o backend local contra o banco real.
+- **Teste novo (`test/unit/sql-shape.test.js`)** para essa classe de erro, que
+  o JavaScript não pega em tempo nenhum: confere que colunas, placeholders e
+  valores do `insert` batem, que os `$n` formam uma sequência sem buraco, que o
+  `update` passa tantos valores quanto o maior placeholder, e que toda coluna
+  gravada na criação também é gravada na edição. Verificado que ele falha quando
+  o bug é reintroduzido.
+
+### Observação
+- Os outros 11 modelos não foram tocados: verificado pixel a pixel, só a Carta
+  mudou.
+- Paginação do PDF conferida em 5 cenários: nenhuma linha de tabela é cortada
+  ao meio e nenhum título de seção fica sozinho no fim da página (o marcador de
+  quebra vai ANTES do título, nunca depois).
+- **Repetir o cabeçalho da tabela quando ela passa de uma página não é possível
+  com o exportador atual.** Ele fotografa o documento inteiro e fatia a imagem,
+  então não há como injetar uma linha nova no meio do corte. Seria preciso
+  trocar o pipeline por um que desenhe o PDF em vetor.
+
+---
+
+## [0.9.1] — 2026-09-22
+
+### Alterado
+- **O botão "Aceitar proposta" não vai mais no PDF exportado.** Num arquivo não
+  há onde clicar: o botão ocupava espaço e sugeria uma ação que o papel não
+  entrega. Ele continua inteiro na tela — na prévia do editor, na proposta
+  pública que o cliente abre pelo link, na miniatura da galeria e na prévia do
+  modelo — e a funcionalidade de aceitar não foi tocada.
+  Para isso os dois sinais foram separados. `print` continua significando
+  "desenha como folha nua, sem sombra nem canto arredondado", e vale para o PDF
+  mas TAMBÉM para a miniatura e a prévia. O sinal novo, `pdf`, significa "este
+  render vai virar arquivo" e é marcado só nos dois nós escondidos de
+  exportação (o do editor e o da lista de propostas). Se o botão fosse escondido
+  por `print`, a galeria inteira mudaria junto.
+  Sai só o BOTÃO: título de seção, bloco de assinatura e os textos em volta
+  continuam no PDF. Verificado nos 12 modelos, em 5 cenários de conteúdo: tudo
+  o que está acima do botão sai pixel a pixel igual nas duas versões (a única
+  exceção é o Aurora, cujo fundo é um degradê de altura inteira e portanto se
+  recalcula quando a página encolhe — diferença máxima de 3 em 255).
+- **O controle da coluna Quantidade virou uma chave liga/desliga.** Era um botão
+  com "#" que ficava aceso quando ativo, o que não deixava claro se era um
+  filtro, uma aba ou um interruptor. Agora é o mesmo `.db-sw` que o app já usa
+  em "Usar gradiente" e na renovação automática: pílula de 42×24, cor de
+  destaque quando ligada, cinza quando desligada, com transição de 180ms no
+  trilho e no botão (e desligada por completo sob `prefers-reduced-motion`,
+  que a regra já existente cobre). O "#" saiu, junto com o ícone que ninguém
+  mais usava.
+- **Proposta nova nasce com a coluna ligada.** O item inicial já vem com
+  quantidade 1, e itens vindos da calculadora de preço também.
+  **Proposta que já existe continua como foi salva** — abrir uma proposta
+  antiga não liga a coluna sozinha. Ligar mudaria o documento sem ninguém
+  pedir e, como a quantidade multiplica, mexeria no total de uma proposta já
+  enviada.
+
+---
+
+## [0.9.0] — 2026-09-22
+
+### Adicionado
+- **Coluna Quantidade nos itens da proposta — opcional, por proposta.** Fica
+  desligada por padrão e, enquanto estiver desligada, a proposta continua
+  exatamente como sempre foi: ITEM e VALOR. Ligada pelo botão "Quantidade" na
+  seção Investimento do editor, a proposta passa a mostrar QUANTIDADE, ITEM e
+  VALOR, e o valor digitado no item passa a ser o preço **por unidade** — a
+  linha mostra o total dela (quantidade × unitário) e o total geral soma isso.
+  Migração `024`: uma coluna booleana `proposals.show_qty`, default `false`.
+  A quantidade de cada item não precisou de coluna: `proposals.items` já é
+  `jsonb` desde a `001`, então cada item passou a poder levar um campo `qty`.
+- **Cada modelo mostra a quantidade no idioma dele.** Onde a lista de itens já
+  era tabela (Técnico e Consultoria), a coluna de índice dá lugar à quantidade e
+  o cabeçalho vira QTD · DESCRIÇÃO · VALOR — continua com três colunas, sem
+  mexer na largura nem no refluxo de celular. Nos que não são tabela (Carta com
+  linha pontilhada, Estúdio com numeral gigante, e os oito herdados), a
+  quantidade entra colada ao nome, como "3× Vídeo institucional". Em todos, uma
+  linha miúda embaixo do item mostra de onde saiu o total ("R$ 240 × 3") sempre
+  que a quantidade for maior que 1.
+
+### Observação sobre compatibilidade
+- Item sem `qty` vale 1 — que é o caso de **toda** proposta anterior a esta
+  versão. Por isso ligar a coluna numa proposta antiga não muda o total dela:
+  só acrescenta a coluna, com 1 em cada linha.
+- Desligar a coluna **não apaga** as quantidades já digitadas; só para de
+  aplicá-las. Desligar devolve o total anterior, e religar traz de volta o que a
+  pessoa tinha posto.
+- Verificado modelo a modelo: com a coluna desligada, os 12 renderizam **pixel a
+  pixel** o mesmo que renderizavam antes desta versão. As quebras de página do
+  PDF continuam caindo nos marcadores declarados, e os 12 seguem sem estouro
+  lateral em 360px e 390px.
+- A conta mora em `lib/items.js`, com uma cópia gêmea no backend e outra no
+  front, porque são dois pacotes npm separados. É a mesma regra que grava
+  `proposals.value` e que desenha o total na proposta — elas têm de bater.
+
+---
+
+## [0.8.4] — 2026-09-16
+
+### Adicionado
+- **`users.proposals_count`** (migração `023`): contagem real de propostas por
+  usuário, mantida em dia por trigger em `proposals` (insert, delete e troca de
+  dono). Usa a chave estrangeira que já existia, `proposals.user_id → users.id`.
+  O backfill preenche os usuários atuais; quem não tem proposta fica em `0`.
+  RLS já estava habilitado em `users` desde a `003_security`; nenhuma policy foi
+  criada, removida ou alterada.
+  **Não é a cota do plano.** A cota continua vindo de `proposal_usage`, que é
+  append-only de propósito — apagar proposta não devolve cota. Esta coluna cai
+  quando o usuário exclui uma proposta, então não serve para cobrança.
+
+---
+
+## [0.8.3] — 2026-09-16
+
+### Alterado
+- **A mensagem pronta pro cliente foi reescrita no tom de quem manda a
+  proposta.** A anterior era uma linha de saudação com emoji, o link e um
+  "qualquer dúvida" — não dizia ao cliente o que fazer depois de abrir. Agora
+  abre pelo primeiro nome, entrega o link, explica que o aceite é o botão no
+  fim da proposta, oferece ajuste e fecha agradecendo. Os blocos vão separados
+  por linha em branco, que é como o WhatsApp respira: um parágrafo único de
+  seis linhas ninguém lê até o fim. Sem nome de cliente a frase começa direto
+  ("Preparei sua proposta..."), o nome sai com inicial maiúscula mesmo se
+  digitado em caixa baixa, e tratamento leva o nome junto — antes
+  "Dr. Henrique Salles" virava "Dr." sozinho.
+
+---
+
 ## [0.8.2] — 2026-09-16
 
 ### Corrigido

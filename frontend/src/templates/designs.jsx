@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { font, color } from "../theme.js";
 import { formatMoney } from "../lib/currency.js";
+import { qtyOf, lineTotal, sumItems } from "../lib/items.js";
 
 /* ════════════════════════════════════════════════════════════════════════════
    FUNDAÇÃO DO SISTEMA DE DOCUMENTOS
@@ -173,10 +174,47 @@ export function PageThumb({ children, width, maxPages = 1 }) {
 
 export const has = (v) => v != null && String(v).trim() !== "";
 const filledItems = (doc) => (doc.items || []).filter((it) => !it.hidden && (has(it.desc) || has(it.value)));
-const sum = (arr) => arr.reduce((a, it) => a + (parseInt(it.value, 10) || 0), 0);
 
 export const money = (v, cur = "BRL") => (has(v) ? formatMoney(parseInt(v, 10) || 0, cur) : "");
+
+/* ── Quantidade (opcional, por proposta) ─────────────────────────────────────
+   A coluna Quantidade é desligada por padrão. Enquanto estiver desligada, TODO
+   modelo desenha exatamente o que desenhava antes: o item é `desc` e o valor é
+   `value`. Ligada, o valor digitado passa a ser o preço POR UNIDADE e o que
+   aparece na linha é o total dela (quantidade × unitário).
+
+   O model() já entrega cada item com `qty` (número, 1 quando não informada) e
+   `line` (o total da linha), então nenhum modelo precisa fazer conta. As três
+   funções abaixo são só apresentação, e todas devolvem o comportamento antigo
+   com a coluna desligada — é o que mantém os 12 modelos intactos para quem não
+   usa isto.
+
+   A conta em si mora em lib/items.js, que é a mesma regra que o servidor usa
+   para gravar proposals.value. */
+
+// Prefixo do nome do item nos modelos que NÃO são tabela (Carta, Estúdio,
+// Pôster...). Nos que são tabela a quantidade vira coluna de verdade.
+export const qtyPrefix = (m, it) => (m.showQty ? `${it.qty}× ` : "");
+
+// Linha auxiliar "R$ 240 × 2", para o cliente conferir de onde saiu o total da
+// linha sem precisar de uma quarta coluna. Só aparece quando há o que conferir:
+// com quantidade 1 o unitário é o próprio total.
+export const unitNote = (m, it) => (m.showQty && it.qty > 1 && has(it.value) ? `${money(it.value, m.currency)} × ${it.qty}` : "");
+
+// Valor exibido na linha: SEMPRE o total dela. Com a coluna desligada `line` é
+// igual a `value`, então o resultado é idêntico ao de antes, inclusive o "" que
+// os modelos trocam por "—" quando o valor está em branco.
+export const lineMoney = (m, it) => (has(it.value) ? fmt(it.line, m.currency) : "");
 export const fmt = (n, cur = "BRL") => formatMoney(n, cur);
+
+// Data por extenso, curta: "22 de setembro de 2026". Entrada inválida ou
+// ausente (rascunho ainda não salvo) cai para hoje, nunca para "Invalid Date".
+const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+export function dataBR(v) {
+  const d = v ? new Date(v) : new Date();
+  const ok = d instanceof Date && !Number.isNaN(d.getTime()) ? d : new Date();
+  return `${ok.getDate()} de ${MESES[ok.getMonth()]} de ${ok.getFullYear()}`;
+}
 
 // Total em duas partes (símbolo e número) para os modelos que dão à cifra
 // tratamento tipográfico próprio — Luxo, Impacto, Editorial.
@@ -190,9 +228,18 @@ export function splitMoney(n, cur = "BRL") {
    Acrescentar um campo novo no futuro = acrescentar uma linha aqui. */
 export function model(doc) {
   const d = doc || {};
-  const items = filledItems(d);
-  const total = sum(items);
+  const showQty = !!d.showQty;
+  // Cada item sai daqui já com a quantidade resolvida (1 quando não informada,
+  // que é o caso de toda proposta anterior a esta feature) e com o total da
+  // linha calculado. Assim nenhum dos 12 modelos faz conta.
+  const items = filledItems(d).map((it) => ({
+    ...it,
+    qty: showQty ? qtyOf(it) : 1,
+    line: lineTotal(it, showQty),
+  }));
+  const total = sumItems(items, showQty);
   return {
+    showQty,
     // marca / remetente
     // ATENÇÃO: `company` no formulário é a EMPRESA DO CLIENTE (fica na mesma
     // linha do campo "Cliente" e é preenchida junto com ele). Não é o nome de
@@ -211,6 +258,9 @@ export function model(doc) {
     watermark: has(d.watermark) ? d.watermark : "",
     // investimento
     items, total, currency: d.currency || "BRL",
+    // data de emissão — já existe no banco (proposals.created_at). Cai para
+    // "hoje" só enquanto a proposta é um rascunho que ainda não foi salvo.
+    date: dataBR(d.createdAt),
     // cronograma
     start: has(d.start) ? d.start : "",
     end: has(d.end) ? d.end : "",
@@ -400,7 +450,7 @@ function TecRule({ label, c, line, top = 34 }) {
   </>);
 }
 
-function Tecnico({ doc, accent, onAccept, onEdit, print }) {
+function Tecnico({ doc, accent, onAccept, onEdit, print, pdf }) {
   const m = model(doc);
   const T = themeOf(doc, TEC_THEMES);
   const A = accentUse("restrained", accent, T);
@@ -456,7 +506,7 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
 
           {/* TABELA MODULAR: índice, descrição, valor. Só fios horizontais. */}
           <div className="pd-t" style={{ display: "grid", gridTemplateColumns: "34px 1fr 150px", columnGap: 10, padding: "0 0 9px" }}>
-            <span style={lbl}>#</span>
+            <span style={lbl}>{m.showQty ? "Qtd" : "#"}</span>
             <span style={lbl}>Descrição</span>
             <span style={{ ...lbl, textAlign: "right" }}>Valor</span>
           </div>
@@ -464,9 +514,12 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
             <React.Fragment key={i}>
             {i > 0 && <Break />}
             <div className="pd-t" style={{ display: "grid", gridTemplateColumns: "34px 1fr 150px", columnGap: 10, alignItems: "baseline", padding: "13px 0", borderTop: `1px solid ${T.line}` }}>
-              <span style={{ ...num, fontSize: 11.5, fontWeight: 600, color: A.head }}>{String(i + 1).padStart(2, "0")}</span>
-              <span style={{ fontSize: 13.5, lineHeight: 1.5, color: T.ink }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span>
-              <span style={{ ...num, fontSize: 13.5, fontWeight: 600, color: has(it.value) ? T.ink : T.soft, textAlign: "right" }}>{money(it.value, m.currency) || "—"}</span>
+              <span style={{ ...num, fontSize: 11.5, fontWeight: 600, color: A.head }}>{m.showQty ? it.qty : String(i + 1).padStart(2, "0")}</span>
+              <span style={{ fontSize: 13.5, lineHeight: 1.5, color: T.ink }}>
+                <Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>
+                {!!unitNote(m, it) && <span style={{ ...num, display: "block", fontSize: 10.5, color: T.soft, marginTop: 2 }}>{unitNote(m, it)}</span>}
+              </span>
+              <span style={{ ...num, fontSize: 13.5, fontWeight: 600, color: has(it.value) ? T.ink : T.soft, textAlign: "right" }}>{lineMoney(m, it) || "—"}</span>
             </div>
             </React.Fragment>
           ))}
@@ -500,9 +553,11 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
             índices e no fio do total, que é onde ela informa alguma coisa. */}
         <TecRule label="Aprovação" c={A.head} line={T.line} top={34} />
         <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+          {!pdf && (
           <button className="pd-pad" onClick={onAccept} style={{ flex: "none", fontFamily: mono, fontSize: 11.5, fontWeight: 600, letterSpacing: "0.16em", textTransform: "uppercase", color: T.ink, background: "transparent", border: `1.5px solid ${T.ink}`, borderRadius: 3, padding: "15px 30px", cursor: "pointer" }}>
             Aceitar proposta
           </button>
+          )}
           <span className="pd-w100" style={{ fontSize: 12.5, color: T.soft, lineHeight: 1.55, flex: 1, minWidth: 220 }}>
             O aceite registra a data e vincula as condições descritas acima.
           </span>
@@ -533,11 +588,30 @@ function Tecnico({ doc, accent, onAccept, onEdit, print }) {
 
 const CARTA_THEMES = ["claro", "creme"];
 
-/* Datas viram texto corrido porque data sempre encaixa numa frase. Já pagamento
-   e revisões o usuário escreve livre ("PIX", "3x", "mensal, até o dia 10") —
-   costurar isso em prosa produz português quebrado ("o pagamento será realizado
-   em mensal"). Então essas duas vão para um bloco de condições com a tipografia
-   da carta, e não para dentro de uma frase. */
+/* ═══════════════════════════════════════════════════════════════════════════
+   CARTA  (id: carta)  —  reescrita como APRESENTAÇÃO COMERCIAL
+   ---------------------------------------------------------------------------
+   Era uma carta timbrada: serifada, medida curta, "Ao cuidado de", prosa. Boa
+   para advogado e consultor, fraca para quem vende pacote de conteúdo — que é
+   quem usa este app.
+
+   Vira um documento de agência, na direção do PDF de referência: barra preta no
+   topo, manchete de duas linhas em caixa alta, caixa-resumo com O QUE e QUANTO,
+   tabela de serviços com cabeçalho sombreado, investimento em faixas cinza,
+   caixa de encerramento e rodapé corrido em toda página.
+
+   O que foi PRESERVADO da carta antiga, de propósito: o bloco de assinatura.
+   É o único dos 12 que tem um, e é o que faz o documento valer como aceite no
+   papel. Ele passa a morar no encerramento.
+
+   A tipografia é a do app (General Sans / Satoshi), não a Arial da referência:
+   uma fonte estranha só neste modelo pareceria erro de carregamento ao lado dos
+   outros onze, e o rasterizador do PDF já é sensível a fonte que não carrega.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// Datas viram texto corrido porque data sempre encaixa numa frase. Já pagamento
+// e revisões o usuário escreve livre ("PIX", "3x", "mensal, até o dia 10") —
+// costurar isso em prosa produz português quebrado.
 function frasePrazos(m) {
   if (!has(m.start) && !has(m.end)) return "";
   if (has(m.start) && has(m.end)) return `Os trabalhos têm início em ${m.start}, com entrega prevista para ${m.end}.`;
@@ -545,122 +619,189 @@ function frasePrazos(m) {
   return `A entrega está prevista para ${m.end}.`;
 }
 
-function Carta({ doc, accent, onAccept, onEdit, print }) {
+/* Título de seção. O <Break/> vem ANTES do título, nunca depois: é o que impede
+   o exportador de cortar a página entre o título e o conteúdo dele — o "título
+   órfão no fim da página". */
+function AgSec({ label, ink, line, top = 40 }) {
+  return (<>
+    <Break />
+    <div style={{ margin: `${top}px 0 16px` }}>
+      <div style={{ fontFamily: font.heading, fontSize: 17, fontWeight: 700, letterSpacing: "-0.015em", color: ink }}>{label}</div>
+      <div style={{ height: 2, width: 34, background: ink, marginTop: 8 }} />
+    </div>
+  </>);
+}
+
+function Carta({ doc, accent, onAccept, onEdit, print, pdf }) {
   const m = model(doc);
   const T = themeOf(doc, CARTA_THEMES);
   const A = accentUse("hairline", accent, T);
   const prazos = frasePrazos(m);
-  const cap = { fontFamily: font.body, fontSize: 10, fontWeight: 600, letterSpacing: "0.2em", textTransform: "uppercase", color: T.soft };
-  const conds = pairs(["Pagamento", m.payment], ["Revisões", m.revisions], ["Validade", m.validity]);
+  const conds = pairs(["Forma de pagamento", m.payment], ["Revisões inclusas", m.revisions], ["Validade da proposta", m.validity]);
+
+  // Faixa cinza das linhas alternadas e do cabeçalho da tabela. Sai do tema, e
+  // não de um cinza fixo, senão o modelo quebra no papel creme.
+  const faixa = T.panel;                     // faixa clara já definida pelo tema
+  const faixaForte = mix(T.bg, T.ink, 0.085); // cabeçalho da tabela, um tom acima
+  const lbl = { fontSize: 9.5, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: T.soft };
+  const num = { fontVariantNumeric: "tabular-nums" };
+
+  // Cabeçalho da tabela: com quantidade são três colunas, sem ela são duas.
+  // A grade é declarada num lugar só para cabeçalho e linhas nunca saírem de
+  // alinhamento quando a coluna é ligada ou desligada.
+  const grade = m.showQty ? "58px minmax(0,1fr) 132px" : "minmax(0,1fr) 132px";
+  const rodape = [m.title || "Proposta comercial", m.total > 0 ? fmt(m.total, m.currency) : ""].filter(Boolean);
 
   return (
     <Sheet bg={T.bg} ink={T.ink} print={print}>
-      {/* fio de identidade no topo — o único lugar onde a cor escolhida aparece */}
-      <div style={{ height: 3, background: A.line }} />
-      <div className="pd-pad" style={{ padding: "62px 84px 58px" }}>
+      {/* barra do topo — o elemento que dá a cara de documento de agência */}
+      <div style={{ height: 14, background: T.ink }} />
+      <div className="pd-pad" style={{ padding: "52px 64px 44px" }}>
 
-        {/* papel timbrado */}
-        <div className="pd-g" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 24 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
-            <Wordmark doc={doc} h={26} ink={T.ink} />
-          </div>
-          <span style={{ ...cap, flex: "none" }}>Proposta comercial</span>
-        </div>
-        <div style={{ height: 1, background: T.ink, opacity: 0.85, margin: "18px 0 40px" }} />
-
-        {/* destinatário + referência */}
-        <div className="pd-g" style={{ display: "flex", justifyContent: "space-between", gap: 32, marginBottom: 34 }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={cap}>Ao cuidado de</div>
-            <div style={{ fontFamily: serif, fontSize: 17, fontWeight: 700, color: T.ink, marginTop: 6, lineHeight: 1.3 }}>
-              <Ed onEdit={onEdit} field="client">{m.client || "Cliente"}</Ed>
-            </div>
-            {!!m.clientCo && <div style={{ fontSize: 13.5, color: T.sub, marginTop: 3 }}>{m.clientCo}</div>}
-          </div>
-          {has(m.validity) && (
-            <div style={{ textAlign: "right", flex: "none" }}>
-              <div style={cap}>Validade</div>
-              <div style={{ fontFamily: serif, fontSize: 17, fontWeight: 700, color: T.ink, marginTop: 6 }}>{m.validity}</div>
-            </div>
-          )}
+        {/* ── 1. CAPA ────────────────────────────────────────────────────── */}
+        <div className="pd-g" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24, marginBottom: 34 }}>
+          <Wordmark doc={doc} h={24} ink={T.ink} />
+          <span style={{ ...lbl, flex: "none", textAlign: "right" }}>Proposta comercial</span>
         </div>
 
-        {/* referência + assunto */}
-        <div style={{ ...cap, marginBottom: 10 }}>Referência</div>
-        <h2 className="pd-d3" style={{ fontFamily: serif, fontWeight: 700, fontSize: 31, lineHeight: 1.22, letterSpacing: "-0.012em", margin: 0, color: m.title ? T.ink : T.soft, maxWidth: 520 }}>
+        <h2 className="pd-d3" style={{ fontFamily: font.heading, fontWeight: 900, fontSize: 40, lineHeight: 1.06, letterSpacing: "-0.035em", textTransform: "uppercase", margin: 0, color: m.title ? T.ink : T.soft, maxWidth: 620 }}>
           <Ed onEdit={onEdit} field="title">{m.title || "Título da proposta"}</Ed>
         </h2>
-        <div style={{ width: 52, height: 2, background: A.line, margin: "22px 0 30px" }} />
 
-        {/* corpo da carta — medida curta, entrelinha generosa */}
         {has(m.scope) && (
-          <p style={{ fontFamily: serif, fontSize: 15.5, lineHeight: 1.92, color: T.sub, margin: "0 0 30px", maxWidth: 520 }}>
+          <p style={{ fontSize: 14.5, lineHeight: 1.6, color: T.sub, margin: "14px 0 0", maxWidth: 560 }}>
             <Ed onEdit={onEdit} field="scope">{m.scope}</Ed>
           </p>
         )}
 
+        {/* caixa-resumo: PARA QUEM e QUANTO, lado a lado, com fio no meio.
+            É o bloco "4 VÍDEOS MENSAIS | R$ 800,00 / MÊS" da referência. */}
+        <div className="pd-g2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", border: `1.5px solid ${T.ink}`, marginTop: 30 }}>
+          <div style={{ padding: "16px 20px", borderRight: `1.5px solid ${T.ink}`, minWidth: 0 }}>
+            <div style={lbl}>Cliente</div>
+            <div style={{ fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 6, lineHeight: 1.3 }}>
+              <Ed onEdit={onEdit} field="client">{m.client || "Cliente"}</Ed>
+            </div>
+            {!!m.clientCo && <div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>{m.clientCo}</div>}
+          </div>
+          <div style={{ padding: "16px 20px", background: faixa, minWidth: 0 }}>
+            <div style={lbl}>{m.total > 0 ? "Investimento" : "Emitida em"}</div>
+            <div style={{ ...num, fontFamily: font.heading, fontSize: m.total > 0 ? 22 : 15.5, fontWeight: 800, letterSpacing: "-0.02em", color: T.ink, marginTop: 6, lineHeight: 1.2 }}>
+              {m.total > 0 ? fmt(m.total, m.currency) : m.date}
+            </div>
+            {m.total > 0 && <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>{m.date}</div>}
+          </div>
+        </div>
+
+        {/* ── 2. APRESENTAÇÃO ────────────────────────────────────────────── */}
+        {has(m.bio) && (<>
+          <AgSec label="Quem apresenta" ink={T.ink} line={T.line} />
+          <p style={{ fontSize: 14, lineHeight: 1.72, color: T.sub, margin: 0, maxWidth: 580 }}>
+            <Ed onEdit={onEdit} field="bio">{m.bio}</Ed>
+          </p>
+        </>)}
+
+        {/* ── 3. PROPOSTA DE SERVIÇOS ────────────────────────────────────── */}
         {m.items.length > 0 && (<>
-          <Break />
-          <div style={{ ...cap, marginBottom: 14 }}>Relação de serviços</div>
+          <AgSec label="O que está incluso" ink={T.ink} line={T.line} />
+
+          <div className={m.showQty ? "pd-t" : undefined} style={{ display: "grid", gridTemplateColumns: grade, columnGap: 14, background: faixaForte, padding: "11px 16px" }}>
+            {m.showQty && <span style={lbl}>Qtd</span>}
+            <span style={lbl}>Serviço</span>
+            <span style={{ ...lbl, textAlign: "right" }}>Valor</span>
+          </div>
+
           {m.items.map((it, i) => (
             <React.Fragment key={i}>
-            {i > 0 && <Break />}
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 0, padding: "9px 0" }}>
-              <span style={{ fontFamily: serif, fontSize: 15, color: T.sub, flex: "0 1 auto", maxWidth: "70%", lineHeight: 1.45 }}>
+            {/* quebra ENTRE linhas: o corte do PDF nunca cai no meio de uma */}
+            <Break />
+            <div className={m.showQty ? "pd-t" : undefined} style={{ display: "grid", gridTemplateColumns: grade, columnGap: 14, alignItems: "baseline", padding: "14px 16px", borderBottom: `1px solid ${T.line}`, background: i % 2 ? faixa : "transparent" }}>
+              {m.showQty && <span style={{ ...num, fontSize: 14, fontWeight: 700, color: T.ink }}>{it.qty}</span>}
+              <span style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.45, color: T.ink, minWidth: 0 }}>
                 <Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>
+                {!!unitNote(m, it) && <span style={{ ...num, display: "block", fontSize: 11.5, fontWeight: 500, color: T.soft, marginTop: 3 }}>{unitNote(m, it)}</span>}
               </span>
-              <span style={{ flex: 1, minWidth: 18, borderBottom: `1px dotted ${T.soft}`, margin: "0 10px 6px" }} />
-              <span style={{ fontFamily: serif, fontSize: 15, fontWeight: 700, color: T.ink, flex: "none", fontVariantNumeric: "tabular-nums" }}>{money(it.value, m.currency) || "—"}</span>
+              <span style={{ ...num, fontSize: 14, fontWeight: 700, color: has(it.value) ? T.ink : T.soft, textAlign: "right" }}>{lineMoney(m, it) || "—"}</span>
             </div>
             </React.Fragment>
           ))}
 
-          {/* total — fio simples acima, fio duplo abaixo (convenção contábil) */}
-          <div className="pd-g" style={{ borderTop: `1px solid ${T.ink}`, marginTop: 16, paddingTop: 14, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 20 }}>
-            <span style={cap}>Investimento total</span>
-            <span className="pd-d3" style={{ fontFamily: serif, fontSize: 30, fontWeight: 700, color: T.ink, letterSpacing: "-0.015em", fontVariantNumeric: "tabular-nums" }}>{fmt(m.total, m.currency)}</span>
+          {/* ── 4. INVESTIMENTO ──────────────────────────────────────────── */}
+          <AgSec label="Investimento" ink={T.ink} line={T.line} top={34} />
+          <div>
+            {(() => {
+              const unidades = m.items.reduce((a, it) => a + it.qty, 0);
+              const base = m.showQty ? unidades : m.items.length;
+              return pairs(
+                ["Serviços contratados", `${m.items.length} ${m.items.length === 1 ? "item" : "itens"}`],
+                ...(m.showQty ? [["Unidades", String(unidades)]] : []),
+                ...(base > 1 && m.total > 0
+                  ? [[m.showQty ? "Valor médio por unidade" : "Valor médio por item", fmt(Math.round(m.total / base), m.currency)]]
+                  : []),
+              );
+            })().map(([k, v], i) => (
+              <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 18, padding: "11px 16px", background: i % 2 ? "transparent" : faixa }}>
+                <span style={{ fontSize: 13.5, color: T.sub }}>{k}</span>
+                <span style={{ ...num, fontSize: 13.5, fontWeight: 600, color: T.ink, textAlign: "right" }}>{v}</span>
+              </div>
+            ))}
+            {/* o total é a única faixa em tinta cheia: é o número que decide */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18, padding: "18px 20px", background: T.ink, marginTop: 4 }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: T.bg, opacity: 0.75 }}>Valor total</span>
+              <span className="pd-d3" style={{ ...num, fontFamily: font.heading, fontSize: 30, fontWeight: 900, letterSpacing: "-0.028em", color: T.bg, lineHeight: 1 }}>{fmt(m.total, m.currency)}</span>
+            </div>
           </div>
-          <div style={{ borderTop: `1px solid ${T.ink}`, marginTop: 13, paddingTop: 3, borderBottom: `1px solid ${T.ink}`, height: 0 }} />
         </>)}
 
-        {prazos && (
-          <p style={{ fontFamily: serif, fontSize: 14.5, lineHeight: 1.85, color: T.sub, margin: "26px 0 0", maxWidth: 520 }}>{prazos}</p>
-        )}
+        {/* ── 5. INFORMAÇÕES ADICIONAIS ──────────────────────────────────── */}
+        {(conds.length > 0 || prazos) && (<>
+          <AgSec label="Condições" ink={T.ink} line={T.line} />
+          {!!prazos && <p style={{ fontSize: 14, lineHeight: 1.7, color: T.sub, margin: "0 0 16px", maxWidth: 580 }}>{prazos}</p>}
+          {conds.length > 0 && (
+            <div className="pd-g2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 28px" }}>
+              {conds.map(([k, v]) => (
+                <div key={k} style={{ borderLeft: `2px solid ${A.line}`, paddingLeft: 13 }}>
+                  <div style={lbl}>{k}</div>
+                  <div style={{ fontSize: 13.5, color: T.ink, marginTop: 5, lineHeight: 1.5 }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>)}
 
-        {conds.length > 0 && (
-          <div style={{ marginTop: 26, borderTop: `1px solid ${T.line}`, paddingTop: 18 }}>
-            {conds.map(([k, v]) => (
-              <div key={k} style={{ display: "flex", gap: 20, padding: "5px 0" }}>
-                <span style={{ ...cap, flex: "none", width: 118, paddingTop: 4 }}>{k}</span>
-                <span style={{ fontFamily: serif, fontSize: 14.5, color: T.sub, lineHeight: 1.6 }}>{v}</span>
+        {/* ── 6. ENCERRAMENTO ────────────────────────────────────────────── */}
+        <AgSec label="Aprovação" ink={T.ink} line={T.line} />
+        <div style={{ border: `1.5px solid ${T.ink}`, padding: "20px 22px" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: T.ink }}>Vamos começar?</div>
+          <div style={{ fontSize: 13.5, color: T.sub, marginTop: 5, lineHeight: 1.55 }}>
+            O aceite registra a data e vincula as condições descritas nesta proposta.
+          </div>
+
+          {/* assinatura — herança da carta antiga, o único dos 12 que tem uma */}
+          <div className="pd-g2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 34, marginTop: 26 }}>
+            {[["", "Pela contratada"], [m.client || "Cliente", "De acordo — contratante"]].map(([nome, papel], i) => (
+              <div key={i}>
+                <div style={{ height: 34 }} />
+                <div style={{ borderTop: `1px solid ${T.ink}`, paddingTop: 8 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, lineHeight: 1.3 }}>{nome || " "}</div>
+                  <div style={{ fontSize: 11, color: T.soft, marginTop: 2 }}>{papel}</div>
+                </div>
               </div>
             ))}
           </div>
-        )}
-
-        {has(m.bio) && (
-          <p style={{ fontFamily: serif, fontSize: 14, lineHeight: 1.8, color: T.soft, margin: "24px 0 0", maxWidth: 520, fontStyle: "italic" }}>
-            <Ed onEdit={onEdit} field="bio">{m.bio}</Ed>
-          </p>
-        )}
-
-        {/* ASSINATURA — o que faltava para isto ser uma carta e não um panfleto */}
-        <Break />
-        <div className="pd-g" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 46, marginTop: 44 }}>
-          {[["", "Pela contratada"], [m.client || "Cliente", "De acordo — contratante"]].map(([nome, papel], i) => (
-            <div key={i}>
-              <div style={{ height: 40 }} />
-              <div style={{ borderTop: `1px solid ${T.ink}`, paddingTop: 9 }}>
-                <div style={{ fontFamily: serif, fontSize: 14.5, fontWeight: 700, color: T.ink, lineHeight: 1.3 }}>{nome || "\u00A0"}</div>
-                <div style={{ fontSize: 11.5, color: T.soft, marginTop: 3 }}>{papel}</div>
-              </div>
-            </div>
-          ))}
         </div>
 
-        <button onClick={onAccept} style={{ marginTop: 36, width: "100%", fontFamily: font.body, fontSize: 12, fontWeight: 600, letterSpacing: "0.2em", textTransform: "uppercase", color: T.ink, background: "transparent", border: `1px solid ${T.ink}`, borderRadius: 2, padding: "17px 14px", cursor: "pointer" }}>
+        {!pdf && (
+        <button onClick={onAccept} style={{ marginTop: 20, width: "100%", fontFamily: font.body, fontSize: 12.5, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: T.bg, background: T.ink, border: "none", borderRadius: 0, padding: "18px 14px", cursor: "pointer" }}>
           Aceitar proposta
         </button>
+        )}
+
+        {/* rodapé corrido, como o da referência */}
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 30, paddingTop: 13, borderTop: `1px solid ${T.line}`, ...lbl }}>
+          <span>{rodape[0]}</span>
+          <span>{m.client ? `Para ${m.client}` : ""}</span>
+        </div>
       </div>
     </Sheet>
   );
@@ -695,7 +836,7 @@ function ConsSec({ n, title, c, line, children, first }) {
   </>);
 }
 
-function Consultoria({ doc, accent, onAccept, onEdit, print }) {
+function Consultoria({ doc, accent, onAccept, onEdit, print, pdf }) {
   const m = model(doc);
   const T = themeOf(doc, CONS_THEMES);
   const A = accentUse("restrained", accent, T);
@@ -762,15 +903,18 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
           <ConsSec n={next()} title="Investimento" c={A.head} line={T.ink}>
             {/* TABELA com cabeçalho — a estrutura que um cliente B2B espera ver */}
             <div className="pd-t" style={{ display: "grid", gridTemplateColumns: "38px 1fr 150px", background: T.panel, padding: "9px 14px", columnGap: 12 }}>
-              <span style={lbl}>#</span><span style={lbl}>Descrição</span><span style={{ ...lbl, textAlign: "right" }}>Valor</span>
+              <span style={lbl}>{m.showQty ? "Qtd" : "#"}</span><span style={lbl}>Descrição</span><span style={{ ...lbl, textAlign: "right" }}>Valor</span>
             </div>
             {m.items.map((it, i) => (
               <React.Fragment key={i}>
               {i > 0 && <Break />}
               <div className="pd-t" style={{ display: "grid", gridTemplateColumns: "38px 1fr 150px", columnGap: 12, alignItems: "baseline", padding: "13px 14px", borderBottom: `1px solid ${T.line}` }}>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: T.soft, fontVariantNumeric: "tabular-nums" }}>{String(i + 1).padStart(2, "0")}</span>
-                <span style={{ fontSize: 13.5, lineHeight: 1.5, color: T.ink }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: has(it.value) ? T.ink : T.soft, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{money(it.value, m.currency) || "—"}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: T.soft, fontVariantNumeric: "tabular-nums" }}>{m.showQty ? it.qty : String(i + 1).padStart(2, "0")}</span>
+                <span style={{ fontSize: 13.5, lineHeight: 1.5, color: T.ink }}>
+                  <Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>
+                  {!!unitNote(m, it) && <span style={{ display: "block", fontSize: 10.5, color: T.soft, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{unitNote(m, it)}</span>}
+                </span>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: has(it.value) ? T.ink : T.soft, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{lineMoney(m, it) || "—"}</span>
               </div>
               </React.Fragment>
             ))}
@@ -850,9 +994,11 @@ function Consultoria({ doc, accent, onAccept, onEdit, print }) {
           {/* CTA em tinta, não na cor de destaque: numa proposta B2B a barra
               colorida de largura total é linguagem de app, não de documento.
               A cor fica no número da seção e no painel do total. */}
+          {!pdf && (
           <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 14.5, fontWeight: 600, color: T.bg, background: T.ink, border: "none", borderRadius: 3, padding: "16px 14px", cursor: "pointer" }}>
             Aceitar proposta
           </button>
+          )}
         </ConsSec>
 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 26, paddingTop: 13, borderTop: `1px solid ${T.line}`, ...lbl }}>
@@ -893,7 +1039,7 @@ function EstSec({ n, label, children, line, soft }) {
   </>);
 }
 
-function Estudio({ doc, accent, onAccept, onEdit, print }) {
+function Estudio({ doc, accent, onAccept, onEdit, print, pdf }) {
   const m = model(doc);
   const T = themeOf(doc, EST_THEMES);
   const A = accentUse("full", accent, T);
@@ -1065,10 +1211,11 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
                   {String(i + 1).padStart(2, "0")}
                 </span>
                 <span style={{ flex: 1, fontSize: 19, fontWeight: 600, lineHeight: 1.35, letterSpacing: "-0.015em", color: T.ink, paddingTop: 4 }}>
-                  <Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>
+                  {qtyPrefix(m, it)}<Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>
+                  {!!unitNote(m, it) && <span style={{ display: "block", fontSize: 12, fontWeight: 500, letterSpacing: 0, color: T.soft, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{unitNote(m, it)}</span>}
                 </span>
                 <span style={{ flex: "none", fontSize: 17, fontWeight: 600, color: has(it.value) ? T.sub : T.soft, paddingTop: 7, fontVariantNumeric: "tabular-nums" }}>
-                  {money(it.value, m.currency) || "—"}
+                  {lineMoney(m, it) || "—"}
                 </span>
               </div>
               </React.Fragment>
@@ -1107,9 +1254,11 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
           </EstSec>
         )}
 
+        {!pdf && (
         <button onClick={onAccept} style={{ marginTop: 44, width: "100%", fontFamily: font.heading, fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em", color: T.dark ? "#141416" : "#FFFFFF", background: T.dark ? T.ink : "#141416", border: "none", borderRadius: 0, padding: "20px 14px", cursor: "pointer" }}>
           Aceitar proposta
         </button>
+        )}
       </div>
     </Sheet>
   );
@@ -1118,9 +1267,10 @@ function Estudio({ doc, accent, onAccept, onEdit, print }) {
 
 /* ══════ MODELOS HERDADOS (reescrita na onda 2) ══════ */
 /* ---------- 1. MINIMAL ---------- */
-function Minimal({ doc, accent, onAccept, onEdit, print }) {
-  const items = filledItems(doc);
-  const total = sum(items);
+function Minimal({ doc, accent, onAccept, onEdit, print, pdf }) {
+  const qm = model(doc);
+  const items = qm.items;
+  const total = qm.total;
   const dates = [["Início", doc.start], ["Entrega", doc.end]].filter(([, v]) => has(v));
   const T = themeOf(doc);
   const deep = accentInkFor(accent, T);
@@ -1150,7 +1300,7 @@ function Minimal({ doc, accent, onAccept, onEdit, print }) {
           <div style={{ border: `1px solid ${hairFor(accent, T)}`, borderRadius: 11, overflow: "hidden", marginBottom: 12 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "16px 20px", borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none", fontSize: "13.5px" }}>
-                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
+                <span style={{ color: T.sub }}>{qtyPrefix(qm, it)}<Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>{!!unitNote(qm, it) && <span style={{ display: "block", fontSize: 11, opacity: 0.72, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{unitNote(qm, it)}</span>}</span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{lineMoney(qm, it)}</span>
               </div>
             ))}
           </div>
@@ -1175,7 +1325,9 @@ function Minimal({ doc, accent, onAccept, onEdit, print }) {
           </div>
         )}
 
+        {!pdf && (
         <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 600, color: btnText(darken(accent, 0.3)), background: darken(accent, 0.3), border: "none", padding: 13, borderRadius: 10, cursor: "pointer" }}>Aceitar proposta</button>
+        )}
       </div>
     </div>
     </Sheet>
@@ -1183,9 +1335,10 @@ function Minimal({ doc, accent, onAccept, onEdit, print }) {
 }
 
 /* ---------- 2. BOLD ---------- */
-function Bold({ doc, accent, onAccept, onEdit, print }) {
-  const items = filledItems(doc);
-  const total = sum(items);
+function Bold({ doc, accent, onAccept, onEdit, print, pdf }) {
+  const qm = model(doc);
+  const items = qm.items;
+  const total = qm.total;
   const chips = [["Início", doc.start], ["Entrega", doc.end], ["Validade", doc.validity]].filter(([, v]) => has(v));
   const T = themeOf(doc);
   return (
@@ -1205,7 +1358,7 @@ function Bold({ doc, accent, onAccept, onEdit, print }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "14px 0", borderBottom: `1px dashed ${T.line}`, fontSize: 14 }}>
-                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
+                <span style={{ color: T.sub }}>{qtyPrefix(qm, it)}<Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>{!!unitNote(qm, it) && <span style={{ display: "block", fontSize: 11, opacity: 0.72, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{unitNote(qm, it)}</span>}</span><span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{lineMoney(qm, it)}</span>
               </div>
             ))}
           </div>
@@ -1227,7 +1380,9 @@ function Bold({ doc, accent, onAccept, onEdit, print }) {
             <p style={{ fontSize: 13, lineHeight: 1.6, color: T.sub, margin: 0 }}><Ed onEdit={onEdit} field="bio">{doc.bio}</Ed></p>
           </div>
         )}
+        {!pdf && (
         <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 700, color: btnText(darken(accent, 0.3)), background: darken(accent, 0.3), border: "none", padding: 14, borderRadius: 10, cursor: "pointer" }}>Aceitar proposta</button>
+        )}
       </div>
     </div>
     </Sheet>
@@ -1235,9 +1390,10 @@ function Bold({ doc, accent, onAccept, onEdit, print }) {
 }
 
 /* ---------- 3. EDITORIAL ---------- */
-function Editorial({ doc, accent, onAccept, onEdit, print }) {
-  const items = filledItems(doc);
-  const total = sum(items);
+function Editorial({ doc, accent, onAccept, onEdit, print, pdf }) {
+  const qm = model(doc);
+  const items = qm.items;
+  const total = qm.total;
   const meta = [["Cliente", doc.client || "Cliente"], ["Início", doc.start], ["Entrega", doc.end]].filter(([k, v]) => k === "Cliente" || has(v));
   const conds = [["Pagamento", doc.payment], ["Revisões", doc.revisions]].filter(([, v]) => has(v));
   const T = themeOf(doc);
@@ -1275,7 +1431,7 @@ function Editorial({ doc, accent, onAccept, onEdit, print }) {
         <div style={{ ...rule, marginBottom: 0 }} />
         {items.map((it, i) => (
           <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "14px 0", borderBottom: `1px solid ${T.line}`, fontSize: "13.5px" }}>
-            <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
+            <span style={{ color: T.sub }}>{qtyPrefix(qm, it)}<Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>{!!unitNote(qm, it) && <span style={{ display: "block", fontSize: 11, opacity: 0.72, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{unitNote(qm, it)}</span>}</span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{lineMoney(qm, it)}</span>
           </div>
         ))}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "17px 20px", marginTop: 8, background: soft, borderRadius: 8 }}>
@@ -1294,7 +1450,9 @@ function Editorial({ doc, accent, onAccept, onEdit, print }) {
           <p style={{ fontSize: "12.5px", lineHeight: 1.65, color: T.sub, margin: 0 }}><Ed onEdit={onEdit} field="bio">{doc.bio}</Ed></p>
         </div>
       )}
+      {!pdf && (
       <button onClick={onAccept} style={{ marginTop: 20, width: "100%", fontFamily: font.body, fontSize: 14.5, fontWeight: 600, color: btnText(darken(accent, 0.3)), background: darken(accent, 0.3), border: "none", padding: 13, borderRadius: 8, cursor: "pointer" }}>Aceitar proposta</button>
+      )}
       </div>
     </div>
     </Sheet>
@@ -1302,9 +1460,10 @@ function Editorial({ doc, accent, onAccept, onEdit, print }) {
 }
 
 /* ---------- 4. COLORIDO ---------- */
-function Colorido({ doc, accent, onAccept, onEdit, print }) {
-  const items = filledItems(doc);
-  const total = sum(items);
+function Colorido({ doc, accent, onAccept, onEdit, print, pdf }) {
+  const qm = model(doc);
+  const items = qm.items;
+  const total = qm.total;
   const dates = [["Início", doc.start], ["Entrega", doc.end]].filter(([, v]) => has(v));
   const T = themeOf(doc);
   const deep = accentInkFor(accent, T);
@@ -1326,7 +1485,7 @@ function Colorido({ doc, accent, onAccept, onEdit, print }) {
           <div style={{ background: soft, borderRadius: 14, padding: "23px 26px", marginBottom: 20 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "11px 0", borderBottom: i < items.length - 1 ? `1px solid ${hairFor(accent, T)}` : "none", fontSize: "13.5px" }}>
-                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
+                <span style={{ color: T.sub }}>{qtyPrefix(qm, it)}<Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>{!!unitNote(qm, it) && <span style={{ display: "block", fontSize: 11, opacity: 0.72, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{unitNote(qm, it)}</span>}</span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{lineMoney(qm, it)}</span>
               </div>
             ))}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", paddingTop: 12, marginTop: 6, borderTop: `1px solid ${hairFor(accent, T)}` }}>
@@ -1348,7 +1507,9 @@ function Colorido({ doc, accent, onAccept, onEdit, print }) {
             <p style={{ fontSize: "13.5px", lineHeight: 1.6, color: T.sub, margin: 0 }}><Ed onEdit={onEdit} field="bio">{doc.bio}</Ed></p>
           </div>
         )}
+        {!pdf && (
         <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 700, color: btnText(darken(accent, 0.3)), background: darken(accent, 0.3), border: "none", padding: 14, borderRadius: 12, cursor: "pointer" }}>Aceitar proposta</button>
+        )}
       </div>
     </div>
     </Sheet>
@@ -1356,9 +1517,10 @@ function Colorido({ doc, accent, onAccept, onEdit, print }) {
 }
 
 /* ---------- 5. CAPA (com foto) ---------- */
-function Capa({ doc, accent, onAccept, onEdit, print }) {
-  const items = filledItems(doc);
-  const total = sum(items);
+function Capa({ doc, accent, onAccept, onEdit, print, pdf }) {
+  const qm = model(doc);
+  const items = qm.items;
+  const total = qm.total;
   const dates = [["Início", doc.start], ["Entrega", doc.end]].filter(([, v]) => has(v));
   const T = themeOf(doc);
   const deep = accentInkFor(accent, T);
@@ -1398,7 +1560,7 @@ function Capa({ doc, accent, onAccept, onEdit, print }) {
           <div style={{ border: `1px solid ${hairFor(accent, T)}`, borderRadius: 11, overflow: "hidden", marginBottom: 12 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "16px 20px", borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none", fontSize: "13.5px" }}>
-                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
+                <span style={{ color: T.sub }}>{qtyPrefix(qm, it)}<Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>{!!unitNote(qm, it) && <span style={{ display: "block", fontSize: 11, opacity: 0.72, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{unitNote(qm, it)}</span>}</span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{lineMoney(qm, it)}</span>
               </div>
             ))}
           </div>
@@ -1418,7 +1580,9 @@ function Capa({ doc, accent, onAccept, onEdit, print }) {
             <p style={{ fontSize: "13.5px", lineHeight: 1.6, color: T.sub, margin: 0 }}><Ed onEdit={onEdit} field="bio">{doc.bio}</Ed></p>
           </div>
         )}
+        {!pdf && (
         <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 600, color: btnText(darken(accent, 0.3)), background: darken(accent, 0.3), border: "none", padding: 14, borderRadius: 11, cursor: "pointer" }}>Aceitar proposta</button>
+        )}
       </div>
     </div>
     </Sheet>
@@ -1426,9 +1590,10 @@ function Capa({ doc, accent, onAccept, onEdit, print }) {
 }
 
 /* ---------- 6. DOSSIÊ (foto escura) ---------- */
-function Dossie({ doc, accent, onAccept, onEdit, print }) {
-  const items = filledItems(doc);
-  const total = sum(items);
+function Dossie({ doc, accent, onAccept, onEdit, print, pdf }) {
+  const qm = model(doc);
+  const items = qm.items;
+  const total = qm.total;
   const chips = [["Início", doc.start], ["Entrega", doc.end], ["Validade", doc.validity]].filter(([, v]) => has(v));
   const EMPTY = "linear-gradient(155deg, #26262D 0%, #0B0B0C 100%)";
   const hero = doc.cover
@@ -1457,7 +1622,7 @@ function Dossie({ doc, accent, onAccept, onEdit, print }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "16px 0", borderBottom: "1px solid #222", fontSize: 14 }}>
-                <span style={{ color: "#D4D4D8" }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
+                <span style={{ color: "#D4D4D8" }}>{qtyPrefix(qm, it)}<Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>{!!unitNote(qm, it) && <span style={{ display: "block", fontSize: 11, opacity: 0.72, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{unitNote(qm, it)}</span>}</span><span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{lineMoney(qm, it)}</span>
               </div>
             ))}
           </div>
@@ -1477,7 +1642,9 @@ function Dossie({ doc, accent, onAccept, onEdit, print }) {
             <p style={{ fontSize: 13, lineHeight: 1.6, color: "#B4B4BA", margin: 0 }}><Ed onEdit={onEdit} field="bio">{doc.bio}</Ed></p>
           </div>
         )}
+        {!pdf && (
         <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 700, color: btnText(darken(accent, 0.3)), background: darken(accent, 0.3), border: "none", padding: 14, borderRadius: 11, cursor: "pointer" }}>Aceitar proposta</button>
+        )}
       </div>
     </div>
     </Sheet>
@@ -1485,9 +1652,10 @@ function Dossie({ doc, accent, onAccept, onEdit, print }) {
 }
 
 /* ---------- 9. AURORA (suave, gradiente) ---------- */
-function Aurora({ doc, accent, onAccept, onEdit, print }) {
-  const items = filledItems(doc);
-  const total = sum(items);
+function Aurora({ doc, accent, onAccept, onEdit, print, pdf }) {
+  const qm = model(doc);
+  const items = qm.items;
+  const total = qm.total;
   const dates = [["Início", doc.start], ["Entrega", doc.end], ["Validade", doc.validity]].filter(([, v]) => has(v));
   const a2 = (doc.gradient && has(doc.accent2)) ? doc.accent2 : accent;
   const T = themeOf(doc);
@@ -1508,7 +1676,7 @@ function Aurora({ doc, accent, onAccept, onEdit, print }) {
         <div style={{ background: glass, backdropFilter: "blur(6px)", border: `1px solid ${hairFor(accent, T)}`, borderRadius: 16, padding: "23px 26px", marginBottom: 18, boxShadow: "0 8px 24px -14px rgba(20,20,30,0.18)" }}>
           {items.map((it, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "11px 0", borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none", fontSize: "13.5px" }}>
-              <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
+              <span style={{ color: T.sub }}>{qtyPrefix(qm, it)}<Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>{!!unitNote(qm, it) && <span style={{ display: "block", fontSize: 11, opacity: 0.72, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{unitNote(qm, it)}</span>}</span><span style={{ fontWeight: 600, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{lineMoney(qm, it)}</span>
             </div>
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", paddingTop: 12, marginTop: 6, borderTop: `1px solid ${T.line}` }}>
@@ -1530,16 +1698,19 @@ function Aurora({ doc, accent, onAccept, onEdit, print }) {
           <p style={{ fontSize: "13.5px", lineHeight: 1.6, color: T.sub, margin: 0 }}><Ed onEdit={onEdit} field="bio">{doc.bio}</Ed></p>
         </div>
       )}
+      {!pdf && (
       <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 700, color: btnText(darken(accent, 0.3)), background: darken(accent, 0.3), border: "none", padding: 14, borderRadius: 14, cursor: "pointer", boxShadow: `0 10px 24px -10px ${accent}80` }}>Aceitar proposta</button>
+      )}
     </div>
     </Sheet>
   );
 }
 
 /* ---------- 12. PÔSTER (capa de impacto com pílula) ---------- */
-function Poster({ doc, accent, onAccept, onEdit, print }) {
-  const items = filledItems(doc);
-  const total = sum(items);
+function Poster({ doc, accent, onAccept, onEdit, print, pdf }) {
+  const qm = model(doc);
+  const items = qm.items;
+  const total = qm.total;
   const T = themeOf(doc);
   const deep = accentInkFor(accent, T);
   const dates = [["Início", doc.start], ["Entrega", doc.end], ["Validade", doc.validity]].filter(([, v]) => has(v));
@@ -1566,7 +1737,7 @@ function Poster({ doc, accent, onAccept, onEdit, print }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 18 }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "14px 0", borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none", fontSize: 14 }}>
-                <span style={{ color: T.sub }}><Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed></span><span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{money(it.value, doc.currency)}</span>
+                <span style={{ color: T.sub }}>{qtyPrefix(qm, it)}<Ed onEdit={onEdit} field="items">{it.desc || "Item"}</Ed>{!!unitNote(qm, it) && <span style={{ display: "block", fontSize: 11, opacity: 0.72, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{unitNote(qm, it)}</span>}</span><span style={{ fontWeight: 700, color: T.ink, fontVariantNumeric: "tabular-nums" }}>{lineMoney(qm, it)}</span>
               </div>
             ))}
           </div>
@@ -1586,7 +1757,9 @@ function Poster({ doc, accent, onAccept, onEdit, print }) {
             <p style={{ fontSize: "13.5px", lineHeight: 1.6, color: T.sub, margin: 0 }}><Ed onEdit={onEdit} field="bio">{doc.bio}</Ed></p>
           </div>
         )}
+        {!pdf && (
         <button onClick={onAccept} style={{ width: "100%", fontFamily: font.body, fontSize: 15, fontWeight: 700, color: btnText(darken(accent, 0.3)), background: darken(accent, 0.3), border: "none", padding: 14, borderRadius: 11, cursor: "pointer" }}>Aceitar proposta</button>
+        )}
       </div>
     </div>
     </Sheet>
@@ -1616,7 +1789,7 @@ const F_ALL = { end: true, validity: true, payment: true, revisions: true };
 
 export const DESIGNS = [
   // ── Essenciais ────────────────────────────────────────────────────────────
-  { id: "minimal", name: "Nítido", tag: "Essencial", cat: "essencial", accent: "#1B1B1E", Comp: Minimal,
+  { id: "minimal", name: "Nítido", tag: "Essencial", free: true, cat: "essencial", accent: "#1B1B1E", Comp: Minimal,
     themes: ALL_THEMES, accentPolicy: "restrained",
     fields: { end: true, validity: false, payment: false, revisions: false } },
 
@@ -1632,11 +1805,13 @@ export const DESIGNS = [
   { id: "editorial", name: "Editorial", tag: "Revista", cat: "editorial", accent: "#3F5548", Comp: Editorial,
     themes: ALL_THEMES, accentPolicy: "restrained", fields: F_ALL },
 
-  // RECONSTRUÍDO: era uma folha com texto centralizado; virou carta comercial.
-  { id: "carta", name: "Carta", tag: "Serifa clássica", cat: "editorial", accent: "#7A6244", Comp: Carta,
+  // ── Corporativos ──────────────────────────────────────────────────────────
+  // RECONSTRUÍDO DUAS VEZES: era uma folha com texto centralizado, virou carta
+  // timbrada e agora é apresentação comercial. O id segue "carta" porque o
+  // banco, as métricas e o gating de plano dependem dele.
+  { id: "carta", name: "Agência", tag: "Pacote de conteúdo", cat: "corporativo", accent: "#5B5B62", Comp: Carta,
     themes: ["claro", "creme"], accentPolicy: "hairline", fields: F_ALL, novo: true },
 
-  // ── Corporativos ──────────────────────────────────────────────────────────
   // RECONSTRUÍDO: o id continua "recibo" por causa do banco; o conceito de
   // cupom fiscal foi abandonado por completo.
   { id: "recibo", name: "Técnico", tag: "Dev e produto", cat: "corporativo", accent: "#414E5E", Comp: Tecnico,
@@ -1647,7 +1822,7 @@ export const DESIGNS = [
     themes: ["claro", "creme"], accentPolicy: "restrained", caps: ["watermark"], fields: F_ALL, novo: true },
 
   // ── Criativos ─────────────────────────────────────────────────────────────
-  { id: "bold", name: "Impacto", tag: "Alto contraste", cat: "criativo", accent: "#2D2A27", Comp: Bold,
+  { id: "bold", name: "Impacto", tag: "Alto contraste", free: true, cat: "criativo", accent: "#2D2A27", Comp: Bold,
     themes: ALL_THEMES, accentPolicy: "full",
     fields: { end: true, validity: true, payment: false, revisions: false } },
 
@@ -1682,6 +1857,16 @@ export const TEMPLATE_CATS = [
 
 const byId = (id) => DESIGNS.find((x) => x.id === id);
 
+/* ── Plano ───────────────────────────────────────────────────────────────────
+   `free: true` marca os modelos que o plano Gratuito inclui. A AUTORIDADE de
+   quem pode usar o quê continua sendo o servidor (BASIC_TEMPLATES em
+   backend/src/lib/plans.js) — isto aqui é a camada de apresentação: o filtro da
+   galeria e o cadeado no card. Um teste (backend/test/unit/plan-templates.test.js)
+   quebra se as duas listas divergirem, que é o jeito de isto não virar uma
+   segunda fonte da verdade com vida própria. */
+export const FREE_TEMPLATES = DESIGNS.filter((d) => d.free).map((d) => d.id);
+export const templateIsFree = (id) => !!byId(id)?.free;
+
 // Modelo desconhecido (proposta antiga ou futura): permissivo, mostra tudo.
 export function templateFields(id) {
   const d = byId(id);
@@ -1708,10 +1893,22 @@ export function templateHas(id, cap) {
   return !!(d && d.caps && d.caps.includes(cap));
 }
 
-export function ProposalDesign({ id, doc, accent, onAccept, onEdit, print = false }) {
+/* `print` e `pdf` são coisas DIFERENTES, de propósito:
+
+     print  — desenha como folha nua: sem sombra, sem canto arredondado. Vale
+              para o PDF, mas também para a miniatura da galeria e para a
+              prévia do modelo, que são representações do documento na tela.
+     pdf    — este render vai virar ARQUIVO. Só os dois nós escondidos de
+              exportação marcam isto.
+
+   Quem separa os dois é o botão "Aceitar proposta": num arquivo ele não tem o
+   que fazer (ninguém clica num PDF), mas na miniatura e na prévia ele faz parte
+   do desenho do modelo e continua aparecendo. Se o botão fosse escondido por
+   `print`, a galeria inteira mudaria junto. */
+export function ProposalDesign({ id, doc, accent, onAccept, onEdit, print = false, pdf = false }) {
   const d = byId(id) || DESIGNS[0];
   const Comp = d.Comp;
-  return <Comp doc={doc} accent={accent || doc.accent || d.accent} onAccept={onAccept} onEdit={onEdit} print={print} />;
+  return <Comp doc={doc} accent={accent || doc.accent || d.accent} onAccept={onAccept} onEdit={onEdit} print={print} pdf={pdf} />;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1784,11 +1981,16 @@ export const SAMPLE_BY_ID = {
 
   // ── exemplos dos quatro reconstruídos ─────────────────────────────────────
   carta: {
-    client: "Dr. Henrique Salles", company: "Salles Advocacia", title: "Consultoria jurídica empresarial mensal",
-    scope: "A presente proposta contempla assessoria contratual e trabalhista continuada, com atendimento prioritário, análise prévia de instrumentos e emissão de pareceres fundamentados sempre que solicitado pela contratante.",
-    items: [{ desc: "Assessoria mensal", value: "2200" }, { desc: "Análise de contratos", value: "900" }, { desc: "Pareceres (até 3 por mês)", value: "1100" }],
-    start: "1 de agosto", payment: "mensal, até o dia 10", revisions: "2 rodadas", validity: "30 dias",
-    bio: "Consultor com atuação empresarial e trabalhista desde 2011.", logo: null, theme: "creme",
+    client: "Mileny Castro", company: "Raiz Alimentos", title: "Produção de conteúdo mensal",
+    scope: "Planejamento de pauta, gravação e edição de conteúdos em vídeo para as redes da marca, com entrega organizada dentro do ciclo mensal contratado.",
+    items: [
+      { desc: "Vídeos para redes sociais", value: "800", qty: "4" },
+      { desc: "Ensaio de fotos dos produtos", value: "1200", qty: "1" },
+      { desc: "Planejamento de pauta mensal", value: "600", qty: "1" },
+    ],
+    showQty: true,
+    start: "1 de outubro", payment: "mensal, até o dia 10", revisions: "2 rodadas", validity: "15 dias",
+    bio: "Produção de conteúdo para marcas de alimentação desde 2019.", logo: null, theme: "claro",
   },
   recibo: {
     client: "TechNova", company: "Órbita Labs", title: "Plataforma web e painel administrativo",

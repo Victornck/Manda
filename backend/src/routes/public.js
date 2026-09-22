@@ -9,6 +9,8 @@ const publicView = (p) => ({
   start: p.start_date, end: p.end_date, payment: p.payment, revisions: p.revisions,
   validity: p.validity, bio: p.bio, accent: p.accent, accent2: p.accent2, gradient: p.gradient,
   logo: p.logo, cover: p.cover, template: p.template, status: p.status, currency: p.currency || "BRL",
+  showQty: !!p.show_qty,
+  createdAt: p.created_at,
 });
 
 // Detecção de bots de link-preview (WhatsApp, Slack, Telegram, etc.) e prefetch.

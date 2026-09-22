@@ -11,11 +11,12 @@ import HomePage from "./Home.jsx";
 import { api, setToken } from "../lib/api.js";
 import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
 import { loadNotifs, mergeNotifs, getSeen, getReadSet, markRead, removeNotifs } from "../lib/notifs.js";
-import { DESIGNS, TEMPLATE_CATS, ProposalDesign, PageThumb, PAGE_W, sampleFor, templateFields, templateThemes, safeTheme, templateHas } from "../templates/designs.jsx";
+import { DESIGNS, TEMPLATE_CATS, ProposalDesign, PageThumb, PAGE_W, sampleFor, templateFields, templateThemes, safeTheme, templateHas, templateIsFree } from "../templates/designs.jsx";
 import CodeInput from "../components/CodeInput.jsx";
 import SupportChat, { SupportPage } from "../components/SupportChat.jsx";
 import { PRICE_TABLE, COMPLEXITY, URGENCY, suggest, fmtBRL, DEFAULT_CONSUMO, PROJECT_DIFFICULTY } from "../lib/pricing.js";
 import { CURRENCY_LIST, currencyOf, DEFAULT_CURRENCY, formatMoney } from "../lib/currency.js";
+import { sumItems, qtyOf, lineTotal } from "../lib/items.js";
 import { FEATURES, hasFeature as planHasFeature, isFreePlan, isSuspended } from "../lib/plan.js";
 
 // Versão do app (injetada pelo Vite a partir do package.json).
@@ -31,7 +32,7 @@ const FILTERS = {
 
 const BLANK_DOC = {
   client: "", company: "", clientEmail: "", title: "",
-  scope: "", items: [{ desc: "", value: "" }],
+  scope: "", items: [{ desc: "", value: "", qty: "1" }], showQty: true,
   start: "", end: "", payment: "", revisions: "", validity: "", bio: "",
   currency: DEFAULT_CURRENCY,
   accent: "#0A0A0A", accent2: "#6C48B0", gradient: false, theme: "claro", watermark: "", logo: null, cover: null, coverPos: "", template: "minimal",
@@ -59,7 +60,7 @@ const PRESET_COLORS = ["#1B1B1E", "#3C4F52", "#45566E", "#3F5548", "#5A5F52", "#
 
 // Limites de caracteres por campo (sempre <= aos do backend, para não falhar no salvamento).
 const LIMITS = {
-  client: 80, company: 80, title: 120, scope: 8000, itemDesc: 300, itemValue: 12,
+  client: 80, company: 80, title: 120, scope: 8000, itemDesc: 300, itemValue: 12, itemQty: 4,
   start: 60, end: 60, payment: 500, revisions: 200, validity: 60, bio: 2000,
 };
 
@@ -140,6 +141,7 @@ const fromApi = (p) => ({
   bio: p.bio, accent: p.accent, accent2: p.accent2 || "#6C48B0", gradient: !!p.gradient, theme: p.theme || "claro", watermark: p.watermark || "",
   currency: p.currency || DEFAULT_CURRENCY,
   logo: p.logo || null, cover: p.cover || null, template: p.template, createdAt: p.createdAt,
+  showQty: !!p.showQty, // proposta salva antes da feature volta sem o campo: false
 });
 
 const STEPS = [
@@ -505,10 +507,18 @@ export default function Dashboard({ go }) {
   };
   const updItem = (i, key) => (e) => {
     let v = e.target.value;
-    if (key === "value") v = v.replace(/[^0-9]/g, "");
+    if (key === "value" || key === "qty") v = v.replace(/[^0-9]/g, "");
     setDoc((d) => ({ ...d, items: d.items.map((it, idx) => (idx === i ? { ...it, [key]: v } : it)) }));
   };
-  const addItem = () => setDoc((d) => (d.items.length >= MAX_ITEMS ? d : { ...d, items: [...d.items, { desc: "", value: "" }] }));
+  const addItem = () => setDoc((d) => (d.items.length >= MAX_ITEMS ? d : { ...d, items: [...d.items, { desc: "", value: "", ...(d.showQty ? { qty: "1" } : {}) }] }));
+  const toggleQty = () => setDoc((d) => {
+    const on = !d.showQty;
+    // Ligar: quem não tem quantidade recebe "1", senão a coluna nasce com
+    // células vazias. Desligar: mantém tudo gravado, só para de aplicar —
+    // assim religar devolve as quantidades que a pessoa já tinha posto.
+    const items = on ? d.items.map((it) => (String(it.qty || "").trim() ? it : { ...it, qty: "1" })) : d.items;
+    return { ...d, showQty: on, items };
+  });
   const toggleItemHidden = (i) => setDoc((d) => ({ ...d, items: d.items.map((it, idx) => (idx === i ? { ...it, hidden: !it.hidden } : it)) }));
   // Reordena os itens: a ordem do array é a ordem que aparece na proposta e no PDF.
   const moveItem = (from, to) => setDoc((d) => {
@@ -528,9 +538,12 @@ export default function Dashboard({ go }) {
       // Descarta a última linha se estiver vazia (não duplica um item em branco).
       const last = items[items.length - 1];
       if (items.length && !String(last.desc || "").trim() && !String(last.value || "").trim()) items = items.slice(0, -1);
-      const incoming = (list && list.length) ? list : [{ desc, value: String(value) }];
+      // Quantidade 1 quando a coluna está ligada, senão a célula nasce vazia.
+      const q = d.showQty ? { qty: "1" } : {};
+      const incoming = ((list && list.length) ? list : [{ desc, value: String(value) }])
+        .map((it) => ({ ...q, ...it, ...(d.showQty && !it.qty ? { qty: "1" } : {}) }));
       items = [...items, ...incoming].slice(0, MAX_ITEMS);
-      if (!items.length) items = [{ desc: "", value: "" }];
+      if (!items.length) items = [{ desc: "", value: "", ...q }];
       return { ...d, items };
     });
     setShowCalc(false);
@@ -546,11 +559,33 @@ export default function Dashboard({ go }) {
     setTimeout(() => setCopied(false), 1800);
     pushToast("Link copiado para a área de transferência.", "success");
   };
-  // Mensagem pronta pro cliente (nome + link + CTA), pra colar no WhatsApp/Instagram.
+  // Mensagem pronta pro cliente, pra colar no WhatsApp. Escrita em blocos
+  // separados por linha em branco porque é assim que o WhatsApp respira: um
+  // parágrafo único de seis linhas vira um bloco que ninguém lê até o fim.
+  // Ordem: link primeiro (é o que a pessoa veio buscar), depois o que fazer
+  // com ele, depois a despedida.
   const proposalMessage = () => {
-    const nome = (doc.client || "").trim().split(/\s+/)[0];
-    const saud = nome ? `Olá, ${nome}! Tudo bem? 😊` : "Olá! Tudo bem? 😊";
-    return `${saud}\nPreparei sua proposta e já está disponível para você acessar:\n${shareUrl()}\nQualquer dúvida, estou à disposição!`;
+    // Primeiro nome, com inicial maiúscula — o campo aceita "mileny" e uma
+    // mensagem pro cliente não começa em caixa baixa. Tratamento ("Dr.", "Sra.")
+    // leva o nome junto: sozinho viraria "Dr., preparei sua proposta".
+    const TRAT = ["dr", "dra", "sr", "sra", "srta", "prof", "profa", "eng", "enga", "adv"];
+    const parts = (doc.client || "").trim().split(/\s+/).filter(Boolean);
+    const cap = (w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : "");
+    const ehTrat = (w) => TRAT.includes(String(w).toLowerCase().replace(/\.$/, ""));
+    const nome = parts.length === 0 ? ""
+      : ehTrat(parts[0]) && parts[1] ? `${cap(parts[0])} ${cap(parts[1])}`
+      : cap(parts[0]);
+    return [
+      nome
+        ? `${nome}, preparei sua proposta e ela já está disponível para acesso:`
+        : "Preparei sua proposta e ela já está disponível para acesso:",
+      shareUrl(),
+      "",
+      "Caso a proposta esteja de acordo com o que vocês procuram, para darmos seguimento ao serviço, basta clicar no botão disponível ao final do orçamento.",
+      "Se tiver qualquer dúvida ou quiser ajustar algum ponto da proposta, fico à disposição!",
+      "",
+      "Agradeço pela atenção e aguardo seu retorno.",
+    ].join("\n");
   };
   const copyMessage = () => {
     if (!shareUrl()) return;
@@ -608,7 +643,12 @@ export default function Dashboard({ go }) {
     }
   };
 
-  const total = doc.items.reduce((a, it) => a + (it.hidden ? 0 : parseInt(it.value, 10) || 0), 0);
+  // Mesma conta do servidor (lib/items.js): quantidade só entra quando a
+  // coluna está ligada, então desligar devolve o total anterior sem tirar
+  // nada do que a pessoa já digitou.
+  const total = sumItems(doc.items, doc.showQty);
+  // Só para a tela de conferência: quantas unidades a proposta está vendendo.
+  const qtyTotal = doc.items.reduce((a, it) => a + (it.hidden ? 0 : qtyOf(it)), 0);
   const itemCount = doc.items.filter((it) => !it.hidden && (it.desc || it.value)).length;
   const hasContent = doc.client || doc.company || doc.title || doc.scope || doc.start || doc.end ||
     doc.payment || doc.revisions || doc.validity || doc.bio || doc.items.some((it) => it.desc || it.value);
@@ -622,11 +662,12 @@ export default function Dashboard({ go }) {
   const toApiBody = () => ({
     client: doc.client, company: doc.company, clientEmail: doc.clientEmail,
     title: doc.title, scope: doc.scope,
-    items: doc.items.filter((it) => it.desc || it.value).map((it) => ({ desc: it.desc || "", value: String(it.value || ""), hidden: !!it.hidden })),
+    items: doc.items.filter((it) => it.desc || it.value).map((it) => ({ desc: it.desc || "", value: String(it.value || ""), hidden: !!it.hidden, qty: String(it.qty || "") })),
     start: doc.start, end: doc.end, payment: doc.payment, revisions: doc.revisions,
     validity: doc.validity, bio: doc.bio, accent: doc.accent, accent2: doc.accent2, gradient: !!doc.gradient, theme: doc.theme || "claro", watermark: doc.watermark || "",
     currency: doc.currency || DEFAULT_CURRENCY,
     logo: doc.logo || "", cover: doc.cover || "", coverPos: doc.coverPos || "", template: doc.template,
+    showQty: !!doc.showQty,
   });
 
   // Rascunho guardado localmente (não consome cota do plano até ser concluído).
@@ -636,7 +677,7 @@ export default function Dashboard({ go }) {
     scope: doc.scope, items: doc.items, start: doc.start, end: doc.end,
     payment: doc.payment, revisions: doc.revisions, validity: doc.validity, bio: doc.bio,
     accent: doc.accent, accent2: doc.accent2, gradient: doc.gradient, logo: doc.logo, cover: doc.cover, coverPos: doc.coverPos || "", template: doc.template,
-    currency: doc.currency || DEFAULT_CURRENCY,
+    currency: doc.currency || DEFAULT_CURRENCY, showQty: !!doc.showQty,
     updatedAt: Date.now(),
   });
 
@@ -666,7 +707,8 @@ export default function Dashboard({ go }) {
   const startProposalWithItem = (desc, value, list) => {
     let bio = "";
     try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
-    const items = (list && list.length) ? list.slice(0, MAX_ITEMS) : [{ desc, value: String(value) }];
+    const items = ((list && list.length) ? list.slice(0, MAX_ITEMS) : [{ desc, value: String(value) }])
+      .map((it) => ({ ...it, qty: String(it.qty || "1") }));
     setDoc({ ...BLANK_DOC, bio, items, currency: user?.currency || DEFAULT_CURRENCY });
     pristineRef.current = ""; // veio da calculadora com valores: já conta como conteúdo
     setDraftId(newId());
@@ -697,7 +739,7 @@ export default function Dashboard({ go }) {
       start: src.start || "", end: src.end || "", payment: src.payment || "",
       revisions: src.revisions || "", validity: src.validity || "", bio: src.bio || "",
       accent: src.accent || "#0A0A0A", accent2: src.accent2 || "#6C48B0", gradient: !!src.gradient, theme: src.theme || "claro", watermark: src.watermark || "", logo: src.logo || null, cover: src.cover || null, coverPos: src.coverPos || "", template: src.template || "minimal",
-      currency: src.currency || DEFAULT_CURRENCY,
+      currency: src.currency || DEFAULT_CURRENCY, showQty: !!src.showQty,
     };
     setDoc(d);
     pristineRef.current = JSON.stringify(d); // abriu uma existente: só re-salva se editar
@@ -894,7 +936,7 @@ export default function Dashboard({ go }) {
       revisions: src.revisions || "", validity: src.validity || "", bio: src.bio || "",
       accent: src.accent || "#0A0A0A", accent2: src.accent2 || "#6C48B0", gradient: !!src.gradient,
       theme: src.theme || "claro", watermark: src.watermark || "", logo: src.logo || null, cover: src.cover || null,
-      template: src.template || "minimal",
+      template: src.template || "minimal", showQty: !!src.showQty,
     };
     setDoc(d);
     pristineRef.current = ""; // cópia já tem conteúdo: conta como rascunho
@@ -1220,8 +1262,10 @@ export default function Dashboard({ go }) {
         .db-dsn-cta:hover{ background:${color.surface3}; }
         .db-dsn-chips{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:22px; }
         .db-dsn-chip{ display:inline-flex; align-items:center; gap:7px; font-family:${font.body}; font-size:13.5px; font-weight:600; color:${color.gray600}; background:#fff; border:1px solid ${color.gray200}; border-radius:999px; padding:8px 14px; cursor:pointer; transition:background .15s ease, border-color .15s ease, color .15s ease; }
-        .db-dsn-chip:hover{ border-color:${color.gray300}; }
+        .db-dsn-chip:hover:not(:disabled){ border-color:${color.gray300}; }
+        .db-dsn-chip:disabled{ opacity:.42; cursor:default; }
         .db-dsn-chip.on{ color:#fff; background:${color.ink}; border-color:${color.ink}; }
+        .db-dsn-sep{ width:1px; align-self:stretch; margin:2px 4px; background:${color.gray200}; flex:none; }
         .db-dsn-chip-n{ font-size:11px; font-weight:700; color:${color.gray400}; background:${color.surface}; border-radius:999px; padding:1px 7px; }
         .db-dsn-chip.on .db-dsn-chip-n{ color:#fff; background:rgba(255,255,255,0.18); }
         .db-dsn-chip:focus-visible{ outline:2px solid ${color.accent}; outline-offset:2px; }
@@ -1420,6 +1464,12 @@ export default function Dashboard({ go }) {
              mostrando todo o texto); valor e controles descem para a segunda linha. */
           .db-item-row{ flex-wrap:wrap; align-items:flex-start !important; }
           .db-item-row > .db-item-desc{ order:-1; flex:1 1 100% !important; }
+          /* Quantidade sobe para a MESMA linha do nome, à esquerda dele: lê-se
+             "3 | Vídeo institucional", que é a ordem da própria proposta. Se
+             ficasse na linha de baixo, os 58px dela empurrariam a lixeira para
+             uma terceira linha num aparelho de 360px. */
+          .db-item-row > .db-item-qty{ order:-2; flex:0 0 52px !important; }
+          .db-item-row > .db-item-desc{ flex:1 1 auto !important; min-width:60% !important; }
           /* Calculadora: card com padding menor no mobile pra sobrar largura ao conteúdo. */
           .calc-card{ padding:16px 14px !important; }
           /* Calculadora em tela cheia no mobile: esconde a barra lateral e mostra o "voltar". */
@@ -1901,6 +1951,24 @@ export default function Dashboard({ go }) {
                   <div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
                       <div style={{ ...sectionLabel, marginBottom: 0 }}>Investimento</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <label
+                        className="db-tip"
+                        data-tip={doc.showQty ? "A proposta mostra QUANTIDADE, ITEM e VALOR. Desligue para voltar a ITEM e VALOR" : "Mostrar uma coluna de quantidade na proposta. O valor do item passa a ser o preço por unidade"}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: locked ? "default" : "pointer", flex: "none" }}
+                      >
+                        <span style={{ fontSize: 13, fontWeight: 600, color: doc.showQty ? color.gray700 : color.gray500, transition: "color .18s ease", whiteSpace: "nowrap" }}>Quantidade</span>
+                        <span className="db-sw">
+                          <input
+                            type="checkbox"
+                            checked={!!doc.showQty}
+                            onChange={toggleQty}
+                            disabled={locked}
+                            aria-label="Mostrar coluna de quantidade na proposta"
+                          />
+                          <i />
+                        </span>
+                      </label>
                       <div className="db-tip" data-tip="Moeda desta proposta" style={{ position: "relative", display: "flex" }}>
                         <select
                           value={doc.currency || DEFAULT_CURRENCY}
@@ -1913,7 +1981,13 @@ export default function Dashboard({ go }) {
                         </select>
                         <ChevronDown size={14} strokeWidth={2} color={color.gray400} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
                       </div>
+                      </div>
                     </div>
+                    {doc.showQty && (
+                      <div style={{ fontSize: "12.5px", color: color.gray500, background: color.surface3, border: `1px solid ${color.gray200}`, borderRadius: 9, padding: "8px 11px", marginBottom: 10, lineHeight: 1.5, animation: "dbUp .25s ease both" }}>
+                        Com a coluna ligada, o valor que você digita é o preço <strong style={{ fontWeight: 600, color: color.gray700 }}>por unidade</strong>. A proposta mostra o total de cada linha (quantidade × valor) e soma tudo no fim.
+                      </div>
+                    )}
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {doc.items.map((it, i) => {
                         const isDragging = dragItem === i;
@@ -1937,6 +2011,18 @@ export default function Dashboard({ go }) {
                               title="Arraste para reordenar (ou use as setas ↑ ↓)"
                               style={{ flex: "none", width: 20, height: 38, border: "none", background: "none", padding: 0, touchAction: "none" }}
                             ><GripVertical size={16} strokeWidth={2} /></button>
+                          )}
+                          {doc.showQty && (
+                            <input
+                              value={it.qty ?? ""}
+                              onChange={updItem(i, "qty")}
+                              maxLength={LIMITS.itemQty}
+                              inputMode="numeric"
+                              placeholder="1"
+                              aria-label={`Quantidade do item ${i + 1}`}
+                              className="db-input db-item-qty"
+                              style={{ ...inp(), flex: "none", width: 58, textAlign: "center", padding: "10px 6px", background: it.hidden ? color.surface : color.white, textDecoration: it.hidden ? "line-through" : "none", color: it.hidden ? color.gray400 : color.ink }}
+                            />
                           )}
                           <textarea id={i === 0 ? "ed-item0" : undefined} className="db-input db-item-desc" value={it.desc} onChange={updItem(i, "desc")} maxLength={LIMITS.itemDesc} placeholder="Item" rows={1}
                             ref={(el) => { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }}
@@ -2057,7 +2143,7 @@ export default function Dashboard({ go }) {
       {/* Cópia oculta da proposta, só para gerar o PDF (mesmo design do cliente) */}
       {view === "editor" && (
         <div ref={pdfRef} aria-hidden="true" style={{ position: "fixed", left: -99999, top: 0, width: PAGE_W, background: "#fff", pointerEvents: "none", zIndex: -1 }}>
-          <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} print />
+          <ProposalDesign id={doc.template} doc={doc} accent={doc.accent} print pdf />
         </div>
       )}
 
@@ -2078,7 +2164,7 @@ export default function Dashboard({ go }) {
                 ["Empresa", doc.company || "—"],
                 ["Título", doc.title || "—"],
                 ["Modelo", currentTplName],
-                ["Itens", `${itemCount} ${itemCount === 1 ? "item" : "itens"}`],
+                ["Itens", `${itemCount} ${itemCount === 1 ? "item" : "itens"}${doc.showQty ? ` · ${qtyTotal} ${qtyTotal === 1 ? "unidade" : "unidades"}` : ""}`],
                 ["Valor total", formatMoney(total, doc.currency)],
               ].map(([k, v], i) => (
                 <div key={k} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 14, padding: "10px 13px", borderTop: i ? `1px solid ${color.line3}` : "none" }}>
@@ -3197,7 +3283,9 @@ const pdfFileName = (row) => {
   return `proposta-${name}.pdf`;
 };
 
-const BASIC_TPL_IDS = ["minimal", "bold"]; // espelha o plano Básico do backend
+// A lista de modelos do plano Gratuito vem do registro dos modelos
+// (`free: true` em designs.jsx), não de uma cópia aqui. A autoridade de quem
+// pode usar o quê continua no servidor; isto é só cadeado e filtro.
 
 // Galeria de modelos. É o MESMO componente em dois papéis, sem duplicar nada:
 //
@@ -3338,9 +3426,16 @@ function TemplatePreview({ id, list, onClose, onGo, onUse, locked, current, hasD
 function DesignGallery({ onUse, plan, onUpgrade, scope, picking = false, hasData = false, current = "", swapLabel = "", onBackToEditor, onCancelFlow }) {
   const [cat, setCat] = useState("todos");
   const [preview, setPreview] = useState("");   // id do modelo aberto em tamanho de leitura
-  const list = cat === "todos" ? DESIGNS : DESIGNS.filter((d) => d.cat === cat);
+  // Dois eixos de filtro independentes: ESTILO (Essenciais, Editoriais...) e
+  // PLANO (Gratuitos, Premium). Separados porque a pergunta "que cara tem" e a
+  // pergunta "eu posso usar" são diferentes — e combinadas ("editorial que eu
+  // posso usar") respondem o que o usuário do plano grátis realmente quer.
+  const [plano, setPlano] = useState("todos");
+  const list = DESIGNS
+    .filter((d) => cat === "todos" || d.cat === cat)
+    .filter((d) => plano === "todos" || (plano === "gratuito" ? d.free : !d.free));
   const showPro = plan === "basic" || plan === "free" || !plan;
-  const isLocked = (id) => showPro && !BASIC_TPL_IDS.includes(id);
+  const isLocked = (id) => showPro && !templateIsFree(id);
   // Selo "Novo" some de vez ao clicar (persistido por usuário no localStorage).
   // Relê quando o `scope` (email) fica disponível: na 1ª renderização o usuário
   // ainda não carregou, então sem isso a chave lida seria a errada (vazia) e o
@@ -3406,11 +3501,42 @@ function DesignGallery({ onUse, plan, onUpgrade, scope, picking = false, hasData
         </div>
       )}
 
-      <div className="db-dsn-chips" role="tablist" aria-label="Filtrar modelos por estilo">
+      <div className="db-dsn-chips" role="tablist" aria-label="Filtrar modelos">
         {TPL_CATS.map(([id, label]) => {
-          const n = id === "todos" ? DESIGNS.length : DESIGNS.filter((d) => d.cat === id).length;
+          // A contagem respeita o outro eixo: com "Gratuitos" ligado, "Editoriais"
+          // mostra quantos editoriais são gratuitos, não o total. Número que não
+          // bate com a lista abaixo é pior que número nenhum.
+          const n = DESIGNS.filter((d) => (id === "todos" || d.cat === id) && (plano === "todos" || (plano === "gratuito" ? d.free : !d.free))).length;
           return (
-            <button key={id} role="tab" aria-selected={cat === id} onClick={() => setCat(id)} className={cat === id ? "db-dsn-chip on" : "db-dsn-chip"}>
+            <button key={id} role="tab" aria-selected={cat === id} disabled={n === 0 && id !== "todos"}
+              onClick={() => setCat(id)} className={cat === id ? "db-dsn-chip on" : "db-dsn-chip"}>
+              {label}<span className="db-dsn-chip-n">{n}</span>
+            </button>
+          );
+        })}
+
+        {/* eixo do PLANO — separado por um fio, porque responde outra pergunta */}
+        <span aria-hidden="true" className="db-dsn-sep" />
+        {[["gratuito", "Gratuitos"], ["premium", "Premium"]].map(([id, label]) => {
+          const on = plano === id;
+          const n = DESIGNS.filter((d) => (cat === "todos" || d.cat === cat) && (id === "gratuito" ? d.free : !d.free)).length;
+          return (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={on}
+              // Clicar de novo no chip aceso desliga o filtro: sem isso não há
+              // como voltar a ver todos sem mexer no outro eixo.
+              onClick={() => {
+                const novo = on ? "todos" : id;
+                setPlano(novo);
+                // Se a categoria escolhida não tem nenhum modelo neste plano,
+                // volta para "Todos" em vez de mostrar grade vazia.
+                if (novo !== "todos" && cat !== "todos"
+                  && !DESIGNS.some((d) => d.cat === cat && (novo === "gratuito" ? d.free : !d.free))) setCat("todos");
+              }}
+              className={on ? "db-dsn-chip on" : "db-dsn-chip"}
+            >
               {label}<span className="db-dsn-chip-n">{n}</span>
             </button>
           );
@@ -3731,7 +3857,7 @@ function ClientsPanel({ rows, onRefresh, suspended = false }) {
       {/* Cópia oculta da proposta escolhida, só para gerar o PDF */}
       {pdfRow && (
         <div ref={cliPdfRef} aria-hidden="true" style={{ position: "fixed", left: -99999, top: 0, width: PAGE_W, background: "#fff", pointerEvents: "none", zIndex: -1 }}>
-          <ProposalDesign id={pdfRow.template} doc={pdfRow} accent={pdfRow.accent} print />
+          <ProposalDesign id={pdfRow.template} doc={pdfRow} accent={pdfRow.accent} print pdf />
         </div>
       )}
     </div>

@@ -20,6 +20,11 @@ const itemSchema = z.object({
   desc: z.string().max(300).optional().default(""),
   value: z.string().max(20).optional().default(""),
   hidden: z.boolean().optional().default(false), // item que o dono optou por não cobrar/mostrar
+  // Quantidade: opcional e guardada como texto, igual a `value`, que também é
+  // texto desde a 001. Vazio = 1. Só é APLICADA quando a proposta tem
+  // showQty ligado; guardada, ela é sempre — assim desligar e religar a coluna
+  // não apaga o que a pessoa já tinha digitado.
+  qty: z.string().max(5).optional().default(""),
 });
 
 export const proposalSchema = z.object({
@@ -29,6 +34,7 @@ export const proposalSchema = z.object({
   title: z.string().max(300).optional().default(""),
   scope: z.string().max(8000).optional().default(""),
   items: z.array(itemSchema).max(20).optional().default([]),   // teto de 20 itens no servidor
+  showQty: z.boolean().optional().default(false), // exibe a coluna Quantidade na proposta
   start: z.string().max(100).optional().default(""),
   end: z.string().max(100).optional().default(""),
   payment: z.string().max(500).optional().default(""),

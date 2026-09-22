@@ -12,6 +12,7 @@ import { PLAN_LIMITS, templateAllowed, proposalCap, hasFeature, FEATURES, isSusp
 import { getFreshAccess } from "../lib/googleAccount.js";
 import { buildRawEmail, sendGmail } from "../lib/googleMail.js";
 import { proposalEmailHtml, proposalEmailText, followUpEmailHtml, followUpEmailText } from "../lib/mailer.js";
+import { sumItems } from "../lib/items.js";
 
 const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -74,9 +75,7 @@ const countUsage = async (userId, cap, anchor) => {
   return rows[0]?.n || 0;
 };
 
-const sumItems = (items = []) =>
-  items.filter((it) => !it.hidden) // itens ocultos não entram no total
-    .reduce((a, it) => a + (parseInt(String(it.value || "").replace(/\D/g, ""), 10) || 0), 0);
+
 
 const toProposal = (p) => ({
   id: p.id, publicId: p.public_id, client: p.client, company: p.company, clientEmail: p.client_email,
@@ -84,6 +83,7 @@ const toProposal = (p) => ({
   payment: p.payment, revisions: p.revisions, validity: p.validity, bio: p.bio,
   accent: p.accent, accent2: p.accent2, gradient: p.gradient, theme: p.theme, watermark: p.watermark, logo: p.logo, cover: p.cover, coverPos: p.cover_pos || "",
   template: p.template, status: p.status, value: Number(p.value), currency: p.currency || "BRL",
+  showQty: !!p.show_qty,
   createdAt: p.created_at, updatedAt: p.updated_at,
 });
 
@@ -376,9 +376,9 @@ r.post("/", writeLimiter, async (req, res, next) => {
       }
     }
     const { rows } = await query(
-      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value, logo, cover, theme, watermark, currency, cover_pos)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) returning *`,
-      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark, d.currency, d.coverPos]
+      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value, logo, cover, theme, watermark, currency, cover_pos, show_qty)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) returning *`,
+      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items, d.showQty), d.logo, d.cover, d.theme, d.watermark, d.currency, d.coverPos, d.showQty]
     );
     // Registra o uso (append-only). Nunca é apagado ao excluir a proposta.
     await query("insert into proposal_usage (user_id) values ($1)", [req.user.id]).catch(() => {});
@@ -402,9 +402,9 @@ r.put("/:id", writeLimiter, async (req, res, next) => {
       return res.status(409).json({ error: "Esta proposta já foi enviada e não pode ser editada. Crie uma nova." });
     }
     const { rows } = await query(
-      `update proposals set client=$3, company=$4, client_email=$5, title=$6, scope=$7, items=$8, start_date=$9, end_date=$10, payment=$11, revisions=$12, validity=$13, bio=$14, accent=$15, accent2=$16, gradient=$17, template=$18, value=$19, logo=$20, cover=$21, theme=$22, watermark=$23, currency=$24, cover_pos=$25, updated_at=now()
+      `update proposals set client=$3, company=$4, client_email=$5, title=$6, scope=$7, items=$8, start_date=$9, end_date=$10, payment=$11, revisions=$12, validity=$13, bio=$14, accent=$15, accent2=$16, gradient=$17, template=$18, value=$19, logo=$20, cover=$21, theme=$22, watermark=$23, currency=$24, cover_pos=$25, show_qty=$26, updated_at=now()
        where id=$1 and user_id=$2 returning *`,
-      [req.params.id, req.user.id, d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items), d.logo, d.cover, d.theme, d.watermark, d.currency, d.coverPos]
+      [req.params.id, req.user.id, d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items, d.showQty), d.logo, d.cover, d.theme, d.watermark, d.currency, d.coverPos, d.showQty]
     );
     if (!rows[0]) return res.status(404).json({ error: "Proposta não encontrada." });
     res.json({ proposal: toProposal(rows[0]) });
