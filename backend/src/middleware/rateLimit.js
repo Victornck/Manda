@@ -39,6 +39,16 @@ export const generalLimiter = rateLimit({
   message: { error: "Muitas requisições. Aguarde um instante." },
 });
 
+// Health check com banco (/health/db). Fica aberto de propósito: monitor externo
+// não autentica. A resposta é só um booleano e a consulta não lê tabela nenhuma,
+// então não há o que vazar. O teto existe por outro motivo: impedir que alguém
+// use a rota para esgotar o pool de conexões do Postgres. Um monitor de 5 em 5
+// minutos gasta 1 de 30.
+export const healthLimiter = rateLimit({
+  windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
+  message: { ok: false },
+});
+
 // Cadastro e login com Google: criação de conta em massa.
 export const authLimiter = rateLimit({
   windowMs: 15 * 60_000, max: 20, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",

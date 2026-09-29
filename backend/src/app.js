@@ -5,7 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { env } from "./env.js";
-import { generalLimiter, publicLimiter, billingLimiter, webhookLimiter } from "./middleware/rateLimit.js";
+import { generalLimiter, publicLimiter, billingLimiter, webhookLimiter, healthLimiter } from "./middleware/rateLimit.js";
+import { query } from "./db.js";
 import { notFound, errorHandler } from "./middleware/error.js";
 import authRoutes from "./routes/auth.js";
 import proposalRoutes from "./routes/proposals.js";
@@ -56,7 +57,33 @@ app.use("/api/webhooks/mercadopago", webhookLimiter, webhookRoutes);
 // (health check do proxy/monitor não deve gastar cota).
 app.use("/api", generalLimiter);
 
+// Vivo, sem tocar no banco. É o que o proxy usa para saber se o processo subiu.
 app.get("/health", (_req, res) => res.json({ ok: true }));
+
+// Vivo E com o banco respondendo. Três decisões de segurança aqui:
+//
+// 1. "select 1" não lê nenhuma tabela, nenhuma coluna, nenhuma linha. Não existe
+//    dado do usuário no caminho desta rota, então não há o que vazar.
+// 2. A resposta é só { ok: true|false }. A mensagem de erro real vai para o log
+//    do servidor e NUNCA para o cliente: ela contém host e usuário do banco.
+// 3. Teto próprio (healthLimiter), porque a rota abre conexão e sem limite viraria
+//    um jeito barato de esgotar o pool.
+//
+// Serve também para manter o projeto do Supabase fora da pausa por inatividade,
+// que o /health acima não faria: ele não fala com o banco.
+app.get("/health/db", healthLimiter, async (_req, res) => {
+  let t;
+  const limite = new Promise((_, rej) => { t = setTimeout(() => rej(new Error("timeout")), 5000); });
+  try {
+    await Promise.race([query("select 1"), limite]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[health/db] banco nao respondeu:", e.message);
+    res.status(503).json({ ok: false });
+  } finally {
+    clearTimeout(t);
+  }
+});
 app.use("/api/auth", authRoutes);
 app.use("/api/proposals", proposalRoutes);
 app.use("/api/integrations", integrationRoutes);
@@ -134,7 +161,7 @@ if (fs.existsSync(indexPath)) {
   // A canônica precisa apontar cada URL pra si mesma, senão o Google vê /precos,
   // /privacidade etc. como "alternativas" da home (canônica fixa) e não indexa.
   app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api") || req.path === "/health") return next();
+    if (req.path.startsWith("/api") || req.path.startsWith("/health")) return next();
     const url = "https://mandaproposta.com" + (req.path === "/" ? "/" : req.path.replace(/\/+$/, ""));
     const html = readIndex()
       .replace('href="https://mandaproposta.com/"', `href="${url}"`)
