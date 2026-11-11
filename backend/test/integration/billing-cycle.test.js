@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { api, newUser, grantPlan, proposalBody } from "../helpers.js";
+import { api, newUser, grantPlan, proposalBody, createAndConclude } from "../helpers.js";
 import { query } from "../../src/db.js";
 
-const create = (token, body = proposalBody()) =>
-  api().post("/api/proposals").set("Authorization", `Bearer ${token}`).send(body);
+// "Criar" aqui é criar E concluir: a cota é debitada na conclusão, não no rascunho.
+const create = (token, body = proposalBody()) => createAndConclude(token, body);
 const usage = (token) => api().get("/api/proposals/usage").set("Authorization", `Bearer ${token}`);
 
 // Assinante com ciclo ancorado numa data: quota_anchor define quando a cota vira.

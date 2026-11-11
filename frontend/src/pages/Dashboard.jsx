@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useLocation, useNavigationType } from "react-router-dom";
 import {
   Plus, FileText, LayoutGrid, Users, Settings, ArrowLeft, ArrowRight, Image as ImageIcon,
   Trash2, Search, LogOut, User, Link2, Mail, Pencil, Check, AlertTriangle, X,
@@ -9,7 +9,8 @@ import {
 import { font, color, statusColors, avatarPalette, initials, shadow } from "../theme.js";
 import HomePage from "./Home.jsx";
 import { api, setToken } from "../lib/api.js";
-import { loadProposals, upsertProposal, removeProposal, newId } from "../lib/drafts.js";
+import { loadProposals, upsertProposal, removeProposal, newId, loadBuffer, saveBuffer, clearBuffer } from "../lib/drafts.js";
+import { copyText } from "../lib/clipboard.js";
 import { loadNotifs, mergeNotifs, getSeen, getReadSet, markRead, removeNotifs } from "../lib/notifs.js";
 import { DESIGNS, TEMPLATE_CATS, ProposalDesign, PageThumb, PAGE_W, sampleFor, templateFields, templateThemes, safeTheme, templateHas, templateIsFree } from "../templates/designs.jsx";
 import CodeInput from "../components/CodeInput.jsx";
@@ -22,12 +23,17 @@ import { FEATURES, hasFeature as planHasFeature, isFreePlan, isSuspended } from 
 // Versão do app (injetada pelo Vite a partir do package.json).
 const APP_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "";
 
+// Abas da lista. São MUTUAMENTE EXCLUSIVAS: cada proposta cai em exatamente uma,
+// então Rascunhos + Aguardando resposta + Aceitas + Recusadas = Todas. Antes
+// havia "Enviadas" (tudo que já saiu) ao lado de "Pendentes" (um pedaço dela):
+// com uma única proposta a tela dizia "Enviadas 1 · Pendentes 1" e parecia
+// haver duas. Os status do banco não mudaram — só o agrupamento.
 const FILTERS = {
   Todas: null,
-  Enviadas: ["Enviada", "Visualizada", "Aceita", "Recusada"],
-  Aceitas: ["Aceita"],
-  Pendentes: ["Enviada", "Visualizada"],
   Rascunhos: ["Rascunho"],
+  "Aguardando resposta": ["Enviada", "Visualizada"],
+  Aceitas: ["Aceita"],
+  Recusadas: ["Recusada"],
 };
 
 const BLANK_DOC = {
@@ -132,6 +138,44 @@ function timeAgo(iso) {
   return fmtDate(iso);
 }
 
+// Rota do app → o que mostrar. O editor tem endereço próprio:
+//   /app/proposta/<id>          etapa 2 (montar)
+//   /app/proposta/<id>/modelo   etapa 1 (escolher/trocar o modelo)
+// Assim atualizar a página, colar o link ou usar voltar/avançar cai na proposta
+// certa. Todo o resto é aba: /app, /app/propostas, /app/templates...
+function parseAppPath(pathname) {
+  const parts = String(pathname || "").replace(/^\/app\/?/, "").split("/").filter(Boolean);
+  if (parts[0] === "proposta" && parts[1]) {
+    let pid = parts[1];
+    try { pid = decodeURIComponent(pid); } catch { /* mantém cru */ }
+    return { kind: "proposal", pid, step: parts[2] === "modelo" ? "modelo" : "editar" };
+  }
+  return { kind: "tab", tab: parts[0] || "" };
+}
+const proposalPath = (id, step) => `/app/proposta/${encodeURIComponent(id)}${step === "modelo" ? "/modelo" : ""}`;
+
+// Tem algo digitado? Proposta em branco não vira rascunho no servidor.
+const docHasContent = (d) => !!(d && (d.client || d.company || d.title || d.scope || d.start || d.end ||
+  d.payment || d.revisions || d.validity || d.bio || (d.items || []).some((it) => it.desc || it.value)));
+
+// Corpo enviado à API (formato do proposalSchema do backend).
+const toBody = (doc) => ({
+  client: doc.client, company: doc.company, clientEmail: doc.clientEmail,
+  title: doc.title, scope: doc.scope,
+  items: (doc.items || []).filter((it) => it.desc || it.value).map((it) => ({ desc: it.desc || "", value: String(it.value || ""), hidden: !!it.hidden, qty: String(it.qty || "") })),
+  start: doc.start, end: doc.end, payment: doc.payment, revisions: doc.revisions,
+  validity: doc.validity, bio: doc.bio, accent: doc.accent, accent2: doc.accent2, gradient: !!doc.gradient, theme: doc.theme || "claro", watermark: doc.watermark || "",
+  currency: doc.currency || DEFAULT_CURRENCY,
+  logo: doc.logo || "", cover: doc.cover || "", coverPos: doc.coverPos || "", template: doc.template,
+  showQty: !!doc.showQty,
+});
+// "Impressão digital" do que o servidor guardaria. Duas versões com a mesma
+// impressão são a mesma proposta: é assim que o autosave sabe se há o que salvar.
+const snapOf = (doc) => JSON.stringify(toBody(doc));
+
+const AUTOSAVE_MS = 1200;                       // espera depois da última tecla
+const RETRY_MS = [3000, 8000, 20000, 45000];    // novas tentativas quando o servidor falha
+
 // Converte uma proposta da API para o formato de linha da tabela (status em PT).
 const fromApi = (p) => ({
   id: p.id, publicId: p.publicId, client: p.client, company: p.company, clientEmail: p.clientEmail,
@@ -140,7 +184,8 @@ const fromApi = (p) => ({
   start: p.start, end: p.end, payment: p.payment, revisions: p.revisions, validity: p.validity,
   bio: p.bio, accent: p.accent, accent2: p.accent2 || "#6C48B0", gradient: !!p.gradient, theme: p.theme || "claro", watermark: p.watermark || "",
   currency: p.currency || DEFAULT_CURRENCY,
-  logo: p.logo || null, cover: p.cover || null, template: p.template, createdAt: p.createdAt,
+  logo: p.logo || null, cover: p.cover || null, coverPos: p.coverPos || "", template: p.template, createdAt: p.createdAt,
+  updatedAt: p.updatedAt || p.createdAt || null, // cru: decide se o buffer local é mais novo que o servidor
   showQty: !!p.showQty, // proposta salva antes da feature volta sem o campo: false
 });
 
@@ -158,9 +203,13 @@ export default function Dashboard({ go }) {
   // aba própria "propostas".
   const TAB_TO_VIEW = { propostas: "list", templates: "templates", calculadora: "calc", clientes: "clients", notificacoes: "notifications", configuracoes: "settings", suporte: "support" };
   const VIEW_TO_TAB = { list: "propostas", templates: "templates", calc: "calculadora", clients: "clientes", notifications: "notificacoes", settings: "configuracoes", support: "suporte" };
-  const { tab: urlTab } = useParams();
   const navigate = useNavigate();
-  const [view, setView] = useState(() => TAB_TO_VIEW[urlTab || ""] || "home");
+  const location = useLocation();
+  const navType = useNavigationType(); // "POP" = carga inicial, F5, voltar/avançar; "PUSH"/"REPLACE" = navegação por código
+  const route = useMemo(() => parseAppPath(location.pathname), [location.pathname]);
+  // "opening" = a URL aponta pra uma proposta que ainda está sendo carregada;
+  // "missing" = ela não existe (ou não é desta conta). Nenhuma das duas mexe na URL.
+  const [view, setView] = useState(() => (route.kind === "proposal" ? "opening" : TAB_TO_VIEW[route.tab] || "home"));
 
   // Navegação colapsável. Desktop: sidebar recolhida (só ícones) por padrão,
   // expansível e lembrada no localStorage. Mobile: drawer sobre o conteúdo,
@@ -174,21 +223,6 @@ export default function Dashboard({ go }) {
   useEffect(() => { if (!drawer) return; const onKey = (e) => { if (e.key === "Escape") setDrawer(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [drawer]);
   useEffect(() => { setDrawer(false); }, [view]);
 
-  // URL mudou (voltar/avançar): segue, exceto se estiver no meio de uma edição.
-  useEffect(() => {
-    const v = TAB_TO_VIEW[urlTab || ""] || "home";
-    setView((cur) => (cur === "editor" || cur === v ? cur : v));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlTab]);
-
-  // Aba mudou: reflete na URL (o editor não mexe nela).
-  useEffect(() => {
-    if (view === "editor") return;
-    const slug = VIEW_TO_TAB[view];
-    const path = slug ? `/app/${slug}` : "/app";
-    if (window.location.pathname !== path) navigate(path);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view]);
   const [filter, setFilter] = useState("Todas");
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState(() => loadProposals());
@@ -196,7 +230,16 @@ export default function Dashboard({ go }) {
   const [booting, setBooting] = useState(true); // 1ª carga (com retry) ainda em andamento
   const [doc, setDoc] = useState(BLANK_DOC);
   const [draftId, setDraftId] = useState(null);
-  const pristineRef = useRef("");  // snapshot do doc ao abrir; só salva rascunho se mudar
+  // Status da proposta aberta no editor. É ele (e não mais "o id é local?") que
+  // decide se dá pra editar: rascunho edita, o resto é só leitura. Rascunho agora
+  // também mora no servidor, então ter id de servidor deixou de significar "enviada".
+  const [draftStatus, setDraftStatus] = useState("Rascunho");
+  // Salvamento automático: idle (nada a salvar) | pending (alteração aguardando)
+  // | saving (indo pro servidor) | saved (servidor confirmou) | error.
+  const [saveState, setSaveState] = useState("idle");
+  const [saveErr, setSaveErr] = useState("");
+  const [missWhy, setMissWhy] = useState("notfound"); // motivo da tela "não encontrada": notfound | offline
+  const [copiedRow, setCopiedRow] = useState(null);   // linha cuja ação "copiar link" acabou de funcionar
   const [editorFrom, setEditorFrom] = useState("list"); // aba de onde o editor foi aberto
   // true = a galeria de modelos está sendo usada como ETAPA 1 de uma proposta
   // em andamento — seja porque a pessoa acabou de clicar em "Nova proposta"
@@ -377,8 +420,13 @@ export default function Dashboard({ go }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Onboarding: só avança para quem tem plano ativo (grátis não conclui o tutorial).
-  const onbActive = !!user && user.plan !== "free";
+  // Onboarding: vale para QUALQUER conta, inclusive a gratuita. Antes só contava
+  // para plano pago (regra de quando o grátis não podia criar proposta); depois
+  // que o gratuito ganhou 2 propostas, o card continuou aparecendo pra ele mas
+  // travado em "0 de 3" pra sempre. O progresso vem de dados reais do servidor
+  // (propostas existentes e uso já debitado), então vale em qualquer sessão ou
+  // aparelho, e é idempotente: repetir a ação não conta duas vezes.
+  const onbActive = !!user;
   const onbBioSet = (() => { try { return !!(localStorage.getItem(bioKeyFor(user?.email)) || "").trim(); } catch { return false; } })();
   const concluiuAlguma = usage.used > 0; // append-only: não some ao apagar propostas
   const onbSteps = {
@@ -551,13 +599,25 @@ export default function Dashboard({ go }) {
   const removeItem = (i) => () => setDoc((d) => ({ ...d, items: d.items.filter((_, idx) => idx !== i) }));
 
   const shareUrl = () => (draftPublicId ? `${window.location.origin}/p/${draftPublicId}` : "");
-  const copyLink = () => {
+  const copyLink = async () => {
     const url = shareUrl();
     if (!url) return;
-    if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
+    if (!(await copyText(url))) { pushToast(`Não deu pra copiar automaticamente. O link é: ${url}`, "info"); return; }
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
     pushToast("Link copiado para a área de transferência.", "success");
+  };
+  // Copiar o link direto da lista, sem abrir a proposta. Só existe para o que já
+  // foi concluído: rascunho não tem link público ativo (o backend devolve 404).
+  // Usa o link que a proposta JÁ tem — não gera outro.
+  const copyRowLink = (r) => async (e) => {
+    e.stopPropagation();
+    if (!r.publicId || r.status === "Rascunho") return;
+    const url = `${window.location.origin}/p/${r.publicId}`;
+    if (!(await copyText(url))) { pushToast(`Não deu pra copiar automaticamente. O link é: ${url}`, "info"); return; }
+    setCopiedRow(r.id);
+    setTimeout(() => setCopiedRow((cur) => (cur === r.id ? null : cur)), 1800);
+    pushToast(`Link da proposta de ${r.client || "cliente"} copiado.`, "success");
   };
   // Mensagem pronta pro cliente, pra colar no WhatsApp. Escrita em blocos
   // separados por linha em branco porque é assim que o WhatsApp respira: um
@@ -621,7 +681,7 @@ export default function Dashboard({ go }) {
     if (emailState === "sending" || emailState === "sent") return;
     const to = String(doc.clientEmail || "").trim();
     if (!emailRe.test(to)) { setEmailState("error"); setEmailNote("Digite um e-mail válido para o cliente."); return; }
-    if (!draftId || isLocalId(draftId)) { setEmailState("error"); setEmailNote("Conclua a proposta antes de enviar."); return; }
+    if (!draftId || isLocalId(draftId) || draftStatus === "Rascunho") { setEmailState("error"); setEmailNote("Conclua a proposta antes de enviar."); return; }
     setEmailState("sending"); setEmailNote("");
     try {
       const res = await api.sendProposalEmail(draftId, { to });
@@ -650,36 +710,250 @@ export default function Dashboard({ go }) {
   // Só para a tela de conferência: quantas unidades a proposta está vendendo.
   const qtyTotal = doc.items.reduce((a, it) => a + (it.hidden ? 0 : qtyOf(it)), 0);
   const itemCount = doc.items.filter((it) => !it.hidden && (it.desc || it.value)).length;
-  const hasContent = doc.client || doc.company || doc.title || doc.scope || doc.start || doc.end ||
-    doc.payment || doc.revisions || doc.validity || doc.bio || doc.items.some((it) => it.desc || it.value);
+  const hasContent = docHasContent(doc);
   const canFinish = doc.client.trim() !== "" && doc.title.trim() !== "";
 
   // Nome amigável do modelo em uso, mostrado no editor (etapa 2). O bloqueio de
   // modelo por plano vive na galeria (DesignGallery), que é onde se escolhe.
   const currentTplName = DESIGNS.find((d) => d.id === (doc.template || "minimal"))?.name || "Minimalista";
 
-  // Corpo enviado à API (formato do proposalSchema do backend).
-  const toApiBody = () => ({
-    client: doc.client, company: doc.company, clientEmail: doc.clientEmail,
-    title: doc.title, scope: doc.scope,
-    items: doc.items.filter((it) => it.desc || it.value).map((it) => ({ desc: it.desc || "", value: String(it.value || ""), hidden: !!it.hidden, qty: String(it.qty || "") })),
-    start: doc.start, end: doc.end, payment: doc.payment, revisions: doc.revisions,
-    validity: doc.validity, bio: doc.bio, accent: doc.accent, accent2: doc.accent2, gradient: !!doc.gradient, theme: doc.theme || "claro", watermark: doc.watermark || "",
-    currency: doc.currency || DEFAULT_CURRENCY,
-    logo: doc.logo || "", cover: doc.cover || "", coverPos: doc.coverPos || "", template: doc.template,
-    showQty: !!doc.showQty,
+  // ════════════════════ SALVAMENTO AUTOMÁTICO DO RASCUNHO ════════════════════
+  //
+  // Antes o rascunho só era gravado dentro de navTo(), ou seja, quando a pessoa
+  // trocava de tela pelo menu. F5, fechar a aba ou o celular descartar a página
+  // passavam por fora e o que tinha sido digitado sumia. Agora o salvamento não
+  // depende de navegação nenhuma. São duas camadas:
+  //
+  //  1. BUFFER LOCAL (síncrono, a cada alteração): cobre F5, aba fechada e página
+  //     morta pelo sistema. Não depende de evento de saída.
+  //  2. SERVIDOR (1,2 s depois da última tecla): é o salvamento de verdade. O
+  //     indicador só diz "salvas" quando o servidor confirma.
+  //
+  // As gravações passam por uma FILA (saver.chain): nunca há duas requisições
+  // do mesmo rascunho ao mesmo tempo, então uma resposta antiga não tem como
+  // chegar depois e sobrescrever uma versão mais nova.
+  const saver = useRef({
+    chain: Promise.resolve(), timer: null, retryTimer: null, retry: 0,
+    session: 0,   // muda toda vez que outra proposta é aberta: resposta atrasada da anterior não mexe na tela
+    saved: "",    // impressão digital da última versão que o servidor confirmou
+    alias: {},    // id local (d_...) → id do servidor, depois da primeira gravação
+  }).current;
+  const docRef = useRef(doc); docRef.current = doc;
+  const draftIdRef = useRef(draftId); draftIdRef.current = draftId;
+  const draftStatusRef = useRef(draftStatus); draftStatusRef.current = draftStatus;
+  const viewRef = useRef(view); viewRef.current = view;
+  const tplPickRef = useRef(tplPick); tplPickRef.current = tplPick;
+  const saveStateRef = useRef(saveState); saveStateRef.current = saveState;
+  const replaceNextNav = useRef(false); // troca de id local→servidor substitui a URL em vez de empilhar
+  // Só rascunho aberto no fluxo de criação (etapa 1 ou 2) é salvo sozinho.
+  const editable = !!draftId && draftStatus === "Rascunho" && flow === "editing"
+    && (view === "editor" || (view === "templates" && tplPick));
+  const editableRef = useRef(editable); editableRef.current = editable;
+
+  // Linha do rascunho na lista enquanto ele ainda não chegou ao servidor (offline).
+  const localRowOf = (id, d) => ({
+    ...d, id, title: d.title || "Proposta sem título", value: sumItems(d.items, d.showQty),
+    status: "Rascunho", date: "Hoje", currency: d.currency || DEFAULT_CURRENCY, updatedAt: Date.now(),
   });
 
-  // Rascunho guardado localmente (não consome cota do plano até ser concluído).
-  const buildLocalDraft = () => ({
-    id: draftId, client: doc.client, company: doc.company, clientEmail: doc.clientEmail,
-    title: doc.title || "Proposta sem título", value: total, status: "Rascunho", date: "Hoje",
-    scope: doc.scope, items: doc.items, start: doc.start, end: doc.end,
-    payment: doc.payment, revisions: doc.revisions, validity: doc.validity, bio: doc.bio,
-    accent: doc.accent, accent2: doc.accent2, gradient: doc.gradient, logo: doc.logo, cover: doc.cover, coverPos: doc.coverPos || "", template: doc.template,
-    currency: doc.currency || DEFAULT_CURRENCY, showQty: !!doc.showQty,
-    updatedAt: Date.now(),
+  // Uma gravação. Recebe o id, o documento e a impressão digital JÁ capturados
+  // no momento em que foi pedida — por isso continua valendo mesmo que a pessoa
+  // tenha saído do editor ou aberto outra proposta enquanto ela esperava na fila.
+  const doSave = async (id, d, snap, session) => {
+    const live = () => session === saver.session;
+    // Já existe versão mais nova desta mesma proposta a caminho: esta é dispensável.
+    if (live() && snapOf(docRef.current) !== snap) return;
+    let realId = saver.alias[id] || id;
+    // Proposta nova e ainda em branco: não cria rascunho vazio no servidor.
+    if (isLocalId(realId) && !docHasContent(d)) { if (live()) setSaveState("idle"); return; }
+    if (live()) setSaveState("saving");
+    try {
+      if (isLocalId(realId)) {
+        // clientRef = o id provisório: se esta criação for repetida (resposta
+        // perdida, F5 com a requisição no ar) o servidor atualiza o mesmo
+        // rascunho em vez de criar outro.
+        const p = (await api.createProposal({ ...toBody(d), clientRef: id })).proposal;
+        saver.alias[id] = p.id;
+        realId = p.id;
+        removeProposal(id);   // deixa de ser "rascunho só deste navegador"
+        clearBuffer(id);
+        if (live()) {
+          replaceNextNav.current = true;
+          draftIdRef.current = p.id;
+          setDraftId(p.id);
+          setDraftPublicId(p.publicId || null);
+        }
+        refreshRows();
+      } else {
+        await api.updateProposal(realId, toBody(d));
+      }
+      if (!live()) { clearBuffer(realId); return; } // o que foi capturado está salvo
+      saver.saved = snap;
+      saver.retry = 0;
+      clearTimeout(saver.retryTimer);
+      if (snapOf(docRef.current) === snap) {
+        clearBuffer(realId);       // servidor confirmou esta versão: não há o que recuperar
+        setSaveErr("");
+        setSaveState("saved");
+      } else {
+        saveBuffer(realId, docRef.current);
+        setSaveState("pending");   // a pessoa seguiu digitando; a próxima gravação já está agendada
+      }
+    } catch (err) {
+      if (!live()) return; // o buffer local continua lá e é recuperado ao reabrir
+      const st = err?.status;
+      let msg = "Não foi possível salvar.";
+      if (err?.network) msg = "Sem conexão. As alterações estão guardadas neste aparelho.";
+      else if (st === 409 && !err?.data?.draftLimit) {
+        // Foi concluída em outra aba/aparelho: não é mais rascunho.
+        clearBuffer(realId);
+        setDraftStatus("Enviada");
+        refreshRows();
+        msg = err.message;
+      } else if (st && st < 500 && st !== 429) msg = err.message || msg;
+      if (st === 429) {
+        // Teto de gravações: nada se perdeu (está no buffer do aparelho), só
+        // precisa esperar. Fica como pendente, sem alarmar com "erro".
+        setSaveErr("");
+        setSaveState("pending");
+      } else {
+        setSaveErr(msg);
+        setSaveState("error");
+      }
+      // Falha passageira (rede, servidor, limite de requisições): tenta de novo
+      // sozinho. Erro de regra (4xx) não adianta repetir.
+      if (err?.network || !st || st >= 500 || st === 429) {
+        clearTimeout(saver.retryTimer);
+        saver.retryTimer = setTimeout(() => { persistNow(); }, RETRY_MS[Math.min(saver.retry, RETRY_MS.length - 1)]);
+        saver.retry += 1;
+      }
+    }
+  };
+
+  // Manda salvar AGORA o que está na tela (sem esperar o debounce) e devolve a
+  // promessa da fila. Usado ao sair do editor, ao trocar de proposta, ao
+  // esconder a aba e antes de concluir.
+  const persistNow = () => {
+    clearTimeout(saver.timer);
+    saver.timer = null;
+    const id = draftIdRef.current;
+    const d = docRef.current;
+    if (!id || !editableRef.current) return saver.chain;
+    const snap = snapOf(d);
+    if (snap === saver.saved) return saver.chain;
+    const session = saver.session;
+    saver.chain = saver.chain.then(() => doSave(id, d, snap, session));
+    return saver.chain;
+  };
+
+  // A cada alteração: buffer local na hora, servidor depois da pausa.
+  useEffect(() => {
+    if (!editable) return;
+    const snap = snapOf(doc);
+    if (snap === saver.saved) {
+      clearTimeout(saver.timer);
+      setSaveState((s) => (s === "pending" ? (isLocalId(draftId) ? "idle" : "saved") : s));
+      return;
+    }
+    // O id pode já ter sido trocado pelo do servidor numa gravação que terminou
+    // agora, antes de o React entregar o novo draftId a este efeito. Resolver
+    // pelo alias impede que uma tecla nessa fresta recrie, com o id antigo, o
+    // rascunho local que acabou de ser promovido (viraria um rascunho fantasma
+    // duplicado na lista).
+    const bufId = saver.alias[draftId] || draftId;
+    saveBuffer(bufId, doc);
+    if (isLocalId(bufId) && docHasContent(doc)) upsertProposal(localRowOf(bufId, doc));
+    setSaveState((s) => (s === "saving" ? s : "pending"));
+    clearTimeout(saver.timer);
+    saver.timer = setTimeout(() => { persistNow(); }, AUTOSAVE_MS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, draftId, editable]);
+
+  // Proteções complementares (o mecanismo principal é o de cima):
+  //  - aba escondida (trocou de app no celular): salva já, pela fila normal;
+  //  - página saindo (pagehide): última tentativa com keepalive;
+  //  - voltou a conexão: tenta de novo na hora;
+  //  - beforeunload: só pergunta se o servidor NÃO está conseguindo salvar. Com
+  //    tudo funcionando não há aviso — o buffer local já garante a recuperação.
+  useEffect(() => {
+    const unsaved = () => !!draftIdRef.current && editableRef.current && snapOf(docRef.current) !== saver.saved;
+    const onVis = () => { if (document.visibilityState === "hidden") persistNow(); };
+    const onHide = () => {
+      if (!unsaved()) return;
+      const id = draftIdRef.current;
+      saveBuffer(id, docRef.current);
+      const realId = saver.alias[id] || id;
+      if (!isLocalId(realId)) api.saveProposalKeepalive(realId, toBody(docRef.current));
+    };
+    const onOnline = () => { saver.retry = 0; persistNow(); };
+    const onBefore = (e) => {
+      if (!unsaved()) return;
+      if (saveStateRef.current !== "error" && navigator.onLine !== false) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("beforeunload", onBefore);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("beforeunload", onBefore);
+      clearTimeout(saver.timer);
+      clearTimeout(saver.retryTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ═══════════════════════ ABRIR / CRIAR UMA PROPOSTA ═══════════════════════
+
+  const blankDoc = () => {
+    let bio = "";
+    try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
+    return { ...BLANK_DOC, bio, currency: user?.currency || DEFAULT_CURRENCY };
+  };
+
+  // Linha da lista / resposta da API → documento do editor.
+  const docFromSrc = (src) => ({
+    ...BLANK_DOC,
+    client: src.client || "", company: src.company || "", title: src.title === "Proposta sem título" ? "" : (src.title || ""),
+    clientEmail: src.clientEmail || "", scope: src.scope || "",
+    items: Array.isArray(src.items) && src.items.length ? src.items : BLANK_DOC.items,
+    start: src.start || "", end: src.end || "", payment: src.payment || "",
+    revisions: src.revisions || "", validity: src.validity || "", bio: src.bio || "",
+    accent: src.accent || "#0A0A0A", accent2: src.accent2 || "#6C48B0", gradient: !!src.gradient, theme: src.theme || "claro", watermark: src.watermark || "", logo: src.logo || null, cover: src.cover || null, coverPos: src.coverPos || "", template: src.template || "minimal",
+    currency: src.currency || DEFAULT_CURRENCY, showQty: !!src.showQty,
   });
+
+  // ÚNICA porta de entrada do editor. Fecha (salvando) o que estava aberto,
+  // zera o estado de salvamento e posiciona na etapa pedida.
+  //   dirty: o documento já tem algo que o servidor ainda não conhece (veio da
+  //          calculadora, é uma cópia, ou foi recuperado do buffer) → salva já.
+  const enterEditor = (d, { id, status = "Rascunho", publicId = null, from = "list", copy = false, dirty = false, step = "editar" } = {}) => {
+    persistNow();                       // a proposta anterior não fica pra trás
+    saver.session += 1;
+    saver.retry = 0;
+    clearTimeout(saver.retryTimer);
+    saver.saved = dirty ? "" : snapOf(d);
+    docRef.current = d;
+    draftIdRef.current = id;
+    draftStatusRef.current = status;
+    setDoc(d);
+    setDraftId(id);
+    setDraftStatus(status);
+    setDraftPublicId(publicId);
+    setEditorFrom(from);
+    setIsCopy(copy);
+    setSaveErr("");
+    setSaveState(dirty ? "pending" : isLocalId(id) ? "idle" : "saved");
+    setFlowError("");
+    setFlow("editing");
+    setReview(false);
+    if (step === "modelo" && status === "Rascunho") { setTplPick(true); setView("templates"); }
+    else { setTplPick(false); setView("editor"); }
+  };
 
   // "Nova proposta" abre a ETAPA 1 (galeria de modelos), nunca o formulário
   // direto. A proposta já nasce aqui (doc em branco + id de rascunho), então o
@@ -688,41 +962,44 @@ export default function Dashboard({ go }) {
   const newProposal = () => {
     // Assinatura vencida: só leitura até renovar (o backend também barra).
     if (isSuspended(user)) { setShowPlans(true); return; }
-    let bio = "";
-    try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
-    const d = { ...BLANK_DOC, bio, currency: user?.currency || DEFAULT_CURRENCY };
-    setDoc(d);
-    pristineRef.current = JSON.stringify(d); // abriu em branco: só vira rascunho se editar
-    setDraftId(newId());
-    setDraftPublicId(null);
-    setEditorFrom("list");
-    setFlowError("");
-    setFlow("editing");
-    setIsCopy(false);
-    setReview(false);
-    setTplPick(true);
-    setView("templates");
+    enterEditor(blankDoc(), { id: newId(), from: "list", step: "modelo" });
   };
   // Abre uma proposta nova já com os itens vindos da Calculadora.
   const startProposalWithItem = (desc, value, list) => {
-    let bio = "";
-    try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
     const items = ((list && list.length) ? list.slice(0, MAX_ITEMS) : [{ desc, value: String(value) }])
       .map((it) => ({ ...it, qty: String(it.qty || "1") }));
-    setDoc({ ...BLANK_DOC, bio, items, currency: user?.currency || DEFAULT_CURRENCY });
-    pristineRef.current = ""; // veio da calculadora com valores: já conta como conteúdo
-    setDraftId(newId());
-    setDraftPublicId(null);
-    setEditorFrom("calc");
-    setFlowError("");
-    setFlow("editing");
-    setIsCopy(false);
-    setReview(false);
     // Mesmo vindo da calculadora, a proposta é nova: começa na etapa 1. Os itens
     // já calculados viajam no doc e aparecem preenchidos na etapa 2.
-    setTplPick(true);
-    setView("templates");
+    enterEditor({ ...blankDoc(), items }, { id: newId(), from: "calc", dirty: true, step: "modelo" });
   };
+
+  // Abre no editor uma proposta cujo conteúdo completo já está em mãos. É aqui
+  // que acontece a RECUPERAÇÃO: se existe buffer local mais novo que a versão
+  // do servidor, alguma alteração não chegou lá (F5 no meio, queda de rede,
+  // aba descartada) — vale o buffer, e ele é enviado em seguida.
+  const openSrc = (src, step = "editar", from = "list") => {
+    const status = src.status || "Rascunho";
+    const local = isLocalId(src.id);
+    let d = docFromSrc(src);
+    // Rascunho antigo, que só existia neste navegador: sobe pro servidor agora.
+    let dirty = local && docHasContent(d);
+    if (status === "Rascunho") {
+      const buf = loadBuffer(src.id);
+      const serverTs = src.updatedAt ? new Date(src.updatedAt).getTime() : 0;
+      if (buf && (local || buf.ts > serverTs)) {
+        const recovered = { ...BLANK_DOC, ...buf.doc };
+        if (snapOf(recovered) !== snapOf(d)) {
+          d = recovered;
+          dirty = true;
+          if (!local) pushToast("Recuperamos alterações que ainda não tinham sido salvas.", "success");
+        } else if (!local) clearBuffer(src.id);
+      } else if (buf && !local) clearBuffer(src.id); // servidor já tem versão mais nova
+    } else {
+      clearBuffer(src.id);
+    }
+    enterEditor(d, { id: src.id || newId(), status, publicId: src.publicId || null, from, dirty, step });
+  };
+
   const openRow = async (r) => {
     // A lista traz só o resumo; ao abrir uma proposta do servidor, busca o
     // conteúdo completo (rascunho local já vem completo). Menos egress no dia a dia.
@@ -731,43 +1008,65 @@ export default function Dashboard({ go }) {
       try { const { proposal } = await api.getProposal(r.id); src = { ...r, ...fromApi(proposal) }; }
       catch { pushToast("Não foi possível carregar a proposta. Tente de novo.", "info"); return; }
     }
-    const d = {
-      ...BLANK_DOC,
-      client: src.client || "", company: src.company || "", title: src.title === "Proposta sem título" ? "" : (src.title || ""),
-      clientEmail: src.clientEmail || "", scope: src.scope || "",
-      items: Array.isArray(src.items) && src.items.length ? src.items : BLANK_DOC.items,
-      start: src.start || "", end: src.end || "", payment: src.payment || "",
-      revisions: src.revisions || "", validity: src.validity || "", bio: src.bio || "",
-      accent: src.accent || "#0A0A0A", accent2: src.accent2 || "#6C48B0", gradient: !!src.gradient, theme: src.theme || "claro", watermark: src.watermark || "", logo: src.logo || null, cover: src.cover || null, coverPos: src.coverPos || "", template: src.template || "minimal",
-      currency: src.currency || DEFAULT_CURRENCY, showQty: !!src.showQty,
-    };
-    setDoc(d);
-    pristineRef.current = JSON.stringify(d); // abriu uma existente: só re-salva se editar
-    setDraftId(src.id || newId());
-    setDraftPublicId(src.publicId || null);
-    setIsCopy(false);
-    setEditorFrom("list");
-    setFlowError("");
-    setFlow("editing");
-    setReview(false);
-    setTplPick(false);
-    setView("editor");
+    openSrc(src);
   };
   const onRowKey = (r) => (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(r); } };
 
-  const navTo = async (v) => {
-    // Salva rascunho local só se HOUVE mudança desde a abertura. Abrir uma
-    // proposta e sair sem mexer não cria (nem duplica) rascunho.
-    const changed = JSON.stringify(doc) !== pristineRef.current;
-    if (view === "editor" && flow !== "done" && changed && hasContent && (!draftId || isLocalId(draftId))) {
-      upsertProposal(buildLocalDraft());
-      await refreshRows();
+  // Chegou pela URL (F5, link colado, voltar/avançar pra uma proposta que não
+  // está em memória): carrega a proposta dona daquele endereço.
+  const loadSeq = useRef(0);
+  const loadFromRoute = async (pid, step) => {
+    const my = ++loadSeq.current;
+    setView("opening");
+    if (isLocalId(pid)) {
+      // Ainda não chegou ao servidor: o que existe está neste navegador.
+      const row = loadProposals().find((x) => x.id === pid);
+      const buf = loadBuffer(pid);
+      if (row) { openSrc(row, step); return; }
+      if (buf) { enterEditor({ ...BLANK_DOC, ...buf.doc }, { id: pid, dirty: true, step }); return; }
+      // Nada neste navegador. Antes de concluir que a proposta está em branco,
+      // pergunta ao servidor: a criação pode ter sido gravada lá um instante
+      // antes do F5 (aí o rascunho local já foi promovido e apagado daqui, mas
+      // a URL ainda mostrava o id provisório).
+      try {
+        const { proposal } = await api.getProposalByRef(pid);
+        if (my !== loadSeq.current) return;
+        saver.alias[pid] = proposal.id;
+        replaceNextNav.current = true; // troca o id provisório da URL pelo definitivo
+        openSrc(fromApi(proposal), step);
+        return;
+      } catch { /* não existe no servidor: é mesmo uma proposta nova */ }
+      if (my !== loadSeq.current) return;
+      // Nada digitado ainda (proposta recém-aberta): recomeça na etapa 1, sem perda.
+      enterEditor(blankDoc(), { id: pid, step: "modelo" });
+      return;
     }
+    try {
+      const { proposal } = await api.getProposal(pid);
+      if (my !== loadSeq.current) return;
+      openSrc(fromApi(proposal), step);
+    } catch (e) {
+      if (my !== loadSeq.current) return;
+      // 404 cobre os três casos sem distinguir: não existe, foi excluída ou é
+      // de outra conta (o backend não revela qual).
+      setMissWhy(e?.network ? "offline" : "notfound");
+      setView("missing");
+    }
+  };
+
+  const navTo = (v) => {
+    // Sair do editor não é mais o que salva — o autosave já cuidou. Aqui só
+    // adianta a gravação pendente (sem esperar o debounce) e atualiza a lista.
+    if (editableRef.current) {
+      const id = draftIdRef.current;
+      if (isLocalId(id) && !docHasContent(docRef.current)) clearBuffer(id); // proposta em branco abandonada
+      persistNow().then(() => refreshRows());
+    }
+    loadSeq.current += 1; // desiste de qualquer carregamento por URL em andamento
     // Indo do editor pra Modelos: é a etapa 1 da proposta atual (trocar o
     // desenho), não uma proposta nova. Qualquer outro destino encerra o fluxo.
     if (v === "templates") {
-      const editing = view === "editor" && flow !== "done" && !!draftId && isLocalId(draftId);
-      setTplPick(editing);
+      setTplPick(view === "editor" && flow !== "done" && !!draftId && draftStatus === "Rascunho");
     } else {
       setTplPick(false);
     }
@@ -808,20 +1107,7 @@ export default function Dashboard({ go }) {
   // clicar em "Usar" é o próprio "Nova proposta com este modelo".
   const startWithDesign = (id) => {
     if (isSuspended(user)) { setShowPlans(true); return; }
-    let bio = "";
-    try { bio = localStorage.getItem(bioKeyFor(user?.email)) || ""; } catch { /* ignore */ }
-    const d = { ...BLANK_DOC, template: id, theme: safeTheme(id, BLANK_DOC.theme), bio, currency: user?.currency || DEFAULT_CURRENCY };
-    setDoc(d);
-    pristineRef.current = JSON.stringify(d); // escolheu um template em branco: idem
-    setDraftId(newId());
-    setDraftPublicId(null);
-    setEditorFrom("templates");
-    setFlowError("");
-    setFlow("editing");
-    setIsCopy(false);
-    setReview(false);
-    setTplPick(false);
-    setView("editor");
+    enterEditor({ ...blankDoc(), template: id, theme: safeTheme(id, BLANK_DOC.theme) }, { id: newId(), from: "templates" });
   };
 
   // Clique em "Usar este modelo" na galeria.
@@ -830,7 +1116,8 @@ export default function Dashboard({ go }) {
   //     doc.template e avança pra etapa 2. Todo o resto do doc segue intacto —
   //     cliente, empresa, título, itens, valores, textos, logo e cores. Vale
   //     tanto pra proposta recém-criada (doc em branco) quanto pra quem voltou
-  //     do editor só pra trocar o desenho.
+  //     do editor só pra trocar o desenho. A troca é salva pelo autosave como
+  //     qualquer outra alteração (o modelo faz parte do documento).
   //  b) Sem fluxo ativo: veio do menu lateral, então abre uma proposta nova.
   const useDesign = (id) => {
     if (!tplPick) { startWithDesign(id); return; }
@@ -845,6 +1132,87 @@ export default function Dashboard({ go }) {
 
   // Volta da etapa 1 pra etapa 2 sem trocar o modelo nem mexer em nada.
   const backToEditor = () => { setTplPick(false); setReview(false); setFlowError(""); setFlow("editing"); setView("editor"); };
+
+  // ═══════════════════════════ ESTADO ↔ ENDEREÇO ═══════════════════════════
+  //
+  // Estado → URL. Abas viram /app/<aba>; o editor vira /app/proposta/<id> e a
+  // etapa 1 de uma proposta em andamento vira /app/proposta/<id>/modelo. Enquanto
+  // uma proposta está sendo carregada (ou não foi encontrada) quem manda é a URL.
+  useEffect(() => {
+    if (view === "opening" || view === "missing") return;
+    let path;
+    if (view === "editor" && draftId) path = proposalPath(draftId);
+    else if (view === "templates" && tplPick && draftId) path = proposalPath(draftId, "modelo");
+    else { const slug = VIEW_TO_TAB[view]; path = slug ? `/app/${slug}` : "/app"; }
+    const replace = replaceNextNav.current;
+    replaceNextNav.current = false;
+    if (window.location.pathname !== path) {
+      selfNav.current.set(path, Date.now()); // avisa o efeito URL→estado: esta mudança é nossa
+      navigate(path, { replace });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, draftId, tplPick]);
+
+  // URL → estado. Só age quando o endereço mudou POR FORA do estado: carga
+  // inicial, F5, link colado, voltar/avançar do navegador. Como o editor agora
+  // tem endereço e salva sozinho, voltar/avançar pode sair dele sem perder nada
+  // (antes o app precisava ignorar o botão voltar durante a edição).
+  //
+  // Quando a mudança de endereço foi feita pelo efeito acima, o estado JÁ está
+  // certo e este efeito não toca em nada. Sem essa distinção os dois efeitos
+  // podiam se perseguir: o estado avançava (etapa 1 → 2), a URL antiga chegava
+  // atrasada, "corrigia" o estado de volta, que corrigia a URL, e assim por
+  // diante — a tela piscava entre galeria e editor e um clique podia cair na
+  // etapa errada. Cada entrada do histórico (location.key) é tratada uma vez.
+  const selfNav = useRef(new Map()); // caminho → quando o próprio app navegou pra ele
+  const handledKey = useRef(null);
+  useEffect(() => {
+    const path = location.pathname;
+    if (handledKey.current === location.key) return;
+    const at = selfNav.current.get(path);
+    if (navType !== "POP" && at && Date.now() - at < 4000) {
+      selfNav.current.delete(path);
+      handledKey.current = location.key;
+      return;
+    }
+    // O endereço já corresponde ao que está na tela: nada a sincronizar. (Evita
+    // que este efeito, ao rodar atrasado em relação a um clique, desfaça o
+    // estado que o clique acabou de pedir.)
+    const v0 = viewRef.current;
+    const shown = v0 === "editor" && draftIdRef.current ? proposalPath(draftIdRef.current)
+      : v0 === "templates" && tplPickRef.current && draftIdRef.current ? proposalPath(draftIdRef.current, "modelo")
+        : v0 === "opening" || v0 === "missing" ? null
+          : (VIEW_TO_TAB[v0] ? `/app/${VIEW_TO_TAB[v0]}` : "/app");
+    if (shown === path) { handledKey.current = location.key; return; }
+    // Abrir proposta pela URL espera a conta carregar (bio e moeda do rascunho
+    // em branco). Não marca como tratada: roda de novo quando o boot terminar.
+    if (route.kind === "proposal" && booting) return;
+    handledKey.current = location.key;
+    if (route.kind === "tab") {
+      const v = TAB_TO_VIEW[route.tab] || "home";
+      loadSeq.current += 1;
+      setTplPick(false);
+      if (viewRef.current !== v) {
+        if (editableRef.current) persistNow().then(() => refreshRows());
+        setReview(false);
+        setFlowError("");
+        setFlow("editing");
+        setView(v);
+      }
+      return;
+    }
+    const { pid, step } = route;
+    const cur = draftIdRef.current;
+    const known = !!cur && (pid === cur || saver.alias[pid] === cur);
+    if (known && viewRef.current !== "opening" && viewRef.current !== "missing") {
+      // É a proposta que já está em memória: só posiciona na etapa do endereço.
+      if (step === "modelo" && draftStatusRef.current === "Rascunho") { setTplPick(true); setView("templates"); }
+      else { setTplPick(false); setReview(false); setView("editor"); }
+      return;
+    }
+    loadFromRoute(pid, step);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key, booting]);
 
   // Upload de imagem (logo ou capa) com limite de 2 MB.
   const MAX_IMG = 2 * 1024 * 1024;
@@ -865,30 +1233,31 @@ export default function Dashboard({ go }) {
     }
   };
 
-  // Concluir: salva no servidor, marca como enviada (sent) e obtém o link público.
-  // Só liga a animação DEPOIS de salvo — assim o link já existe no modal "pronto".
+  // Concluir: garante que o servidor tem a ÚLTIMA versão do rascunho, tira ele
+  // do estado de rascunho (é aí que a cota do plano é debitada, uma única vez)
+  // e obtém o link público. Só liga a animação DEPOIS — assim o link já existe
+  // no modal "pronto".
   const finish = async () => {
     if (!canFinish || sending) return;
     setFlowError("");
-    const creatingNew = !draftId || isLocalId(draftId);
-    // Rascunho local não consome cota; ela é contada ao CONCLUIR. Bloqueia só a
-    // criação de uma proposta NOVA quando a cota acabou (Gratuito: 2 no total).
-    if (creatingNew && usage && usage.limit != null && usage.used >= usage.limit) {
+    // Rascunho não consome cota; ela é contada ao CONCLUIR. O backend é quem
+    // decide de verdade (402); aqui só evita a viagem quando já se sabe.
+    if (usage && usage.limit != null && usage.used >= usage.limit) {
       setLimitHit(true);
       return;
     }
     setSending(true);
     try {
-      const body = toApiBody();
-      let saved;
-      if (draftId && !isLocalId(draftId)) {
-        saved = (await api.updateProposal(draftId, body)).proposal;
-      } else {
-        saved = (await api.createProposal(body)).proposal; // conta na cota mensal do plano
-        if (isLocalId(draftId)) removeProposal(draftId);    // o rascunho local vira proposta do servidor
+      await persistNow(); // nada de concluir uma versão antiga do que está na tela
+      const id = saver.alias[draftIdRef.current] || draftIdRef.current;
+      if (!id || isLocalId(id) || snapOf(docRef.current) !== saver.saved) {
+        throw new Error("Não foi possível salvar a proposta antes de concluir. Confira sua conexão e tente de novo.");
       }
-      const sent = (await api.setStatus(saved.id, "sent")).proposal;
+      const sent = (await api.setStatus(id, "sent")).proposal;
+      clearBuffer(id);
+      draftIdRef.current = sent.id;
       setDraftId(sent.id);
+      setDraftStatus(EN2PT[sent.status] || "Enviada");
       setDraftPublicId(sent.publicId);
       setEmailState("idle");
       setEmailNote("");
@@ -896,7 +1265,8 @@ export default function Dashboard({ go }) {
       refreshUsage();
       setFlow("finishing");
     } catch (err) {
-      if (err?.data?.limitReached || err?.status === 402) setLimitHit(true);
+      if (err?.data?.limitReached) setLimitHit(true);
+      else if (err?.data?.suspended) setShowPlans(true);
       else setFlowError(err.message || "Não foi possível concluir. Tente de novo.");
     } finally {
       setSending(false);
@@ -936,17 +1306,11 @@ export default function Dashboard({ go }) {
       revisions: src.revisions || "", validity: src.validity || "", bio: src.bio || "",
       accent: src.accent || "#0A0A0A", accent2: src.accent2 || "#6C48B0", gradient: !!src.gradient,
       theme: src.theme || "claro", watermark: src.watermark || "", logo: src.logo || null, cover: src.cover || null,
+      coverPos: src.coverPos || "", currency: src.currency || DEFAULT_CURRENCY,
       template: src.template || "minimal", showQty: !!src.showQty,
     };
-    setDoc(d);
-    pristineRef.current = ""; // cópia já tem conteúdo: conta como rascunho
-    setDraftId(newId());
-    setDraftPublicId(null);
-    setEditorFrom("list");
-    setFlowError("");
-    setFlow("editing");
-    setIsCopy(true);
-    setView("editor");
+    // dirty: a cópia já nasce com conteúdo, então é salva como rascunho na hora.
+    enterEditor(d, { id: newId(), from: "list", copy: true, dirty: true });
     pushToast("Cópia aberta como rascunho. Ajuste e conclua.", "success");
   };
 
@@ -971,6 +1335,7 @@ export default function Dashboard({ go }) {
     if (!r) return;
     if (isLocalId(r.id)) removeProposal(r.id);
     else { try { await api.deleteProposal(r.id); } catch { /* ignore */ } }
+    clearBuffer(r.id); // nada de "recuperar" alteração de uma proposta que foi excluída
     await refreshRows();
     pushToast("Proposta excluída.", "info");
   };
@@ -1003,8 +1368,9 @@ export default function Dashboard({ go }) {
   );
   const previewItems = doc.items.filter((it) => it.desc || it.value);
   const coverTpl = !!DESIGNS.find((d) => d.id === (doc.template || "minimal"))?.cover; // template com capa?
-  // Proposta concluída (id do servidor) é imutável — não pode ser editada nem reenviada.
-  const locked = view === "editor" && !!draftId && !isLocalId(draftId);
+  // Proposta concluída é imutável — não pode ser editada nem reenviada. Quem
+  // decide é o STATUS: rascunho (mesmo já salvo no servidor) continua editável.
+  const locked = view === "editor" && !!draftId && draftStatus !== "Rascunho";
 
   const labelStyle = { fontSize: 13, fontWeight: 600, color: color.gray700 };
   const sectionLabel = { fontSize: 12, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: color.gray400, marginBottom: 10 };
@@ -1129,7 +1495,7 @@ export default function Dashboard({ go }) {
         .db-badge{ font-size:11.5px; font-weight:700; padding:1px 8px; border-radius:999px; font-variant-numeric:tabular-nums; }
 
         .db-table{ background:#fff; border:1px solid ${color.line2}; border-radius:14px; overflow:hidden; }
-        .db-thead, .db-row{ display:grid; grid-template-columns:minmax(180px,1.6fr) minmax(140px,1.3fr) 116px 130px 64px 108px; column-gap:16px; align-items:center; }
+        .db-thead, .db-row{ display:grid; grid-template-columns:minmax(180px,1.6fr) minmax(140px,1.3fr) 116px 130px 64px 158px; column-gap:16px; align-items:center; }
         .db-thead{ padding:12px 20px; background:${color.surface3}; border-bottom:1px solid #EEE; font-size:11.5px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; color:${color.gray400}; }
         .db-row{ padding:16px 20px; border-top:1px solid #F3F3F3; cursor:pointer; transition:background .12s ease; }
         .db-row:hover{ background:${color.surface2}; }
@@ -1423,11 +1789,16 @@ export default function Dashboard({ go }) {
         @media (max-width:680px){
           .db-pad{ padding:20px 16px; }
           .db-thead{ display:none; }
-          .db-row{ grid-template-columns:1fr auto; grid-template-areas:"client del" "title value" "status date"; row-gap:8px; column-gap:12px; padding:16px; }
+          /* No celular não existe hover: as ações ficam sempre visíveis, numa
+             faixa própria no pé do cartão. Ao lado do nome (como era) cinco
+             ícones espremiam o cliente até virar "TESTE Agua…"; embaixo, o nome
+             ganha a linha inteira e cada ação vira um alvo de toque de 40px. */
+          .db-row{ grid-template-columns:1fr auto; grid-template-areas:"client client" "title value" "status date" "del del"; row-gap:8px; column-gap:12px; padding:16px 16px 10px; }
           .db-c-client{ grid-area:client; } .db-c-title{ grid-area:title; } .db-c-value{ grid-area:value; }
-          .db-c-status{ grid-area:status; } .db-c-date{ grid-area:date; } .db-c-del{ grid-area:del; justify-self:end; }
+          .db-c-status{ grid-area:status; } .db-c-date{ grid-area:date; }
+          .db-c-del{ grid-area:del; justify-self:stretch; justify-content:flex-end !important; gap:4px !important; border-top:1px solid #F3F3F3; padding-top:6px; margin-top:4px; }
           .db-c-value, .db-c-date{ justify-self:end; text-align:right; }
-          .db-del, .db-act{ opacity:1; }
+          .db-del, .db-act{ opacity:1; width:40px; height:40px; }
         }
 
         /* ───── MOBILE do editor de propostas (≤767px). Escopo: só .db-editing.
@@ -1696,6 +2067,11 @@ export default function Dashboard({ go }) {
                         {(r.status === "Aceita" || r.status === "Recusada") && (
                           <button className="db-act db-act-un" onClick={setDecision(r, "Enviada")} aria-label="Reabrir proposta" title="Reabrir (volta para Enviada)"><RotateCcw size={15} strokeWidth={2.2} /></button>
                         )}
+                        {r.publicId && r.status !== "Rascunho" && (
+                          <button className="db-act db-act-un" onClick={copyRowLink(r)} aria-label={`Copiar link da proposta de ${r.client || "cliente"}`} title={copiedRow === r.id ? "Link copiado" : "Copiar link"} style={copiedRow === r.id ? { color: "#2E7D51", opacity: 1 } : undefined}>
+                            {copiedRow === r.id ? <Check size={16} strokeWidth={2.6} /> : <Link2 size={15} strokeWidth={2.2} />}
+                          </button>
+                        )}
                         {!isLocalId(r.id) && (
                           <button className="db-act db-act-un" onClick={duplicateRow(r)} aria-label={`Duplicar proposta de ${r.client || "cliente"}`} title="Duplicar"><Copy size={15} strokeWidth={2.2} /></button>
                         )}
@@ -1738,6 +2114,30 @@ export default function Dashboard({ go }) {
           <SupportPage userEmail={user?.email} onMenu={() => setDrawer(true)} />
         ) : view === "settings" ? (
           <SettingsPanel user={user} setUser={setUser} go={go} pushToast={pushToast} usage={usage} />
+        ) : view === "opening" ? (
+          <div className="db-pad" role="status" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, minHeight: "60vh", color: color.gray500, fontSize: 14.5 }}>
+            <span className="db-spin" />
+            Abrindo a proposta…
+          </div>
+        ) : view === "missing" ? (
+          <div className="db-pad" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+            <div style={{ textAlign: "center", maxWidth: 400 }}>
+              <div style={{ width: 56, height: 56, margin: "0 auto 16px", borderRadius: 14, background: missWhy === "offline" ? "#FEF3E2" : "#FDECEA", color: missWhy === "offline" ? "#8A5A1A" : "#B4443C", display: "flex", alignItems: "center", justifyContent: "center" }}><AlertTriangle size={26} strokeWidth={1.9} /></div>
+              <div style={{ fontFamily: font.heading, fontWeight: 700, fontSize: 20, marginBottom: 6 }}>{missWhy === "offline" ? "Não foi possível abrir a proposta" : "Proposta não encontrada"}</div>
+              <p style={{ fontSize: 14.5, color: color.gray500, margin: "0 0 20px", lineHeight: 1.55 }}>
+                {missWhy === "offline"
+                  ? "Parece que você está sem conexão com o servidor. Suas alterações não foram perdidas: tente de novo em instantes."
+                  : "Este endereço não leva a nenhuma proposta da sua conta. Ela pode ter sido excluída, ou o link é de outra conta."}
+              </p>
+              <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+                {missWhy === "offline" && (
+                  <button onClick={() => { if (route.kind === "proposal") loadFromRoute(route.pid, route.step); }} className="db-btn db-btn-dark" style={{ fontSize: 14, padding: "10px 18px" }}>Tentar de novo</button>
+                )}
+                <button onClick={() => navTo("list")} className={missWhy === "offline" ? "db-btn db-btn-ghost" : "db-btn db-btn-dark"} style={{ fontSize: 14, padding: "10px 18px" }}>Ver minhas propostas</button>
+                {missWhy !== "offline" && <button onClick={newProposal} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 18px" }}>Nova proposta</button>}
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="db-edit-root" style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
             {/* action bar */}
@@ -1746,7 +2146,29 @@ export default function Dashboard({ go }) {
                 <ArrowLeft size={17} strokeWidth={2.2} />{{ templates: "Modelos", calc: "Calculadora" }[editorFrom] || "Propostas"}
               </button>
               <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 13, color: locked ? "#8A5A1A" : color.gray400, marginRight: 6, display: "flex", alignItems: "center", gap: 6 }}>{locked ? <><Lock size={13} strokeWidth={2.2} />Enviada, somente leitura</> : <><span style={{ width: 7, height: 7, borderRadius: "50%", background: hasContent ? "#22C55E" : color.gray300 }} />{hasContent ? "Rascunho salvo ao sair" : "Rascunho"}</>}</span>
+                {locked ? (
+                  <span style={{ fontSize: 13, color: "#8A5A1A", marginRight: 6, display: "flex", alignItems: "center", gap: 6 }}><Lock size={13} strokeWidth={2.2} />Enviada, somente leitura</span>
+                ) : (
+                  // Indicador de salvamento. Só diz "salvas" depois que o SERVIDOR
+                  // confirmou; enquanto isso mostra o estado real (pendente/salvando/erro).
+                  <span role="status" aria-live="polite" title={saveState === "error" ? saveErr : undefined} style={{ fontSize: 13, marginRight: 6, display: "flex", alignItems: "center", gap: 7, color: saveState === "error" ? "#B4443C" : saveState === "pending" ? "#8A5A1A" : color.gray500 }}>
+                    {saveState === "saving" ? (
+                      <><span className="db-spin" style={{ width: 12, height: 12, borderWidth: 2 }} />Salvando alterações…</>
+                    ) : saveState === "pending" ? (
+                      <><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#E0A030" }} />Alterações pendentes…</>
+                    ) : saveState === "saved" ? (
+                      <><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22C55E" }} />Todas as alterações foram salvas</>
+                    ) : saveState === "error" ? (
+                      <>
+                        <AlertTriangle size={14} strokeWidth={2.2} style={{ flex: "none" }} />
+                        <span>{saveErr || "Não foi possível salvar."}</span>
+                        <button onClick={() => { saver.retry = 0; persistNow(); }} className="db-btn" style={{ fontSize: 12.5, fontWeight: 700, color: "#B4443C", background: "#FDECEA", border: "1px solid #F5D2CD", borderRadius: 7, padding: "4px 9px" }}>Tentar novamente</button>
+                      </>
+                    ) : (
+                      <><span style={{ width: 7, height: 7, borderRadius: "50%", background: color.gray300 }} />Rascunho em branco</>
+                    )}
+                  </span>
+                )}
                 <button onClick={() => setShowPreview((v) => !v)} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "9px 15px" }} aria-pressed={showPreview}><Eye size={15} strokeWidth={2} />{showPreview ? "Ocultar prévia" : "Pré-visualizar"}</button>
               </div>
             </div>
@@ -1763,7 +2185,7 @@ export default function Dashboard({ go }) {
                 {isCopy && !locked && (
                   <div style={{ maxWidth: 440, margin: "0 auto 20px", display: "flex", alignItems: "flex-start", gap: 9, background: color.surface2, border: `1px solid ${color.line}`, color: color.gray600, borderRadius: 12, padding: "11px 13px", fontSize: "12.5px", lineHeight: 1.5 }}>
                     <Copy size={14} strokeWidth={2} style={{ flex: "none", marginTop: 1, color: color.gray400 }} />
-                    <span>Esta é uma cópia. Ela fica salva só neste navegador até você clicar em <strong style={{ fontWeight: 600, color: color.gray700 }}>Concluir proposta</strong>.</span>
+                    <span>Esta é uma cópia. Ela fica guardada como rascunho e só é enviada quando você clicar em <strong style={{ fontWeight: 600, color: color.gray700 }}>Concluir proposta</strong>.</span>
                   </div>
                 )}
                 <div style={{ maxWidth: 440, margin: "0 auto", display: "flex", flexDirection: "column", gap: 26, pointerEvents: locked ? "none" : "auto", opacity: locked ? 0.6 : 1 }}>
@@ -3503,13 +3925,22 @@ function DesignGallery({ onUse, plan, onUpgrade, scope, picking = false, hasData
 
       <div className="db-dsn-chips" role="tablist" aria-label="Filtrar modelos">
         {TPL_CATS.map(([id, label]) => {
-          // A contagem respeita o outro eixo: com "Gratuitos" ligado, "Editoriais"
-          // mostra quantos editoriais são gratuitos, não o total. Número que não
-          // bate com a lista abaixo é pior que número nenhum.
-          const n = DESIGNS.filter((d) => (id === "todos" || d.cat === id) && (plano === "todos" || (plano === "gratuito" ? d.free : !d.free))).length;
+          // Cada chip conta sobre a COLEÇÃO INTEIRA, só no seu próprio critério.
+          // "Todos" é sempre o total de modelos e "Editoriais" é sempre o total
+          // de editoriais, com ou sem outro filtro ligado. Antes a contagem
+          // acompanhava o filtro de plano e "Todos" virava 2 ao ligar "Gratuitos",
+          // dando a entender que o sistema só tinha 2 modelos. Nada de número
+          // fixo: sai tudo de DESIGNS.
+          const n = id === "todos" ? DESIGNS.length : DESIGNS.filter((d) => d.cat === id).length;
           return (
             <button key={id} role="tab" aria-selected={cat === id} disabled={n === 0 && id !== "todos"}
-              onClick={() => setCat(id)} className={cat === id ? "db-dsn-chip on" : "db-dsn-chip"}>
+              onClick={() => {
+                setCat(id);
+                // Se esta categoria não tem nenhum modelo no plano filtrado, solta o
+                // filtro de plano em vez de abrir uma grade vazia.
+                if (id !== "todos" && plano !== "todos"
+                  && !DESIGNS.some((d) => d.cat === id && (plano === "gratuito" ? d.free : !d.free))) setPlano("todos");
+              }} className={cat === id ? "db-dsn-chip on" : "db-dsn-chip"}>
               {label}<span className="db-dsn-chip-n">{n}</span>
             </button>
           );
@@ -3519,7 +3950,7 @@ function DesignGallery({ onUse, plan, onUpgrade, scope, picking = false, hasData
         <span aria-hidden="true" className="db-dsn-sep" />
         {[["gratuito", "Gratuitos"], ["premium", "Premium"]].map(([id, label]) => {
           const on = plano === id;
-          const n = DESIGNS.filter((d) => (cat === "todos" || d.cat === cat) && (id === "gratuito" ? d.free : !d.free)).length;
+          const n = DESIGNS.filter((d) => (id === "gratuito" ? d.free : !d.free)).length; // coleção inteira, idem
           return (
             <button
               key={id}
@@ -3681,10 +4112,10 @@ function ClientsPanel({ rows, onRefresh, suspended = false }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [openClient]);
 
-  const copyLinkFor = (r) => {
-    if (!r.publicId) return;
+  const copyLinkFor = async (r) => {
+    if (!r.publicId || r.status === "Rascunho") return;
     const url = `${window.location.origin}/p/${r.publicId}`;
-    if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
+    if (!(await copyText(url))) { window.prompt("Copie o link da proposta:", url); return; }
     setCopiedId(r.id);
     setTimeout(() => setCopiedId(null), 1800);
   };
@@ -3835,7 +4266,7 @@ function ClientsPanel({ rows, onRefresh, suspended = false }) {
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {r.publicId ? (
+                      {r.publicId && r.status !== "Rascunho" ? (
                         <button onClick={() => copyLinkFor(r)} className="db-btn db-btn-ghost" style={{ fontSize: 13, padding: "8px 13px", color: copiedId === r.id ? "#2E7D51" : undefined }}>
                           {copiedId === r.id ? <><Check size={14} strokeWidth={2.6} />Copiado!</> : <><Link2 size={14} strokeWidth={2.2} />Copiar link</>}
                         </button>
@@ -3906,6 +4337,18 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
   const [refMsg, setRefMsg] = useState("");
   const [refBusy, setRefBusy] = useState(false);
   const [refSent, setRefSent] = useState(false);
+  // Elegibilidade vem do BACKEND (é ele quem valida de novo ao receber o pedido).
+  // null = ainda não sabemos → o bloco não aparece. Conta sem pagamento aprovado
+  // (plano gratuito) nunca vê o bloco: não há o que reembolsar.
+  const [refElig, setRefElig] = useState(null);
+  const loadRefElig = () => api.refundEligibility()
+    .then((e) => { setRefElig(e); if (e?.code === "annual_prorata") setRefReason((r) => (r === "arrependimento" ? "nao_atendeu" : r)); })
+    .catch(() => setRefElig(null));
+  useEffect(() => { loadRefElig(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [user?.id, user?.plan]);
+  const refDay = (iso) => {
+    const d = iso ? new Date(iso) : null;
+    return d && !isNaN(d.getTime()) ? d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+  };
   const sendRefund = async () => {
     setRefBusy(true);
     try {
@@ -3914,8 +4357,14 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
       setRefOpen(false);
       pushToast("Pedido enviado. Você recebeu uma confirmação por e-mail.", "success");
     } catch (e) {
+      // 403/409: o servidor recusou pela regra (sem pagamento, fora do prazo,
+      // pedido já feito). Fecha o formulário e mostra o estado real.
+      if (e?.status === 403 || e?.status === 409) setRefOpen(false);
       pushToast(e?.message || "Não foi possível enviar agora. Tente de novo.", "info");
-    } finally { setRefBusy(false); }
+    } finally {
+      setRefBusy(false);
+      loadRefElig();
+    }
   };
 
   useEffect(() => {
@@ -4307,18 +4756,27 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
           </label>
         </div>
 
-        {/* Reembolso — fica no fim, discreto, mas sempre acessível. */}
+        {/* Reembolso — só existe para quem tem um pagamento aprovado. Conta
+            gratuita não vê nada aqui. O texto acompanha o caso real (dentro dos
+            7 dias, anual proporcional, pedido já feito, prazo encerrado). */}
+        {refElig && refElig.code !== "no_payment" && (
         <div style={card}>
           <div style={hTitle}>Reembolso</div>
           <p style={subTxt}>
-            Você pode desistir em até 7 dias corridos após o pagamento e receber o valor de volta integralmente, sem precisar justificar (art. 49 do Código de Defesa do Consumidor). Passado esse prazo, é só pedir aqui que a gente analisa.
+            {refSent || refElig.code === "request_open" || refElig.code === "already_requested"
+              ? `Seu pedido de reembolso${refElig.requestedAt ? ` de ${refDay(refElig.requestedAt)}` : ""} está registrado.`
+              : refElig.code === "within_regret"
+                ? `Seu último pagamento foi em ${refDay(refElig.paidAt)}. Até ${refDay(refElig.regretEnds)} (7 dias corridos) você pode desistir e receber o valor de volta integralmente, sem precisar justificar (art. 49 do Código de Defesa do Consumidor).`
+                : refElig.code === "annual_prorata"
+                  ? "O prazo de 7 dias para devolução integral já passou, mas no plano anual você pode cancelar e receber de volta o valor proporcional aos meses cheios ainda não usados."
+                  : `O prazo de 7 dias para pedir reembolso do seu último pagamento (${refDay(refElig.paidAt)}) terminou em ${refDay(refElig.regretEnds)}. Nos planos mensais não há devolução do mês em andamento. Se tiver algum problema com uma cobrança, fale com o suporte.`}
           </p>
 
-          {refSent ? (
+          {refSent || refElig.code === "request_open" || refElig.code === "already_requested" ? (
             <div style={{ background: "#EAF6EF", border: "1px solid #CDE9D8", borderRadius: 11, padding: "13px 15px", fontSize: "13.5px", lineHeight: 1.55, color: "#2E7D51" }}>
               <strong style={{ fontWeight: 700 }}>Pedido recebido.</strong> Mandamos uma confirmação para o seu e-mail. A resposta vem em até 5 dias.
             </div>
-          ) : !refOpen ? (
+          ) : !refElig.eligible ? null : !refOpen ? (
             <button onClick={() => setRefOpen(true)} className="db-btn db-btn-ghost" style={{ fontSize: 14, padding: "10px 18px" }}>
               Pedir reembolso
             </button>
@@ -4332,7 +4790,7 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
                   onChange={(e) => setRefReason(e.target.value)}
                   style={{ ...inp(), width: "100%", cursor: "pointer" }}
                 >
-                  <option value="arrependimento">Desistência (até 7 dias)</option>
+                  {refElig.code === "within_regret" && <option value="arrependimento">Desistência (até 7 dias)</option>}
                   <option value="nao_atendeu">Não atendeu ao que eu esperava</option>
                   <option value="dificuldade">Dificuldade de usar</option>
                   <option value="cobranca_indevida">Cobrança que eu não reconheço</option>
@@ -4365,6 +4823,7 @@ function SettingsPanel({ user, setUser, go, pushToast, usage }) {
             </div>
           )}
         </div>
+        )}
 
         <div style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
           <div>

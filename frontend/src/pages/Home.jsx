@@ -249,7 +249,9 @@ export default function Home({ user, onNewProposal, onNavigate, onboarding }) {
   const money = (v) => formatMoney(v, display);
 
   const insights = useMemo(() => (data ? buildInsights(data, display) : []), [data, display]);
-  const totalProps = data ? Object.values(data.funil).reduce((a, b) => a + b, 0) : 0;
+  // Rascunho não conta: enquanto nada foi concluído, o painel segue no estado
+  // "comece pela primeira proposta" em vez de mostrar uma tela cheia de zeros.
+  const totalProps = data ? Object.entries(data.funil).reduce((a, [k, n]) => a + (k === "rascunho" ? 0 : n), 0) : 0;
   const empty = data && totalProps === 0;
 
   const actions = [

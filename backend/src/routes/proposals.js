@@ -3,7 +3,7 @@ import { z } from "zod";
 import { query } from "../db.js";
 import { env } from "../env.js";
 import { requireAuth } from "../middleware/auth.js";
-import { writeLimiter, emailSendLimiter } from "../middleware/rateLimit.js";
+import { writeLimiter, emailSendLimiter, autosaveLimiter } from "../middleware/rateLimit.js";
 import { proposalSchema, statusSchema } from "../lib/validate.js";
 import { publicId } from "../lib/ids.js";
 import { getRates, convertWith } from "../lib/rates.js";
@@ -24,6 +24,12 @@ const emailProposalSchema = z.object({
 
 const r = Router();
 r.use(requireAuth); // tudo aqui exige login
+
+// O id da proposta e um uuid. Qualquer outra coisa na URL (id de rascunho local
+// antigo, lixo digitado, tentativa de varredura) vira 404 aqui, em vez de
+// estourar como erro de sintaxe do Postgres (22P02) e aparecer como 500.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+r.param("id", (req, res, next, id) => (UUID_RE.test(id) ? next() : res.status(404).json({ error: "Proposta não encontrada." })));
 
 // Conta do usuário: plano EFETIVO (admin tem acesso total, equivale a business),
 // se a assinatura está suspensa (vencida + carência) e a âncora do ciclo de cota.
@@ -116,7 +122,8 @@ r.get("/stats", async (req, res, next) => {
     const aceitas = rows.filter((x) => x.status === "accepted").length;
     const conversao = enviadas ? Math.round((aceitas / enviadas) * 100) : 0;
     const map = {};
-    rows.forEach((x) => {
+    // Rascunho ainda nao foi apresentado a ninguem: nao entra na carteira.
+    rows.filter((x) => x.status !== "draft").forEach((x) => {
       const k = (x.client || "Sem cliente").trim() || "Sem cliente";
       if (!map[k]) map[k] = { client: k, company: x.company || "", count: 0, value: 0, opened: false, accepted: 0 };
       const g = map[k];
@@ -216,8 +223,9 @@ r.get("/dashboard", async (req, res, next) => {
 
     const [counts, funil, tempo, ativos, serie, templates, atividade, valores, quentes] = await Promise.all([
       query(`select
-          count(*) filter (where created_at >= date_trunc('month', now())) as criadas_mes,
-          count(*) filter (where created_at >= date_trunc('month', now()-interval '1 month')
+          count(*) filter (where status <> 'draft' and created_at >= date_trunc('month', now())) as criadas_mes,
+          count(*) filter (where status <> 'draft'
+                             and created_at >= date_trunc('month', now()-interval '1 month')
                              and created_at <  date_trunc('month', now())) as criadas_mes_ant,
           count(*) filter (where status <> 'draft') as enviadas_total,
           count(*) filter (where status = 'accepted') as aceitas_total
@@ -243,13 +251,13 @@ r.get("/dashboard", async (req, res, next) => {
           select coalesce(nullif(trim(client),''),'-') as c,
                  bool_or(created_at >= now()-interval '30 days') as recente,
                  bool_or(status='accepted') as fechou
-          from proposals where user_id=$1 group by 1
+          from proposals where user_id=$1 and status <> 'draft' group by 1
         ) t`, [uid]),
       query(`select to_char(created_at::date,'YYYY-MM-DD') as dia, count(*)::int as n
-        from proposals where user_id=$1 and created_at >= now()-make_interval(days => $2)
+        from proposals where user_id=$1 and status <> 'draft' and created_at >= now()-make_interval(days => $2)
         group by 1 order by 1`, [uid, days]),
       query(`select template, count(*)::int as total, count(*) filter (where status='accepted')::int as aceitas
-        from proposals where user_id=$1 group by template order by aceitas desc, total desc`, [uid]),
+        from proposals where user_id=$1 and status <> 'draft' group by template order by aceitas desc, total desc`, [uid]),
       query(`select e.type, e.created_at, p.client, p.title, p.public_id
         from proposal_events e join proposals p on p.id=e.proposal_id
         where p.user_id=$1 and e.type in ('viewed','accepted','declined','emailed')
@@ -262,8 +270,8 @@ r.get("/dashboard", async (req, res, next) => {
       query(`select currency,
                coalesce(sum(value) filter (where status in ('sent','viewed')),0) as em_aberto,
                coalesce(sum(value) filter (where status='accepted'),0) as fechada,
-               coalesce(sum(value) filter (where value>0),0) as soma,
-               count(*) filter (where value>0)::int as n
+               coalesce(sum(value) filter (where value>0 and status <> 'draft'),0) as soma,
+               count(*) filter (where value>0 and status <> 'draft')::int as n
         from proposals where user_id=$1 group by currency`, [uid]),
       // Clientes quentes por (cliente, moeda). O join com eventos é agregado por
       // proposta (lateral) pra não inflar o valor; a junção por cliente e a
@@ -278,7 +286,7 @@ r.get("/dashboard", async (req, res, next) => {
                  max(e.created_at) filter (where e.type='viewed') as last_view
           from proposal_events e where e.proposal_id=p.id
         ) ev on true
-        where p.user_id=$1 group by 1,2`, [uid]),
+        where p.user_id=$1 and p.status <> 'draft' group by 1,2`, [uid]),
     ]);
 
     const c = counts.rows[0] || {};
@@ -342,6 +350,20 @@ r.get("/dashboard", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Acha a proposta pelo id PROVISORIO que o navegador usou ao cria-la (client_ref).
+// Cobre a fresta em que a criacao ja foi gravada no servidor mas a pagina foi
+// recarregada antes de trocar o endereco pelo id definitivo: o navegador volta
+// com o id antigo na URL e pergunta aqui "isso ja virou o que?". So enxerga
+// propostas da propria conta. Definido antes de /:id para nao conflitar.
+r.get("/by-ref/:ref", async (req, res, next) => {
+  try {
+    if (!/^d_[a-z0-9]{6,40}$/.test(req.params.ref)) return res.status(404).json({ error: "Proposta não encontrada." });
+    const { rows } = await query("select * from proposals where user_id=$1 and client_ref=$2", [req.user.id, req.params.ref]);
+    if (!rows[0]) return res.status(404).json({ error: "Proposta não encontrada." });
+    res.json({ proposal: toProposal(rows[0]) });
+  } catch (e) { next(e); }
+});
+
 r.get("/:id", async (req, res, next) => {
   try {
     const { rows } = await query("select * from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);
@@ -350,6 +372,29 @@ r.get("/:id", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Teto de rascunhos guardados por conta. Rascunho nao consome cota do plano,
+// entao precisa de um limite proprio pra nao virar deposito infinito.
+const MAX_DRAFTS = 50;
+
+// Confere a cota do plano. Devolve null se ha vaga, ou o corpo do erro 402.
+async function quotaError(userId, acc) {
+  const cap = proposalCap(acc.plan);
+  if (cap.limit === Infinity) return null;
+  const used = await countUsage(userId, cap, acc.anchor);
+  if (used < cap.limit) return null;
+  return {
+    error: cap.scope === "total"
+      ? `Você já usou suas ${cap.limit} propostas grátis. Assine um plano para criar mais.`
+      : `Você atingiu o limite de ${cap.limit} propostas deste ciclo. Ele renova na próxima cobrança.`,
+    limitReached: true,
+  };
+}
+
+// Cria um RASCUNHO. E o destino do salvamento automatico do editor, entao NAO
+// consome cota: a cota e debitada uma unica vez, quando a proposta e concluida
+// (PATCH /:id/status saindo de 'draft'). O rascunho nao tem link publico ativo
+// (routes/public.js devolve 404 enquanto o status for 'draft'), entao nao da
+// pra usar rascunho como proposta de graca.
 r.post("/", writeLimiter, async (req, res, next) => {
   try {
     const d = proposalSchema.parse(req.body);
@@ -360,33 +405,37 @@ r.post("/", writeLimiter, async (req, res, next) => {
     if (!templateAllowed(plan, d.template)) {
       return res.status(402).json({ error: "Seu plano não inclui este template." });
     }
-    // Cota de propostas: conta o USO append-only (proposal_usage), que NÃO diminui
-    // ao apagar uma proposta (não dá pra burlar apagando e recriando). O Gratuito
-    // tem teto VITALÍCIO (scope "total"); os pagos renovam a cada ciclo pago.
-    const cap = proposalCap(plan);
-    if (cap.limit !== Infinity) {
-      const used = await countUsage(req.user.id, cap, acc.anchor);
-      if (used >= cap.limit) {
-        return res.status(402).json({
-          error: cap.scope === "total"
-            ? `Você já usou suas ${cap.limit} propostas grátis. Assine um plano para criar mais.`
-            : `Você atingiu o limite de ${cap.limit} propostas deste ciclo. Ele renova na próxima cobrança.`,
-          limitReached: true,
-        });
-      }
+    const drafts = await query("select count(*)::int as n from proposals where user_id=$1 and status='draft'", [req.user.id]);
+    if ((drafts.rows[0]?.n || 0) >= MAX_DRAFTS) {
+      return res.status(409).json({ error: `Você já tem ${MAX_DRAFTS} rascunhos guardados. Conclua ou exclua alguns para criar outro.`, draftLimit: true });
     }
+    // Chave de idempotencia: o id provisorio que o navegador deu a proposta.
+    // Criar de novo com a mesma chave (resposta perdida, F5 no meio da primeira
+    // gravacao) ATUALIZA o rascunho existente em vez de duplicar. Se a proposta
+    // dessa chave ja foi concluida, nao ha o que atualizar: 409.
+    const clientRef = typeof req.body?.clientRef === "string" && /^d_[a-z0-9]{6,40}$/.test(req.body.clientRef) ? req.body.clientRef : null;
     const { rows } = await query(
-      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value, logo, cover, theme, watermark, currency, cover_pos, show_qty)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) returning *`,
-      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items, d.showQty), d.logo, d.cover, d.theme, d.watermark, d.currency, d.coverPos, d.showQty]
+      `insert into proposals (user_id, public_id, client, company, client_email, title, scope, items, start_date, end_date, payment, revisions, validity, bio, accent, accent2, gradient, template, value, logo, cover, theme, watermark, currency, cover_pos, show_qty, client_ref)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+       on conflict (user_id, client_ref) where client_ref is not null do update set
+         client=excluded.client, company=excluded.company, client_email=excluded.client_email, title=excluded.title,
+         scope=excluded.scope, items=excluded.items, start_date=excluded.start_date, end_date=excluded.end_date,
+         payment=excluded.payment, revisions=excluded.revisions, validity=excluded.validity, bio=excluded.bio,
+         accent=excluded.accent, accent2=excluded.accent2, gradient=excluded.gradient, template=excluded.template,
+         value=excluded.value, logo=excluded.logo, cover=excluded.cover, theme=excluded.theme, watermark=excluded.watermark,
+         currency=excluded.currency, cover_pos=excluded.cover_pos, show_qty=excluded.show_qty, updated_at=now()
+       where proposals.status = 'draft'
+       returning *`,
+      [req.user.id, publicId(), d.client, d.company, d.clientEmail, d.title, d.scope, JSON.stringify(d.items), d.start, d.end, d.payment, d.revisions, d.validity, d.bio, d.accent, d.accent2, d.gradient, d.template, sumItems(d.items, d.showQty), d.logo, d.cover, d.theme, d.watermark, d.currency, d.coverPos, d.showQty, clientRef]
     );
-    // Registra o uso (append-only). Nunca é apagado ao excluir a proposta.
-    await query("insert into proposal_usage (user_id) values ($1)", [req.user.id]).catch(() => {});
+    if (!rows[0]) {
+      return res.status(409).json({ error: "Esta proposta já foi enviada e não pode ser editada. Crie uma nova." });
+    }
     res.status(201).json({ proposal: toProposal(rows[0]) });
   } catch (e) { next(e); }
 });
 
-r.put("/:id", writeLimiter, async (req, res, next) => {
+r.put("/:id", autosaveLimiter, async (req, res, next) => {
   try {
     const d = proposalSchema.parse(req.body);
     const acc = await getAccount(req.user.id);
@@ -411,9 +460,49 @@ r.put("/:id", writeLimiter, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Troca de status. Duas regras de negocio moram aqui:
+//
+//  1. CONCLUIR (sair de 'draft') e o momento em que a proposta passa a valer:
+//     confere assinatura e cota, e registra o uso (append-only) UMA vez. O
+//     update leva "and status='draft'" pra que dois cliques simultaneos nao
+//     debitem a cota duas vezes: so quem de fato tirou do rascunho registra.
+//  2. Proposta concluida nunca volta a ser rascunho. Voltar reabriria a edicao
+//     de algo que o cliente ja pode ter visto e permitiria reenviar o mesmo
+//     link com outro conteudo.
 r.patch("/:id/status", async (req, res, next) => {
   try {
     const { status } = statusSchema.parse(req.body);
+    const cur = await query("select status, template from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: "Proposta não encontrada." });
+    const from = cur.rows[0].status;
+
+    if (status === "draft") {
+      if (from === "draft") return res.json({ proposal: toProposal((await query("select * from proposals where id=$1", [req.params.id])).rows[0]) });
+      return res.status(409).json({ error: "Uma proposta já enviada não pode voltar a ser rascunho." });
+    }
+
+    if (from === "draft") {
+      const acc = await getAccount(req.user.id);
+      if (acc.suspended) return res.status(402).json(SUSPENDED_ERROR);
+      if (!templateAllowed(acc.plan, cur.rows[0].template)) {
+        return res.status(402).json({ error: "Seu plano não inclui este template." });
+      }
+      const qErr = await quotaError(req.user.id, acc);
+      if (qErr) return res.status(402).json(qErr);
+      const { rows } = await query(
+        "update proposals set status=$3, updated_at=now() where id=$1 and user_id=$2 and status='draft' returning *",
+        [req.params.id, req.user.id, status]
+      );
+      if (!rows[0]) {
+        // Outro clique concluiu no meio do caminho: devolve o estado atual, sem debitar de novo.
+        const again = await query("select * from proposals where id=$1 and user_id=$2", [req.params.id, req.user.id]);
+        return res.json({ proposal: toProposal(again.rows[0]) });
+      }
+      // Registra o uso (append-only). Nunca e apagado ao excluir a proposta.
+      await query("insert into proposal_usage (user_id) values ($1)", [req.user.id]).catch(() => {});
+      return res.json({ proposal: toProposal(rows[0]) });
+    }
+
     const { rows } = await query("update proposals set status=$3, updated_at=now() where id=$1 and user_id=$2 returning *", [req.params.id, req.user.id, status]);
     if (!rows[0]) return res.status(404).json({ error: "Proposta não encontrada." });
     res.json({ proposal: toProposal(rows[0]) });

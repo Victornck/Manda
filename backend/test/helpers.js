@@ -28,3 +28,16 @@ export async function grantPlan(userId, plan) {
     [userId, plan]
   );
 }
+
+// Cria o rascunho E conclui (rascunho -> enviada). É a conclusão que debita a
+// cota do plano; criar rascunho não custa nada. Devolve no formato que os
+// testes de cota esperam: 201 quando a proposta passou a valer, ou a resposta
+// de bloqueio (402 etc.) de onde quer que ela tenha vindo.
+export async function createAndConclude(token, body) {
+  const created = await request(app).post("/api/proposals").set("Authorization", `Bearer ${token}`).send(body);
+  if (created.status !== 201) return created;
+  const done = await request(app).patch(`/api/proposals/${created.body.proposal.id}/status`)
+    .set("Authorization", `Bearer ${token}`).send({ status: "sent" });
+  if (done.status !== 200) return done;
+  return { status: 201, body: { proposal: done.body.proposal } };
+}

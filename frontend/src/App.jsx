@@ -38,7 +38,7 @@ export default function App() {
   const location = useLocation();
 
   useEffect(() => {
-    document.title = TITLES[location.pathname] || "Manda";
+    document.title = TITLES[location.pathname] || (location.pathname.startsWith("/app/proposta/") ? "Editar proposta · Manda" : "Manda");
     // Toda troca de página começa do topo (vale para links do menu, rodapé e navegação por código).
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [location.pathname]);
@@ -62,7 +62,11 @@ export default function App() {
       </Route>
       <Route path="/entrar" element={<Auth go={go} tab="login" />} />
       <Route path="/criar-conta" element={<Auth go={go} tab="signup" />} />
-      <Route path="/app/:tab?" element={<RequireAuth><Dashboard go={go} /></RequireAuth>} />
+      {/* Uma rota só para o app inteiro (abas E editor em /app/proposta/:id).
+          O Dashboard lê o resto do caminho por conta própria. Se o editor fosse
+          outra <Route>, entrar e sair dele desmontaria o Dashboard e jogaria
+          fora o estado da edição. */}
+      <Route path="/app/*" element={<RequireAuth><Dashboard go={go} /></RequireAuth>} />
       <Route path="/p/:token" element={<PublicProposal />} />
       <Route path="*" element={<NotFound go={go} />} />
     </Routes>

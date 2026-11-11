@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { api, newUser, grantPlan, proposalBody } from "../helpers.js";
+import { api, newUser, grantPlan, proposalBody, createAndConclude } from "../helpers.js";
 
-const create = (token, body = proposalBody()) =>
-  api().post("/api/proposals").set("Authorization", `Bearer ${token}`).send(body);
+// "Criar" aqui é criar E concluir: a cota é debitada na conclusão, não no rascunho.
+const create = (token, body = proposalBody()) => createAndConclude(token, body);
 
 test("Gratuito cria até 2 propostas; a 3ª é bloqueada (402, limitReached)", async () => {
   const { token } = await newUser(); // conta nova começa no plano Gratuito

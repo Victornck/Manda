@@ -51,8 +51,23 @@ test("UPDATE de proposta: maior placeholder é igual ao número de valores", () 
 test("toda coluna do INSERT também aparece no UPDATE", () => {
   const ins = src.match(/insert into proposals \(([^)]*)\)/)[1]
     .split(",").map((c) => c.trim())
-    .filter((c) => !["user_id", "public_id"].includes(c)); // só existem na criação
+    // só existem na criação (client_ref é a chave de idempotência da criação do rascunho)
+    .filter((c) => !["user_id", "public_id", "client_ref"].includes(c));
   const up = src.match(/update proposals set ([\s\S]*?)where id=\$1/)[1];
   const faltando = ins.filter((c) => !new RegExp(`\\b${c}=`).test(up));
   assert.deepEqual(faltando, [], `colunas gravadas na criação mas não na edição: ${faltando.join(", ")}`);
+});
+
+// O autosave do editor grava a cada pausa na digitacao. Se o PUT voltar a usar o
+// teto de criacao (20/min por IP), quem edita rapido ve "erro ao salvar" sem
+// motivo - e os testes de integracao nao pegam, porque os limitadores ficam
+// desligados em NODE_ENV=test. Por isso a checagem e estatica.
+test("autosave (PUT) usa o teto proprio, por conta e folgado", () => {
+  assert.match(src, /r\.put\("\/:id", autosaveLimiter,/, "o PUT de proposta deve usar autosaveLimiter");
+  const rl = fs.readFileSync(path.join(dir, "../../src/middleware/rateLimit.js"), "utf8");
+  const m = rl.match(/export const autosaveLimiter = rateLimit\(\{([\s\S]*?)\}\);/);
+  assert.ok(m, "autosaveLimiter não encontrado");
+  const max = Number((m[1].match(/max:\s*(\d+)/) || [])[1]);
+  assert.ok(max >= 60, `teto do autosave baixo demais: ${max}/min`);
+  assert.match(m[1], /keyGenerator:\s*keyByUserOrIp/, "o teto do autosave deve ser por conta, não por IP");
 });

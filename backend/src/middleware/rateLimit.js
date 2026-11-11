@@ -107,6 +107,19 @@ export const feedbackLimiter = rateLimit({
 
 // Escrita de propostas (criar/editar): corpo de até 3MB (imagens base64);
 // flood disso pesa banco e banda. Uso normal fica muito abaixo.
+// Salvamento automatico do rascunho (PUT /proposals/:id). O editor grava 1,2 s
+// depois de cada pausa na digitacao, entao quem preenche varios campos seguidos
+// passa facil de 20 gravacoes por minuto - o teto do writeLimiter, que existe
+// para criacao. Aqui o teto e POR CONTA (nao por IP: escritorio ou rede movel
+// atras do mesmo IP nao disputam a mesma cota) e folgado para o uso real.
+// Cada gravacao so altera um rascunho da propria conta (o PUT recusa proposta
+// enviada), entao o custo de abuso e baixo; o teto so impede uma enxurrada.
+export const autosaveLimiter = rateLimit({
+  windowMs: 60_000, max: 120, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
+  keyGenerator: keyByUserOrIp,
+  handler: logAndBlock("teto_autosave", { error: "Muitas gravações seguidas. Suas alterações estão guardadas e serão salvas em instantes." }),
+});
+
 export const writeLimiter = rateLimit({
   windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false, skip: () => process.env.NODE_ENV === "test",
   handler: logAndBlock("teto_escrita", { error: "Muitas operações seguidas. Aguarde um instante." }),

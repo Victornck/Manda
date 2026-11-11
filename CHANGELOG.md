@@ -14,6 +14,63 @@ versão nos dois `package.json` e registre a entrada aqui.
 
 ---
 
+## [0.11.0] — 2026-11-11
+
+Sprint de estabilização. Exige `npm run migrate` (migrações `025` e `026`).
+
+### Corrigido
+- **Rascunho não se perde mais (F5, aba fechada, aba descartada no celular).**
+  O rascunho só era gravado em `navTo()`, ao trocar de tela pelo menu. Agora há
+  salvamento automático em duas camadas: um buffer local gravado na hora a cada
+  alteração (sobrevive a F5 e à página morta sem aviso) e a gravação no
+  servidor 1,2 s depois da última tecla, numa fila que nunca deixa uma resposta
+  antiga sobrescrever uma versão nova. Ao reabrir, se o aparelho tem versão mais
+  nova que o servidor, ela é recuperada e enviada. Falha de rede tenta de novo
+  sozinha; o aviso de saída do navegador só aparece quando o servidor não está
+  conseguindo salvar. Vale para todos os campos, inclusive o modelo.
+- **Rascunho agora mora no servidor e não consome cota.** A cota passou a ser
+  debitada na conclusão (rascunho → enviada), uma única vez, mesmo com cliques
+  simultâneos. Rascunho não tem link público ativo (404), então não dá para usar
+  rascunho como proposta grátis. Proposta concluída não volta a ser rascunho.
+  Rascunhos antigos que só existiam no navegador sobem para o servidor ao abrir.
+  Criação idempotente (`client_ref`): F5 com a primeira gravação no ar não
+  duplica o rascunho.
+- **Editor com endereço próprio.** `/app/proposta/<id>` (etapa 2) e
+  `/app/proposta/<id>/modelo` (etapa 1). F5, link colado e voltar/avançar
+  caem na proposta certa. Proposta inexistente, excluída ou de outra conta
+  mostra "Proposta não encontrada" (o backend devolve 404 para os três).
+- **Tutorial travado em "0 de 3".** Só contava para plano pago; a conta
+  gratuita via o card mas nunca avançava. Agora vale para todas, com base em
+  dados reais do servidor.
+- **Contadores da galeria.** Cada chip conta sobre a coleção inteira; filtrar
+  não altera nenhum número.
+- **Reembolso só para quem pagou.** Elegibilidade calculada no backend
+  (`GET /billing/refund-eligibility`) e revalidada ao pedir: pagamento aprovado,
+  prazo de 7 dias (ou proporcional no anual), um pedido por pagamento (índice
+  único, migração `025`). Conta gratuita não vê o bloco; chamada direta ao
+  endpoint é recusada (403/409).
+- **Aceite do cliente.** O botão some depois do aceite e entra "Proposta aceita
+  em DD/MM às HHhMM" (horário de Brasília, do registro real). A tela só confirma
+  depois que o servidor confirma. Aceite atômico no banco: um evento só.
+
+### Adicionado
+- "Copiar link" direto na lista de propostas (só para concluídas, com retorno
+  visual e tratamento de falha da área de transferência). No celular as ações
+  ficam sempre visíveis, numa faixa própria do cartão, com alvo de 40 px.
+- Indicador de salvamento: "Alterações pendentes…", "Salvando alterações…",
+  "Todas as alterações foram salvas" (só depois da confirmação do servidor) e
+  "Não foi possível salvar" com "Tentar novamente".
+
+### Alterado
+- Abas da lista mutuamente exclusivas: Todas, Rascunhos, Aguardando resposta,
+  Aceitas, Recusadas (antes "Enviadas" e "Pendentes" contavam a mesma proposta).
+- IDs públicos novos sem `I`, `l`, `1`, `0`, `O` (57 símbolos, ~70 bits). Links
+  antigos continuam válidos.
+- Painel (Home, Clientes) ignora rascunhos nos indicadores.
+- Salvamento automático (`PUT /proposals/:id`) tem teto próprio: 120 gravações
+  por minuto POR CONTA (antes usava o de criação, 20 por minuto por IP, que o
+  autosave estouraria). Se o teto for atingido, o editor mostra "pendente", não erro.
+
 ## [0.10.1] — 2026-09-22
 
 ### Adicionado

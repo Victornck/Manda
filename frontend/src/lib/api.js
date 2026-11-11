@@ -108,9 +108,26 @@ export const api = {
   listProposals: () => request("/proposals"),
   createProposal: (body) => request("/proposals", { method: "POST", body: JSON.stringify(body) }),
   getProposal: (id) => request(`/proposals/${id}`),
+  // Proposta criada a partir de um id provisório do navegador (d_...), se já existir no servidor.
+  getProposalByRef: (ref) => request(`/proposals/by-ref/${encodeURIComponent(ref)}`),
   updateProposal: (id, body) => request(`/proposals/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   setStatus: (id, status) => request(`/proposals/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
   deleteProposal: (id) => request(`/proposals/${id}`, { method: "DELETE" }),
+  // Último recurso ao SAIR da página (pagehide): manda a versão atual do
+  // rascunho com keepalive, que o navegador entrega mesmo depois de a página
+  // morrer. Não dá pra esperar a resposta, então é só uma tentativa a mais — a
+  // garantia de verdade é o buffer local (lib/drafts.js), recuperado ao reabrir.
+  saveProposalKeepalive: (id, body) => {
+    try {
+      const token = getToken();
+      const payload = JSON.stringify(body);
+      if (payload.length > 60000) return; // keepalive tem teto de ~64 KB por página
+      fetch(`${BASE}/proposals/${id}`, {
+        method: "PUT", keepalive: true, body: payload,
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      }).catch(() => {});
+    } catch { /* ignore */ }
+  },
   stats: () => request("/proposals/stats"),
   usage: () => request("/proposals/usage"),
   // Home: agrega KPIs, funil, série, atividade, clientes quentes e templates.
@@ -150,6 +167,8 @@ export const api = {
   cancelSubscription: () => request("/billing/subscription/cancel", { method: "POST" }),
   // Pedido de reembolso feito dentro do app (Decreto 7.962/2013, art. 5, §1º:
   // o arrependimento tem que poder ser exercido pela mesma ferramenta da compra).
+  // Diz se a conta pode pedir reembolso agora (e por quê não). A regra mora no backend.
+  refundEligibility: () => request("/billing/refund-eligibility"),
   requestRefund: (reason, message = "") => request("/billing/refund-request", { method: "POST", body: JSON.stringify({ reason, message }) }),
 
   // Relatar problema. body: { category, message, email?, pageUrl?, screenshot? (data URL) }.
